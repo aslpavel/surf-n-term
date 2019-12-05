@@ -17,6 +17,17 @@ const PI: f64 = std::f64::consts::PI;
 /// flatness of 0.1px gives good accuracy tradeoff
 const FLATNESS: Scalar = 0.1;
 
+#[inline]
+fn clip(scalar: Scalar, min: Scalar, max: Scalar) -> Scalar {
+    if scalar < min {
+        min
+    } else if scalar > max {
+        max
+    } else {
+        scalar
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Point([Scalar; 2]);
 
@@ -48,6 +59,33 @@ impl Point {
     #[inline]
     pub fn y(&self) -> Scalar {
         self.0[1]
+    }
+
+    pub fn len(&self) -> Scalar {
+        let Self([x, y]) = self;
+        x.hypot(*y)
+    }
+
+    pub fn dot(&self, other: &Self) -> Scalar {
+        let Self([x0, y0]) = self;
+        let Self([x1, y1]) = other;
+        x0 * x1 + y0 * y1
+    }
+
+    pub fn cross(&self, other: &Self) -> Scalar {
+        let Self([x0, y0]) = self;
+        let Self([x1, y1]) = other;
+        x0 * y1 - y0 * x1
+    }
+
+    pub fn angle_between(&self, other: &Self) -> Scalar {
+        let angle_cos = self.dot(other) / (self.len() * other.len());
+        let angle = clip(angle_cos, -1.0, 1.0).acos();
+        if self.cross(other) < 0.0 {
+            -angle
+        } else {
+            angle
+        }
     }
 }
 
@@ -366,10 +404,229 @@ impl From<Quad> for Cubic {
 }
 
 #[derive(Clone, Copy)]
+pub struct ElipArc {
+    center: Point,
+    rx: Scalar,
+    ry: Scalar,
+    phi: Scalar,
+    eta: Scalar,
+    eta_delta: Scalar,
+}
+
+impl fmt::Debug for ElipArc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Arc center:{:?} radius:{:?} phi:{:.3?} eta:{:.3?} eta_delta:{:.3?}",
+            self.center,
+            Point([self.rx, self.ry]),
+            self.phi,
+            self.eta,
+            self.eta_delta
+        )
+    }
+}
+
+impl ElipArc {
+    /// Convert arc from SVG arguments to parametric curve
+    ///
+    /// This code mostly comes from arc implementation notes from svg sepc
+    /// (Arc to Parametric)[https://www.w3.org/TR/SVG/implnote.html#ArcImplementationNotes]
+    pub fn new_param(
+        src: Point,
+        dst: Point,
+        rx: Scalar,
+        ry: Scalar,
+        x_axis_rot: Scalar,
+        large_flag: bool,
+        sweep_flag: bool,
+    ) -> Self {
+        let rx = rx.abs();
+        let ry = ry.abs();
+        let phi = x_axis_rot * PI / 180.0;
+
+        // Eq 5.1
+        let Point([x1, y1]) = Transform::default().rotate(-phi).apply(0.5 * (src - dst));
+        // scale/normalize radii
+        let s = (x1 / rx).powi(2) + (y1 / ry).powi(2);
+        let (rx, ry) = if s > 1.0 {
+            let s = s.sqrt();
+            (rx * s, ry * s)
+        } else {
+            (rx, ry)
+        };
+        // Eq 5.2
+        let sq = ((rx * ry).powi(2) / ((rx * y1).powi(2) + (ry * x1).powi(2)) - 1.0)
+            .max(0.0)
+            .sqrt();
+        let sq = if large_flag == sweep_flag { -sq } else { sq };
+        let center = sq * Point([rx * y1 / ry, -ry * x1 / rx]);
+        let Point([cx, cy]) = center;
+        // Eq 5.3 convert center to initail coordinates
+        let center = Transform::default().rotate(phi).apply(center) + 0.5 * (dst + src);
+        // Eq 5.5-6
+        let v0 = Point([1.0, 0.0]);
+        let v1 = Point([(x1 - cx) / rx, (y1 - cy) / ry]);
+        let v2 = Point([(-x1 - cx) / rx, (-y1 - cy) / ry]);
+        // initial angle
+        let eta = v0.angle_between(&v1);
+        //delta angle to be covered when t changes from 0..1
+        let eta_delta = v1.angle_between(&v2).rem_euclid(2.0 * PI);
+        let eta_delta = if !sweep_flag && eta_delta > 0.0 {
+            eta_delta - 2.0 * PI
+        } else if sweep_flag && eta_delta < 0.0 {
+            eta_delta + 2.0 * PI
+        } else {
+            eta_delta
+        };
+
+        Self {
+            center,
+            rx,
+            ry,
+            phi,
+            eta,
+            eta_delta,
+        }
+    }
+
+    pub fn at(&self, t: Scalar) -> Point {
+        let (angle_sin, angle_cos) = (self.eta + t * self.eta_delta).sin_cos();
+        let point = Point([self.rx * angle_cos, self.ry * angle_sin]);
+        Transform::default().rotate(self.phi).apply(point) + self.center
+    }
+
+    pub fn from(&self) -> Point {
+        self.at(0.0)
+    }
+
+    pub fn to(&self) -> Point {
+        self.at(1.0)
+    }
+
+    pub fn to_cubic(&self) -> ElipArcCubicIter {
+        ElipArcCubicIter::new(*self)
+    }
+
+    pub fn flatten(&self, tr: Transform, flatness: Scalar) -> ElipArcFlattenIter {
+        ElipArcFlattenIter::new(*self, tr, flatness)
+    }
+}
+
+/// Approximate arc with a sequnce of cubic bezier curves
+///
+/// [Drawing an elliptical arc using polylines, quadraticor cubic Bezier curves]
+/// (http://www.spaceroots.org/documents/ellipse/elliptical-arc.pdf)
+/// [Approximating Arcs Using Cubic Bézier Curves]
+/// (https://www.joecridge.me/content/pdf/bezier-arcs.pdf)
+///
+/// We are using following formula to split arc segment from `eta_1` to `eta_2`
+/// to achieve good approximation arc is split in segments smaller then `pi / 2`.
+///     P0 = A(eta_1)
+///     P1 = P0 + alpha * A'(eta_1)
+///     P2 = P3 - alpha * A'(eta_2)
+///     P3 = A(eta_2)
+/// where
+///     A - arc parametrized by angle
+///     A' - derivative of arc parametrized by angle
+///     eta_1 = eta
+///     eta_2 = eta + eta_delta
+///     alpha = sin(eta_2 - eta_1) * (sqrt(4 + 3 * tan((eta_2 - eta_1) / 2) ** 2) - 1) / 3
+pub struct ElipArcCubicIter {
+    arc: ElipArc,
+    phi_tr: Transform,
+    segment_delta: Scalar,
+    segment_index: Scalar,
+    segment_count: Scalar,
+}
+
+impl ElipArcCubicIter {
+    fn new(arc: ElipArc) -> Self {
+        let phi_tr = Transform::default().rotate(arc.phi);
+        let segment_max_angle = PI / 4.0; // maximum `eta_delta` of a segment
+        let segment_count = (arc.eta_delta.abs() / segment_max_angle).ceil();
+        let segment_delta = arc.eta_delta / segment_count;
+        dbg!((&arc, segment_count, segment_delta));
+        Self {
+            arc,
+            phi_tr,
+            segment_delta,
+            segment_index: 0.0,
+            segment_count: segment_count - 1.0,
+        }
+    }
+
+    fn at(&self, alpha: Scalar) -> (Point, Point) {
+        let (sin, cos) = alpha.sin_cos();
+        let at = self
+            .phi_tr
+            .apply(Point([self.arc.rx * cos, self.arc.ry * sin]))
+            + self.arc.center;
+        let at_deriv = self
+            .phi_tr
+            .apply(Point([-self.arc.rx * sin, self.arc.ry * cos]));
+        (at, at_deriv)
+    }
+}
+
+impl Iterator for ElipArcCubicIter {
+    type Item = Cubic;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.segment_index > self.segment_count {
+            return None;
+        }
+        let eta_1 = self.arc.eta + self.segment_delta * self.segment_index;
+        let eta_2 = eta_1 + self.segment_delta;
+        self.segment_index += 1.0;
+
+        let sq = (4.0 + 3.0 * ((eta_2 - eta_1) / 2.0).tan().powi(2)).sqrt();
+        let alpha = (eta_2 - eta_1).sin() * (sq - 1.0) / 3.0;
+        let (p0, d0) = self.at(eta_1);
+        let (p3, d3) = self.at(eta_2);
+        let p1 = p0 + alpha * d0;
+        let p2 = p3 - alpha * d3;
+        Some(Cubic([p0, p1, p2, p3]))
+    }
+}
+
+pub struct ElipArcFlattenIter {
+    tr: Transform,
+    flatness: Scalar,
+    cubics: ElipArcCubicIter,
+    cubic: Option<CubicFlattenIter>,
+}
+
+impl ElipArcFlattenIter {
+    fn new(arc: ElipArc, tr: Transform, flatness: Scalar) -> Self {
+        Self {
+            tr,
+            flatness,
+            cubics: arc.to_cubic(),
+            cubic: None,
+        }
+    }
+}
+
+impl Iterator for ElipArcFlattenIter {
+    type Item = Line;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.cubic.as_mut().and_then(Iterator::next) {
+                line @ Some(_) => return line,
+                None => self.cubic = Some(self.cubics.next()?.flatten(self.tr, self.flatness)),
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum Segment {
     Line(Line),
     Quad(Quad),
     Cubic(Cubic),
+    ElipArc(ElipArc),
 }
 
 impl fmt::Debug for Segment {
@@ -378,6 +635,7 @@ impl fmt::Debug for Segment {
             Segment::Line(line) => line.fmt(f),
             Segment::Quad(quad) => quad.fmt(f),
             Segment::Cubic(cubic) => cubic.fmt(f),
+            Segment::ElipArc(arc) => arc.fmt(f),
         }
     }
 }
@@ -392,6 +650,7 @@ impl Segment {
                 SegmentFlattenIter::Cubic(cubic.flatten(tr, flatness))
             }
             Segment::Cubic(cubic) => SegmentFlattenIter::Cubic(cubic.flatten(tr, flatness)),
+            Segment::ElipArc(arc) => SegmentFlattenIter::ElipArc(arc.flatten(tr, flatness)),
         }
     }
 
@@ -400,6 +659,7 @@ impl Segment {
             Segment::Line(line) => line.from(),
             Segment::Quad(quad) => quad.from(),
             Segment::Cubic(cubic) => cubic.from(),
+            Segment::ElipArc(arc) => arc.from(),
         }
     }
 
@@ -408,6 +668,7 @@ impl Segment {
             Segment::Line(line) => line.to(),
             Segment::Quad(quad) => quad.to(),
             Segment::Cubic(cubic) => cubic.to(),
+            Segment::ElipArc(arc) => arc.to(),
         }
     }
 }
@@ -430,9 +691,16 @@ impl From<Cubic> for Segment {
     }
 }
 
+impl From<ElipArc> for Segment {
+    fn from(arc: ElipArc) -> Self {
+        Self::ElipArc(arc)
+    }
+}
+
 pub enum SegmentFlattenIter {
     Line(LineFlattenIter),
     Cubic(CubicFlattenIter),
+    ElipArc(ElipArcFlattenIter),
 }
 
 impl Iterator for SegmentFlattenIter {
@@ -442,6 +710,7 @@ impl Iterator for SegmentFlattenIter {
         match self {
             Self::Line(line) => line.next(),
             Self::Cubic(cubic) => cubic.next(),
+            Self::ElipArc(arc) => arc.next(),
         }
     }
 }
@@ -513,17 +782,19 @@ impl Path {
         eprintln!("[lines]: {}", lines.len());
 
         // determine size of output layer
-        let (min_x, min_y, max_x, max_y) = lines.iter().fold(
-            (INFINITY, INFINITY, NEG_INFINITY, NEG_INFINITY),
-            |(min_x, min_y, max_x, max_y), Line([p0, p1])| {
-                (
-                    min_x.min(p0.x().min(p1.x())),
-                    min_y.min(p0.y().min(p1.y())),
-                    max_x.max(p0.x().max(p1.x())),
-                    max_y.max(p0.y().max(p1.y())),
-                )
-            },
-        );
+        let (min_x, min_y, max_x, max_y) = timeit("[size]", || {
+            lines.iter().fold(
+                (INFINITY, INFINITY, NEG_INFINITY, NEG_INFINITY),
+                |(min_x, min_y, max_x, max_y), Line([p0, p1])| {
+                    (
+                        min_x.min(p0.x().min(p1.x())),
+                        min_y.min(p0.y().min(p1.y())),
+                        max_x.max(p0.x().max(p1.x())),
+                        max_y.max(p0.y().max(p1.y())),
+                    )
+                },
+            )
+        });
         // one pixel broder to account for anti-aliasing
         let x = min_x.floor() as i32 - 1;
         let y = min_y.floor() as i32 - 1;
@@ -535,14 +806,17 @@ impl Path {
         }
 
         // calculate signed coverage
-        let offset = Transform::default().translate(-x as Scalar, -y as Scalar);
-        let mut layer: Image<Scalar> = Image::new(width as usize, height as usize);
-        for line in lines {
-            layer.coverage_line(line.transform(offset));
-        }
+        let mut layer: Image<Scalar> =
+            timeit("[alloc]", || Image::new(width as usize, height as usize));
+        timeit("[coverage]", || {
+            let offset = Transform::default().translate(-x as Scalar, -y as Scalar);
+            for line in lines {
+                layer.coverage_line(line.transform(offset));
+            }
+        });
 
         // cummulative sum over rows
-        layer.coverage_to_mask(fill_rule);
+        timeit("[mask]", || layer.coverage_to_mask(fill_rule));
 
         Some(layer)
     }
@@ -565,6 +839,12 @@ impl FromStr for Path {
                 _ => (),
             }
             parser.parse_separators()?;
+        }
+        if !segments.is_empty() {
+            subpaths.push(SubPath {
+                closed: false,
+                segments: std::mem::replace(&mut segments, Vec::new()),
+            })
         }
         Ok(Path { subpaths })
     }
@@ -652,8 +932,8 @@ impl<'a> PathParser<'a> {
     fn parse_digits(&mut self) -> Result<bool, PathParseError> {
         let mut found = false;
         loop {
-            match self.current()? {
-                b'0'..=b'9' => {
+            match self.current() {
+                Ok(b'0'..=b'9') => {
                     self.advance(1);
                     found = true;
                 }
@@ -677,25 +957,27 @@ impl<'a> PathParser<'a> {
         let start = self.offset;
         self.parse_sign()?;
         let whole = self.parse_digits()?;
-        let fraction = match self.current()? {
-            b'.' => {
-                self.advance(1);
-                self.parse_digits()?
-            }
-            _ => false,
-        };
-        if !whole && !fraction {
-            return Err(self.error("parse_scalar: missing whole and fractional value"));
-        }
-        match self.current()? {
-            b'e' | b'E' => {
-                self.advance(1);
-                self.parse_sign()?;
-                if !self.parse_digits()? {
-                    return Err(self.error("parse_scalar: missing exponent value"));
+        if !self.is_eof() {
+            let fraction = match self.current()? {
+                b'.' => {
+                    self.advance(1);
+                    self.parse_digits()?
                 }
+                _ => false,
+            };
+            if !whole && !fraction {
+                return Err(self.error("parse_scalar: missing whole and fractional value"));
             }
-            _ => (),
+            match self.current()? {
+                b'e' | b'E' => {
+                    self.advance(1);
+                    self.parse_sign()?;
+                    if !self.parse_digits()? {
+                        return Err(self.error("parse_scalar: missing exponent value"));
+                    }
+                }
+                _ => (),
+            }
         }
         // unwrap is safe here since we have validated content
         let scalar_str = std::str::from_utf8(&self.text[start..self.offset]).unwrap();
@@ -714,6 +996,7 @@ impl<'a> PathParser<'a> {
     }
 
     fn parse_flag(&mut self) -> Result<bool, PathParseError> {
+        self.parse_separators()?;
         match self.current()? {
             b'0' => {
                 self.advance(1);
@@ -817,7 +1100,17 @@ impl<'a> PathParser<'a> {
                 let p2 = self.parse_point(is_relative)?;
                 Quad([p0, p1, p2]).into()
             }
-            b'A' | b'a' => unimplemented!("FIXME: implement ARC segment support"),
+            b'A' | b'a' => {
+                let is_relative = cmd == b'a';
+                let src = self.position()?;
+                let rx = self.parse_scalar()?;
+                let ry = self.parse_scalar()?;
+                let x_axis_rot = self.parse_scalar()?;
+                let large_flag = self.parse_flag()?;
+                let sweep_flag = self.parse_flag()?;
+                let dst = self.parse_point(is_relative)?;
+                ElipArc::new_param(src, dst, rx, ry, x_axis_rot, large_flag, sweep_flag).into()
+            }
             b'Z' | b'z' => {
                 if let Some(start) = self.start {
                     self.prev_seg = Some(Line([Point([0.0, 0.0]), start]).into());
@@ -1069,13 +1362,10 @@ pub fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
     Ok(timeit("[parse]", || Path::from_str(&contents))?)
 }
 
-pub const SQUIRREL: &str = r#"
-M12 1C9.79 1 8 2.31 8 3.92c0 1.94.5 3.03 0 6.08 0-4.5-2.77-6.34-4-6.34.05-.5-.48-.66-.48-.66s-.22.11-.3.34c-.27-.31-.56-.27-.56-.27l-.13.58S.7 4.29 .68 6.87c.2.33 1.53.6 2.47.43.89.05.67.79.47.99C2.78 9.13 2 8 1 8S0 9 1 9s1 1 3 1c-3.09 1.2 0 4 0 4H3c-1 0-1 1-1 1h6c3 0 5-1 5-3.47 0-.85-.43-1.79 -1-2.53-1.11-1.46.23-2.68 1-2 .77.68 3 1 3-2 0-2.21-1.79-4-4-4z
-M2.5 6 c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z
-"#;
-
+pub const SQUIRREL: &str = "M12 1C9.79 1 8 2.31 8 3.92c0 1.94.5 3.03 0 6.08 0-4.5-2.77-6.34-4-6.34.05-.5-.48-.66-.48-.66s-.22.11-.3.34c-.27-.31-.56-.27-.56-.27l-.13.58S.7 4.29 .68 6.87c.2.33 1.53.6 2.47.43.89.05.67.79.47.99C2.78 9.13 2 8 1 8S0 9 1 9s1 1 3 1c-3.09 1.2 0 4 0 4H3c-1 0-1 1-1 1h6c3 0 5-1 5-3.47 0-.85-.43-1.79 -1-2.53-1.11-1.46.23-2.68 1-2 .77.68 3 1 3-2 0-2.21-1.79-4-4-4zM2.5 6 c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z";
 pub const NOMOVE: &str = "M50,100 0,50 25,25Z L100,50 75,25Z";
 pub const STAR: &str = "M50,0 21,90 98,35 2,35 79,90z M110,0 h90 v90 h-90 z M130,20 h50 v50 h-50 zM210,0  h90 v90 h-90 z M230,20 v50 h50 v-50 z";
+pub const ARCS: &str = "M600,350 l 50,-25a80,60 -30 1,1 50,-25 l 50,-25a25,50 -30 0,1 50,-25 l 50,-25a25,75 -30 0,1 50,-25 l 50,-25a25,100 -30 0,1 50,-25 l 50,-25";
 
 pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
     let start = std::time::Instant::now();
@@ -1085,10 +1375,10 @@ pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
 }
 
 fn main() -> Result<(), Error> {
-    let path = Path::from_str(SQUIRREL)?;
-    // let path = path_load("huyak.path")?;
-    let tr = Transform::default().scale(5.0, 5.0);
-    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::NonZero));
+    let path = Path::from_str(ARCS)?;
+    // let path = path_load("material_design.path")?;
+    let tr = Transform::default(); // .scale(4.0, 4.0);
+    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
     println!("{:?}", mask);
 
     if let Some(mask) = mask {
