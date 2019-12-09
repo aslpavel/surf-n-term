@@ -1,3 +1,4 @@
+use log::debug;
 use std::{
     cmp::min,
     fmt,
@@ -28,6 +29,27 @@ fn clip(scalar: Scalar, min: Scalar, max: Scalar) -> Scalar {
     }
 }
 
+fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
+    let mut result = [None; 2];
+    let det = b * b - 4.0 * a * c;
+    if (det - 0.0).abs() < EPSILON {
+        result[0] = Some(-b / (2.0 * a));
+    } else if det > 0.0 {
+        let sq = det.sqrt();
+        result[0] = Some((-b + sq) / (2.0 * a));
+        result[1] = Some((-b - sq) / (2.0 * a));
+    }
+    result
+}
+
+fn scalar_fmt(f: &mut fmt::Formatter<'_>, value: Scalar) -> fmt::Result {
+    if value > 9999.0 || value <= 0.0001 {
+        write!(f, "{:e}", value)
+    } else {
+        write!(f, "{:.3}", value)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Point([Scalar; 2]);
 
@@ -35,17 +57,9 @@ impl fmt::Debug for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Point([x, y]) = self;
         write!(f, "(")?;
-        if x > &9999.0 || x <= &0.0001 {
-            write!(f, "{:e}", x)?;
-        } else {
-            write!(f, "{:.3}", x)?;
-        }
+        scalar_fmt(f, *x)?;
         write!(f, ", ")?;
-        if y > &9999.0 || y <= &0.0001 {
-            write!(f, "{:e}", y)?;
-        } else {
-            write!(f, "{:.3}", y)?;
-        }
+        scalar_fmt(f, *y)?;
         write!(f, ")")
     }
 }
@@ -61,7 +75,7 @@ impl Point {
         self.0[1]
     }
 
-    pub fn len(&self) -> Scalar {
+    pub fn hypot(&self) -> Scalar {
         let Self([x, y]) = self;
         x.hypot(*y)
     }
@@ -79,13 +93,19 @@ impl Point {
     }
 
     pub fn angle_between(&self, other: &Self) -> Scalar {
-        let angle_cos = self.dot(other) / (self.len() * other.len());
+        let angle_cos = self.dot(other) / (self.hypot() * other.hypot());
         let angle = clip(angle_cos, -1.0, 1.0).acos();
         if self.cross(other) < 0.0 {
             -angle
         } else {
             angle
         }
+    }
+}
+
+impl From<(Scalar, Scalar)> for Point {
+    fn from(xy: (Scalar, Scalar)) -> Self {
+        Self([xy.0, xy.1])
     }
 }
 
@@ -287,6 +307,19 @@ impl BBox {
     }
 }
 
+impl fmt::Debug for BBox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BBox ")?;
+        scalar_fmt(f, self.x())?;
+        write!(f, ", ")?;
+        scalar_fmt(f, self.y())?;
+        write!(f, ", ")?;
+        scalar_fmt(f, self.width())?;
+        write!(f, ", ")?;
+        scalar_fmt(f, self.height())
+    }
+}
+
 // Line curve
 #[derive(Clone, Copy)]
 pub struct Line([Point; 2]);
@@ -299,7 +332,11 @@ impl fmt::Debug for Line {
 }
 
 impl Line {
-    fn flatten(&self, tr: Transform) -> LineFlattenIter {
+    pub fn new<P: Into<Point>>(p0: P, p1: P) -> Self {
+        Self([p0.into(), p1.into()])
+    }
+
+    pub fn flatten(&self, tr: Transform) -> LineFlattenIter {
         LineFlattenIter(Some(self.transform(tr)))
     }
 
@@ -346,6 +383,10 @@ impl fmt::Debug for Quad {
 }
 
 impl Quad {
+    pub fn new<P: Into<Point>>(p0: P, p1: P, p2: P) -> Self {
+        Self([p0.into(), p1.into(), p2.into()])
+    }
+
     pub fn from(&self) -> Point {
         self.0[0]
     }
@@ -379,6 +420,10 @@ impl fmt::Debug for Cubic {
 }
 
 impl Cubic {
+    pub fn new<P: Into<Point>>(p0: P, p1: P, p2: P, p3: P) -> Self {
+        Self([p0.into(), p1.into(), p2.into(), p3.into()])
+    }
+
     pub fn flatten(&self, tr: Transform, flatness: Scalar) -> CubicFlattenIter {
         CubicFlattenIter {
             flatness: 16.0 * flatness * flatness,
@@ -396,9 +441,9 @@ impl Cubic {
 
     pub fn at(&self, t: Scalar) -> Point {
         let Self([p0, p1, p2, p3]) = self;
-        let (t1, t_1) = (1.0 - t, t);
-        let (t2, t_2) = (t_1 * t_1, t1 * t1);
-        let (t3, t_3) = (t_2 * t_1, t2 * t1);
+        let (t1, t_1) = (t, 1.0 - t);
+        let (t2, t_2) = (t1 * t1, t_1 * t_1);
+        let (t3, t_3) = (t2 * t1, t_2 * t_1);
         t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3
     }
 
@@ -460,24 +505,12 @@ impl Cubic {
         let Point([c0, c1]) = -3.0 * p0 + 3.0 * p1;
         let t0 = quadratic_solve(a0, b0, c0);
         let t1 = quadratic_solve(a1, b1, c1);
-        t0.into_iter()
+        t0.iter()
             .flatten()
-            .chain(t1.into_iter().flatten())
+            .chain(t1.iter().flatten())
+            .filter(|t| **t > 0.0 && **t < 1.0)
             .fold(bbox, |bbox, t| bbox.extend(self.at(*t)))
     }
-}
-
-fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
-    let mut result = [None; 2];
-    let det = b * b - 4.0 * a * c;
-    if (det - 0.0).abs() < EPSILON {
-        result[0] = Some(-b / (2.0 * a));
-    } else if det > 0.0 {
-        let sq = det.sqrt();
-        result[0] = Some((-b + sq) / (2.0 * a));
-        result[1] = Some((-b - sq) / (2.0 * a));
-    }
-    result
 }
 
 impl Transformable for Cubic {
@@ -885,7 +918,7 @@ pub struct Path {
 }
 
 impl Path {
-    pub fn flatten<'a>(
+    pub fn flatten_simple<'a>(
         &'a self,
         tr: Transform,
         flatness: Scalar,
@@ -896,13 +929,17 @@ impl Path {
             .flat_map(move |subpath| subpath.flatten(tr, flatness, close))
     }
 
+    pub fn flatten(&self, tr: Transform, flatness: Scalar, close: bool) -> PathFlattenIter {
+        PathFlattenIter::new(self, tr, flatness, close)
+    }
+
     pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<Image<Scalar>> {
         // flatten all curves
         let lines: Vec<Line> = timeit("[flatten]", || self.flatten(tr, FLATNESS, true).collect());
         if lines.is_empty() {
             return None;
         }
-        eprintln!("[lines]: {}", lines.len());
+        debug!("[lines]: {}", lines.len());
 
         // determine size of output layer
         let (min_x, min_y, max_x, max_y) = timeit("[size]", || {
@@ -942,6 +979,68 @@ impl Path {
         timeit("[mask]", || layer.coverage_to_mask(fill_rule));
 
         Some(layer)
+    }
+}
+
+pub struct PathFlattenIter {
+    stack: Vec<Result<Line, Cubic>>,
+    flatness: Scalar,
+}
+
+impl PathFlattenIter {
+    fn new(path: &Path, tr: Transform, flatness: Scalar, close: bool) -> Self {
+        let size: usize = path
+            .subpaths
+            .iter()
+            .map(|subpath| subpath.segments.len())
+            .sum();
+        let mut stack = Vec::new();
+        stack.reserve(size * 2);
+        for subpath in path.subpaths.iter().rev() {
+            if subpath.closed || close {
+                let line = subpath
+                    .to()
+                    .and_then(|p1| subpath.from().map(|p2| Ok(Line::new(p1, p2).transform(tr))));
+                stack.extend(line);
+            }
+            for segment in subpath.segments.iter().rev() {
+                match segment {
+                    Segment::Line(line) => stack.push(Ok(line.transform(tr))),
+                    Segment::Quad(quad) => stack.push(Err(From::from(quad.transform(tr)))),
+                    Segment::Cubic(cubic) => stack.push(Err(cubic.transform(tr))),
+                    Segment::ElipArc(arc) => {
+                        stack.extend(arc.to_cubic().map(|cubic| Err(cubic.transform(tr))))
+                    }
+                }
+            }
+        }
+
+        Self {
+            flatness: 16.0 * flatness * flatness,
+            stack,
+        }
+    }
+}
+
+impl Iterator for PathFlattenIter {
+    type Item = Line;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.stack.pop() {
+                None => return None,
+                Some(Ok(line)) => return Some(line),
+                Some(Err(cubic)) if cubic.flatness() < self.flatness => {
+                    let Cubic([p0, _p1, _p2, p3]) = cubic;
+                    return Some(Line([p0, p3]));
+                }
+                Some(Err(cubic)) => {
+                    let (c0, c1) = cubic.split();
+                    self.stack.push(Err(c1));
+                    self.stack.push(Err(c0));
+                }
+            }
+        }
     }
 }
 
@@ -1248,14 +1347,6 @@ impl<'a> PathParser<'a> {
     }
 }
 
-fn srgb_to_linear(value: Scalar) -> Scalar {
-    if value <= 0.04045 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.5)
-    }
-}
-
 fn linear_to_srgb(value: Scalar) -> Scalar {
     if value <= 0.0031308 {
         value * 12.92
@@ -1264,27 +1355,30 @@ fn linear_to_srgb(value: Scalar) -> Scalar {
     }
 }
 
+/*
+fn srgb_to_linear(value: Scalar) -> Scalar {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.5)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct RGBA {
+    rgba: [Scalar; 4],
+}
+*/
+
 trait Color {
     fn to_rgb(&self) -> [u8; 3];
 }
 
 impl Color for Scalar {
     fn to_rgb(&self) -> [u8; 3] {
-        // let alpha = (linear_to_srgb(*self) * 255.0).round() as u8;
-        let alpha = (self * 255.0).round() as u8;
-        [alpha; 3]
+        let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
+        [color; 3]
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ColorScape {
-    LinearRGB,
-    Linear,
-}
-
-#[derive(Clone, Copy)]
-struct RGBA {
-    rgba: [Scalar; 4],
 }
 
 #[derive(Clone)]
@@ -1343,7 +1437,7 @@ impl<C> Image<C> {
     {
         write!(w, "P6 {} {} 255 ", self.width, self.height)?;
         for c in self.data.iter() {
-            w.write(&c.to_rgb())?;
+            w.write_all(&c.to_rgb())?;
         }
         Ok(())
     }
@@ -1489,19 +1583,20 @@ pub const SQUIRREL: &str = "M12 1C9.79 1 8 2.31 8 3.92c0 1.94.5 3.03 0 6.08 0-4.
 pub const NOMOVE: &str = "M50,100 0,50 25,25Z L100,50 75,25Z";
 pub const STAR: &str = "M50,0 21,90 98,35 2,35 79,90z M110,0 h90 v90 h-90 z M130,20 h50 v50 h-50 zM210,0  h90 v90 h-90 z M230,20 v50 h50 v-50 z";
 pub const ARCS: &str = "M600,350 l 50,-25a80,60 -30 1,1 50,-25 l 50,-25a25,50 -30 0,1 50,-25 l 50,-25a25,75 -30 0,1 50,-25 l 50,-25a25,100 -30 0,1 50,-25 l 50,-25";
-pub const RUST: &str = "M20.648 10.144l-.873-.54a7.042 7.042 0 0 0-.025-.254l.75-.7a.301.301 0 0 0-.1-.501l-.958-.36a11.689 11.689 0 0 0-.075-.247l.598-.831c.06-.084.073-.194.034-.291s-.127-.165-.23-.182l-1.01-.165a6.168 6.168 0 0 0-.122-.227l.425-.933c.043-.095.035-.205-.024-.292s-.155-.137-.26-.133l-1.026.036a9.948 9.948 0 0 0-.162-.197l.236-1a.3.3 0 0 0-.361-.362l-1 .236a9.948 9.948 0 0 0-.196-.162l.036-1.026a.299.299 0 0 0-.424-.284l-.933.425a16.347 16.347 0 0 0-.227-.122l-.165-1.011a.3.3 0 0 0-.472-.195l-.831.598a10.077 10.077 0 0 0-.247-.075l-.36-.96a.3.3 0 0 0-.5-.1l-.7.752a10.398 10.398 0 0 0-.254-.025l-.54-.873a.3.3 0 0 0-.511 0l-.54.873c-.085.007-.17.016-.255.025l-.7-.751a.301.301 0 0 0-.501.1l-.36.959-.246.075-.831-.598a.3.3 0 0 0-.472.195L6.07 2.03c-.076.04-.152.08-.227.123l-.933-.425a.301.301 0 0 0-.425.284l.036 1.026a9.948 9.948 0 0 0-.197.162l-1-.236a.3.3 0 0 0-.361.362l.236 1c-.055.065-.11.13-.162.197l-1.026-.036a.301.301 0 0 0-.284.425l.425.933c-.041.075-.082.15-.122.227l-1.011.165a.3.3 0 0 0-.195.473l.598.83-.075.249-.96.359a.3.3 0 0 0-.098.5l.75.7c-.01.086-.018.17-.025.255l-.873.54a.301.301 0 0 0 0 .51l.873.54c.007.086.016.17.025.255l-.75.7a.301.301 0 0 0 .099.5l.959.36c.024.083.049.166.075.248l-.598.83c-.061.086-.074.195-.034.29s.127.166.229.183l1.01.165c.04.077.08.152.123.227l-.425.932a.301.301 0 0 0 .284.425l1.026-.036c.053.067.107.132.162.197l-.236 1a.299.299 0 0 0 .36.36l1-.234.198.162-.036 1.027a.299.299 0 0 0 .425.283l.933-.425c.075.042.15.082.227.122l.165 1.01a.303.303 0 0 0 .473.196l.83-.598.249.075.359.959a.3.3 0 0 0 .5.099l.7-.75c.085.01.17.018.256.025l.54.873a.3.3 0 0 0 .51 0l.54-.873c.085-.007.17-.016.254-.025l.7.75a.301.301 0 0 0 .5-.1l.36-.958c.083-.024.166-.05.248-.075l.83.599a.303.303 0 0 0 .473-.196l.165-1.011.227-.122.933.425a.3.3 0 0 0 .424-.283l-.036-1.027c.066-.053.132-.107.197-.162l1 .235a.301.301 0 0 0 .36-.361l-.234-1c.055-.065.109-.13.162-.197l1.026.036a.301.301 0 0 0 .283-.425l-.425-.932.122-.227 1.01-.165c.104-.016.19-.085.23-.182s.027-.206-.034-.29l-.598-.831c.026-.082.05-.165.075-.248l.959-.36a.302.302 0 0 0 .099-.5l-.75-.7.025-.254.873-.54a.3.3 0 0 0 0-.511zm-5.843 7.24a.618.618 0 0 1 .259-1.208.618.618 0 1 1-.26 1.209zm-.297-2.005a.562.562 0 0 0-.668.433l-.31 1.447a7.572 7.572 0 0 1-3.137.675 7.575 7.575 0 0 1-3.203-.706l-.31-1.446a.563.563 0 0 0-.668-.433l-1.277.274a7.662 7.662 0 0 1-.66-.778h6.213c.07 0 .117-.013.117-.077V12.57c0-.064-.047-.077-.117-.077H8.67V11.1h1.965c.179 0 .959.05 1.208 1.048.078.306.25 1.304.367 1.623.117.358.592 1.073 1.099 1.073h3.096a.643.643 0 0 0 .112-.011c-.215.292-.45.568-.704.826l-1.306-.281zm-8.592 1.976a.62.62 0 0 1-.26-1.21.619.619 0 0 1 .26 1.21zM3.559 7.798a.619.619 0 1 1-1.131.502.619.619 0 0 1 1.13-.502zm-.724 1.717l1.33-.591a.564.564 0 0 0 .286-.744l-.274-.62h1.077v4.856H3.08a7.593 7.593 0 0 1-.247-2.902zm5.837-.471V7.613h2.566c.133 0 .936.153.936.754 0 .499-.616.677-1.123.677H8.67zm9.323 1.288c0 .19-.007.378-.021.564h-.78c-.078 0-.11.05-.11.128v.358c0 .843-.476 1.027-.892 1.073-.397.045-.837-.166-.891-.41-.234-1.315-.624-1.596-1.24-2.082.765-.485 1.56-1.201 1.56-2.16 0-1.035-.71-1.687-1.193-2.006-.68-.447-1.43-.537-1.632-.537H4.729a7.592 7.592 0 0 1 4.253-2.4l.95.998a.563.563 0 0 0 .797.018l1.064-1.018a7.607 7.607 0 0 1 5.204 3.707l-.728 1.645a.564.564 0 0 0 .287.744l1.402.623c.024.249.037.5.037.755zm-8.061-8.32a.617.617 0 1 1 .852.894.617.617 0 1 1-.852-.894zm7.228 5.816a.618.618 0 1 1 1.13.5.618.618 0 0 1-1.13-.5z";
 
 pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
     let start = std::time::Instant::now();
     let result = f();
-    eprintln!("{} {:?}", msg, start.elapsed());
+    debug!("{} {:?}", msg, start.elapsed());
     result
 }
 
 fn main() -> Result<(), Error> {
-    let path = Path::from_str(RUST)?;
-    // let path = path_load("material_design.path")?;
-    let tr = Transform::default().scale(6.0, 6.0);
+    env_logger::init();
+
+    // let path = Path::from_str(RUST)?;
+    let path = path_load("material_design.path")?;
+    let tr = Transform::default(); //.scale(12.0, 12.0);
     let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
     println!("{:?}", mask);
 
@@ -1509,6 +1604,10 @@ fn main() -> Result<(), Error> {
         let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.ppm")?);
         timeit("[save]", || mask.to_ppm(&mut image))?;
     }
+
+    let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
+    println!("{:?}", curve);
+    println!("{:?}", curve.bbox());
 
     Ok(())
 }
