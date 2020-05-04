@@ -45,7 +45,7 @@ impl FromStr for Color {
 
     fn from_str(rgba: &str) -> Result<Color, Self::Err> {
         // FIXME: support different color notations
-        if rgba.len() < 7 || !rgba.starts_with("#") || rgba.len() > 9 {
+        if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
             return Err(ColorError(format!("invalid color `{}`", rgba)));
         }
         let red = u8::from_str_radix(rgba.get(1..3).unwrap(), 16)

@@ -107,7 +107,7 @@ pub trait View {
         }
     }
 
-    fn view<'a, RS, CS>(&'a mut self, rows: RS, cols: CS) -> SurfaceView<'a>
+    fn view<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceView<'_>
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
