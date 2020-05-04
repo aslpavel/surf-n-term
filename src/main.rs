@@ -22,14 +22,14 @@ fn main() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
         .view(3..4, ..-1)
         .fill(|_, _, cell| cell.face = three);
 
-    // let mut renderer = TerminalRenderer::new()?;
-    // renderer.render(&surface)?;
+    let mut renderer = TerminalRenderer::new()?;
+    renderer.render(&surface)?;
     println!();
 
     let mut term = terminal::UnixTerminal::new()?;
     // term.write(&[46; 8192][..])?;
     // term.write("\x1b[6n")?;
-    term.wait(Some(std::time::Duration::from_secs(1)))?;
+    term.wait(Some(std::time::Duration::from_secs(100)))?;
     term.debug()?;
     println!("{:?}", term.size());
 

@@ -1,4 +1,5 @@
 use crate::{Face, Surface, View};
+use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
     fmt,
@@ -9,6 +10,7 @@ use std::{
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
     pub use nix::{
+        errno::Errno,
         fcntl::{fcntl, open, FcntlArg, OFlag},
         sys::{
             select::{select, FdSet},
@@ -19,7 +21,7 @@ mod nix {
         unistd::{isatty, read, write},
         Error,
     };
-    pub use std::os::unix::io::RawFd;
+    pub use std::os::unix::{io::RawFd, net::UnixStream};
 }
 
 /*
@@ -52,6 +54,8 @@ pub struct UnixTerminal {
     read_fd: nix::RawFd,
     read_queue: IOQueue,
     termios_saved: nix::Termios,
+    sigwinch_read: nix::UnixStream,
+    sigwinch_id: signal_hook::SigId,
 }
 
 impl UnixTerminal {
@@ -75,8 +79,13 @@ impl UnixTerminal {
         // termios.output_flags.remove(nix::OutputFlags::OPOST); // do not post process `\n` input `\r\n`
         nix::tcsetattr(write_fd, nix::SetArg::TCSAFLUSH, &termios)?;
 
+        // self-pipe trick to handle SIGWINCH (window resize) signal
+        let (sigwinch_read, sigwinch_write) = nix::UnixStream::pair()?;
+        let sigwinch_id = signal_hook::pipe::register(signal_hook::SIGWINCH, sigwinch_write)?;
+
         set_blocking(read_fd, false)?;
         set_blocking(write_fd, false)?;
+        set_blocking(sigwinch_read.as_raw_fd(), false)?;
 
         Ok(Self {
             write_fd,
@@ -84,6 +93,8 @@ impl UnixTerminal {
             read_fd,
             read_queue: Default::default(),
             termios_saved,
+            sigwinch_read,
+            sigwinch_id,
         })
     }
 
@@ -115,23 +126,41 @@ impl UnixTerminal {
         let mut read_set = nix::FdSet::new();
         let mut write_set = nix::FdSet::new();
         let write_fd = self.write_fd;
+        let sigwinch_fd = self.sigwinch_read.as_raw_fd();
 
         while !self.write_queue.is_empty() || self.read_queue.is_empty() {
+            // update descriptors sets
             read_set.clear();
-            write_set.clear();
             read_set.insert(self.read_fd);
+            read_set.insert(sigwinch_fd);
+            write_set.clear();
             if !self.write_queue.is_empty() {
                 write_set.insert(self.write_fd);
             }
+
             let mut timeout = timeout.map(timeval_from_duration);
-            let _count = nix::select(None, &mut read_set, &mut write_set, None, &mut timeout)?;
-            if !self.write_queue.is_empty() && write_set.contains(self.write_fd) {
+            let select = nix::select(None, &mut read_set, &mut write_set, None, &mut timeout);
+            let _count = guard_io(select, 0)?;
+
+            // process pending output
+            if write_set.contains(self.write_fd) {
+                println!("WRITE");
                 self.write_queue
-                    .consume_with(|slice| nix::write(write_fd, slice))?;
+                    .consume_with(|slice| guard_io(nix::write(write_fd, slice), 0))?;
             }
+            // process SIGWINCH
+            if read_set.contains(sigwinch_fd) {
+                let mut buf = [0u8; 1];
+                if guard_io(nix::read(sigwinch_fd, &mut buf), 0)? != 0 {
+                    // TODO: enqueue resize event
+                    println!("RESIZED: {:?}", self.size());
+                }
+            }
+            // process pending input
             if read_set.contains(self.read_fd) {
+                println!("READ");
                 let mut buf = [0u8; 1024];
-                let size = nix::read(self.read_fd, &mut buf)?;
+                let size = guard_io(nix::read(self.read_fd, &mut buf), 0)?;
                 self.read_queue.write_all(&buf[..size])?;
             }
             println!("\x1b[31;01mloop\x1b[m");
@@ -154,10 +183,24 @@ impl UnixTerminal {
 
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {
-        set_blocking(self.write_fd, false).unwrap_or(());
-        set_blocking(self.read_fd, false).unwrap_or(());
+        set_blocking(self.write_fd, true).unwrap_or(());
+        set_blocking(self.read_fd, true).unwrap_or(());
+
+        // disable SIGIWNCH handler
+        signal_hook::unregister(self.sigwinch_id);
+
         // restore termios settings
         nix::tcsetattr(self.write_fd, nix::SetArg::TCSAFLUSH, &self.termios_saved).unwrap_or(());
+    }
+}
+
+/// Guard against EAGAIN and EINTR
+fn guard_io<T>(result: Result<T, nix::Error>, value: T) -> Result<T, nix::Error> {
+    match result {
+        Err(nix::Error::Sys(nix::Errno::EINTR)) | Err(nix::Error::Sys(nix::Errno::EAGAIN)) => {
+            Ok(value)
+        }
+        _ => result,
     }
 }
 
@@ -388,6 +431,8 @@ impl Renderer for TerminalRenderer {
     type Error = TerminalError;
 
     fn render(&mut self, surface: &Surface) -> Result<(), Self::Error> {
+        write!(self.tty, "\x1b[s")?; // save cursor
+
         let shape = surface.shape();
         let data = surface.data();
         for row in 0..shape.height {
@@ -407,6 +452,7 @@ impl Renderer for TerminalRenderer {
         self.tty.flush()?;
         self.queue.clear();
 
+        write!(self.tty, "\x1b[u")?; // restore cursor
         Ok(())
     }
 }
