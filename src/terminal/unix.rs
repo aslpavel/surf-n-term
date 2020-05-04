@@ -1,8 +1,8 @@
+use super::{Renderer, TerminalError};
 use crate::{Face, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
-    fmt,
     io::{BufRead, Read, Write},
     time::Duration,
 };
@@ -23,22 +23,6 @@ mod nix {
     };
     pub use std::os::unix::{io::RawFd, net::UnixStream};
 }
-
-/*
-enum TerminalCommand {}
-enum TerminalEvent {}
-
-trait Terminal: Sync + Write {
-    fn write(&mut self, command: TerminalCommand) -> Result<(), TerminalError>;
-    fn flush(&mut self) -> Result<(), TerminalError>;
-
-    fn recv<F, FR>(&mut self, f: F) -> FR
-    where
-        F: FnMut(&mut Vec<TerminalEvent>) -> FR;
-}
-
-type BoxTerminal = std::boxed::Box<dyn Terminal>;
-*/
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TerminalSize {
@@ -138,6 +122,7 @@ impl UnixTerminal {
                 write_set.insert(self.write_fd);
             }
 
+            // wait for descriptors
             let mut timeout = timeout.map(timeval_from_duration);
             let select = nix::select(None, &mut read_set, &mut write_set, None, &mut timeout);
             let _count = guard_io(select, 0)?;
@@ -191,6 +176,69 @@ impl std::ops::Drop for UnixTerminal {
 
         // restore termios settings
         nix::tcsetattr(self.write_fd, nix::SetArg::TCSAFLUSH, &self.termios_saved).unwrap_or(());
+    }
+}
+
+impl Write for UnixTerminal {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.write_queue.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.write_queue.flush()
+    }
+}
+
+// FIXME: support for different color depth and attributes
+fn set_face(buf: &mut dyn Write, cur: &mut Face, new: Face) -> Result<(), TerminalError> {
+    if cur == &new {
+        return Ok(());
+    }
+    write!(buf, "\x1b[00")?;
+    if cur.bg != new.bg {
+        new.bg
+            .map(|c| write!(buf, ";48;2;{};{};{}", c.red, c.green, c.blue))
+            .transpose()?;
+    }
+    if cur.fg != new.fg {
+        new.fg
+            .map(|c| write!(buf, ";38;2;{};{};{}", c.red, c.green, c.blue))
+            .transpose()?;
+    }
+    if cur.attrs != new.attrs {
+        unimplemented!()
+    }
+    write!(buf, "m")?;
+    std::mem::replace(cur, new);
+    Ok(())
+}
+
+fn set_cursor(buf: &mut dyn Write, row: usize, col: usize) -> Result<(), TerminalError> {
+    write!(buf, "\x1b[{};{}H", row + 1, col + 1)?;
+    Ok(())
+}
+
+impl Renderer for UnixTerminal {
+    fn render(&mut self, surface: &Surface) -> Result<(), TerminalError> {
+        let mut cur_face = Face::default();
+        write!(self, "\x1b[s")?; // save cursor
+        let shape = surface.shape();
+        let data = surface.data();
+        for row in 0..shape.height {
+            set_cursor(self, row, 0)?;
+            for col in 0..shape.width {
+                let cell = &data[shape.index(row, col)];
+                set_face(self, &mut cur_face, cell.face)?;
+                match cell.glyph {
+                    Some(glyph) => self.write_all(&glyph)?,
+                    None => self.write_all(&[b' '])?,
+                };
+            }
+        }
+        set_face(self, &mut cur_face, Face::default())?;
+        write!(self, "\x1b[u")?; // restore cursor
+        self.flush()?;
+        Ok(())
     }
 }
 
@@ -267,14 +315,16 @@ impl IOQueue {
 impl Write for IOQueue {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.chunks.is_empty() {
-            self.flush()?;
+            self.chunks.push_back(Default::default());
         }
         let chunk = self.chunks.back_mut().unwrap();
         chunk.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.chunks.push_back(Default::default());
+        if self.as_slice().len() > 0 {
+            self.chunks.push_back(Default::default());
+        }
         Ok(())
     }
 }
@@ -344,115 +394,6 @@ mod tests {
             lines,
             vec!["one".to_string(), "two".to_string(), "three".to_string()]
         );
-        Ok(())
-    }
-}
-
-// ----------------------------------------------------------------------------------------------------
-pub trait Renderer {
-    type Error;
-    fn render(&mut self, surface: &Surface) -> Result<(), Self::Error>;
-}
-
-#[derive(Debug)]
-pub enum TerminalError {
-    IOError(std::io::Error),
-    NixError(nix::Error),
-    Closed,
-    NotATTY,
-}
-
-impl fmt::Display for TerminalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for TerminalError {}
-
-impl From<std::io::Error> for TerminalError {
-    fn from(error: std::io::Error) -> Self {
-        Self::IOError(error)
-    }
-}
-
-impl From<nix::Error> for TerminalError {
-    fn from(error: nix::Error) -> Self {
-        Self::NixError(error)
-    }
-}
-
-pub struct TerminalRenderer {
-    face: Face,
-    queue: Vec<u8>,
-    tty: std::io::Stdout, // FIXME: use `/dev/tty` instead
-}
-
-impl TerminalRenderer {
-    pub fn new() -> Result<Self, TerminalError> {
-        Ok(Self {
-            face: Default::default(),
-            queue: Vec::new(),
-            tty: std::io::stdout(),
-        })
-    }
-
-    // FIXME: support for different color depth and attributes
-    fn set_face(&mut self, face: Face) -> Result<(), TerminalError> {
-        if self.face == face {
-            return Ok(());
-        }
-        write!(&mut self.queue, "\x1b[00")?;
-        if self.face.bg != face.bg {
-            face.bg
-                .map(|c| write!(self.queue, ";48;2;{};{};{}", c.red, c.green, c.blue))
-                .transpose()?;
-        }
-        if self.face.fg != face.fg {
-            face.fg
-                .map(|c| write!(self.queue, ";38;2;{};{};{}", c.red, c.green, c.blue))
-                .transpose()?;
-        }
-        if self.face.attrs != face.attrs {
-            unimplemented!()
-        }
-        write!(self.queue, "m")?;
-        self.face = face;
-        Ok(())
-    }
-
-    fn set_cursor(&mut self, row: usize, col: usize) -> Result<(), TerminalError> {
-        write!(self.queue, "\x1b[{};{}H", row + 1, col + 1)?;
-        Ok(())
-    }
-}
-
-impl Renderer for TerminalRenderer {
-    type Error = TerminalError;
-
-    fn render(&mut self, surface: &Surface) -> Result<(), Self::Error> {
-        write!(self.tty, "\x1b[s")?; // save cursor
-
-        let shape = surface.shape();
-        let data = surface.data();
-        for row in 0..shape.height {
-            self.set_cursor(row, 0)?;
-            for col in 0..shape.width {
-                let cell = &data[shape.index(row, col)];
-                self.set_face(cell.face)?;
-                match cell.glyph {
-                    Some(glyph) => self.queue.write(&glyph)?,
-                    None => self.queue.write(&[b' '])?,
-                };
-            }
-        }
-        self.set_face(Face::default())?;
-
-        self.tty.write_all(&self.queue)?;
-        self.tty.flush()?;
-        self.queue.clear();
-
-        write!(self.tty, "\x1b[u")?; // restore cursor
         Ok(())
     }
 }

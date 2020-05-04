@@ -5,7 +5,7 @@ mod surface;
 pub use crate::surface::{Surface, View};
 
 pub mod terminal;
-pub use crate::terminal::{Renderer, TerminalRenderer};
+pub use crate::terminal::{Renderer, SystemTerminal};
 
 fn main() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
     let bg = Face::default().with_bg(Some("#3c3836".parse()?));
@@ -22,11 +22,8 @@ fn main() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
         .view(3..4, ..-1)
         .fill(|_, _, cell| cell.face = three);
 
-    let mut renderer = TerminalRenderer::new()?;
-    renderer.render(&surface)?;
-    println!();
-
-    let mut term = terminal::UnixTerminal::new()?;
+    let mut term = SystemTerminal::new()?;
+    term.render(&surface)?;
     // term.write(&[46; 8192][..])?;
     // term.write("\x1b[6n")?;
     term.wait(Some(std::time::Duration::from_secs(100)))?;
