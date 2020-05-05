@@ -1,9 +1,8 @@
-use super::{Renderer, Terminal, TerminalCommand, TerminalError};
-use crate::{Face, Surface, View};
+use super::{common::IOQueue, Renderer, Terminal, TerminalCommand, TerminalError};
+use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
-    collections::VecDeque,
-    io::{BufRead, Read, Write},
+    io::{Read, Write},
     time::Duration,
 };
 
@@ -236,10 +235,7 @@ impl Terminal for UnixTerminal {
             EraseLineLeft => self.write_all(b"\x1b[1K")?,
             EraseLine => self.write_all(b"\x1b[2K")?,
             Face(face) => {
-                // TODO:
-                //  - support 256 colors and lower
-                //  - attributes
-                self.write_all(b"\x1b[0")?;
+                self.write_all(b"\x1b[00")?;
                 if let Some(fg) = face.fg {
                     let (r, g, b) = fg.rgb_u8();
                     write!(self, ";38;2;{};{};{}", r, g, b)?;
@@ -247,6 +243,19 @@ impl Terminal for UnixTerminal {
                 if let Some(bg) = face.bg {
                     let (r, g, b) = bg.rgb_u8();
                     write!(self, ";48;2;{};{};{}", r, g, b)?;
+                }
+                if !face.attrs.is_empty() {
+                    for (flag, code) in &[
+                        (FaceAttrs::BOLD, b";01"),
+                        (FaceAttrs::ITALIC, b";03"),
+                        (FaceAttrs::UNDERLINE, b";04"),
+                        (FaceAttrs::BLINK, b";05"),
+                        (FaceAttrs::REVERSE, b";07"),
+                    ] {
+                        if face.attrs.contains(*flag) {
+                            self.write_all(*code)?;
+                        }
+                    }
                 }
                 self.write_all(b"m")?;
             }
@@ -305,135 +314,4 @@ fn timeval_from_duration(dur: Duration) -> nix::TimeVal {
         tv_sec: dur.as_secs() as libc::time_t,
         tv_usec: dur.subsec_micros() as libc::suseconds_t,
     })
-}
-
-struct IOQueue {
-    chunks: VecDeque<Vec<u8>>,
-    offset: usize,
-}
-
-impl IOQueue {
-    fn new() -> Self {
-        Self {
-            chunks: Default::default(),
-            offset: 0,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.chunks.is_empty()
-    }
-
-    /// Remaining slice at the front of the queue
-    pub fn as_slice(&self) -> &[u8] {
-        match self.chunks.front() {
-            Some(chunk) => &chunk.as_slice()[self.offset..],
-            None => &[],
-        }
-    }
-
-    /// Consume bytes from the front of the queue
-    pub fn consume(&mut self, amt: usize) {
-        if self.chunks.front().map(|chunk| chunk.len()).unwrap_or(0) > self.offset + amt {
-            self.offset += amt
-        } else {
-            self.offset = 0;
-            self.chunks.pop_front();
-        }
-    }
-
-    pub fn consume_with<F, FE>(&mut self, consumer: F) -> Result<usize, FE>
-    where
-        F: FnOnce(&[u8]) -> Result<usize, FE>,
-    {
-        let size = consumer(self.as_slice())?;
-        self.consume(size);
-        Ok(size)
-    }
-}
-
-impl Write for IOQueue {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.chunks.is_empty() {
-            self.chunks.push_back(Default::default());
-        }
-        let chunk = self.chunks.back_mut().unwrap();
-        chunk.write(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        if self.as_slice().len() > 0 {
-            self.chunks.push_back(Default::default());
-        }
-        Ok(())
-    }
-}
-
-impl Read for IOQueue {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let buf_queue = self.as_slice();
-        let size = std::cmp::min(buf.len(), buf_queue.len());
-        let src = &buf_queue[..size];
-        let dst = &mut buf[..size];
-        dst.copy_from_slice(src);
-        self.consume(size);
-        Ok(size)
-    }
-}
-
-impl BufRead for IOQueue {
-    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-        Ok(self.as_slice())
-    }
-
-    fn consume(&mut self, amt: usize) {
-        Self::consume(self, amt)
-    }
-}
-
-impl Default for IOQueue {
-    fn default() -> Self {
-        IOQueue::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::IOQueue;
-    use std::io::{BufRead, Read, Write};
-
-    #[test]
-    fn test_io_queue() -> std::io::Result<()> {
-        let mut queue = IOQueue::new();
-        assert!(queue.is_empty());
-
-        queue.write(b"on")?;
-        queue.write(b"e")?;
-        queue.flush()?;
-        queue.write(b",two")?;
-        queue.flush()?;
-        assert!(!queue.is_empty());
-
-        // make sure flush creates separate chunks
-        assert_eq!(queue.as_slice(), b"one");
-
-        // check `Read` implementation
-        let mut out = String::new();
-        queue.read_to_string(&mut out)?;
-        assert_eq!(out, String::from("one,two"));
-        assert!(queue.is_empty());
-
-        // make `BufRead` implementation
-        queue.write(b"one\nt")?;
-        queue.flush()?;
-        queue.write(b"wo\nth")?;
-        queue.flush()?;
-        queue.write(b"ree\n")?;
-        let lines = queue.lines().collect::<Result<Vec<_>, _>>()?;
-        assert_eq!(
-            lines,
-            vec!["one".to_string(), "two".to_string(), "three".to_string()]
-        );
-        Ok(())
-    }
 }

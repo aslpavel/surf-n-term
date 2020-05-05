@@ -1,6 +1,7 @@
 use crate::{Face, Surface};
 use std::{fmt, io::Write};
 
+mod common;
 mod unix;
 
 pub type SystemTerminal = unix::UnixTerminal;
