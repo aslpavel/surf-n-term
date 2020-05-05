@@ -2,6 +2,7 @@ use crate::{Face, Surface};
 use std::{fmt, io::Write};
 
 mod common;
+mod parser;
 mod unix;
 
 pub type SystemTerminal = unix::UnixTerminal;
@@ -50,6 +51,8 @@ pub enum TerminalCommand {
     EraseLine,
     /// Set current face (foreground/background colors and text attributes)
     Face(Face),
+    /// Full reset of the terminal
+    Reset,
 }
 
 pub enum TerminalKeyMode {

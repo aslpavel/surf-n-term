@@ -1,5 +1,5 @@
 [package]
-name = "canvas"
+name = "tty-surface"
 version = "0.1.0"
 authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 edition = "2018"

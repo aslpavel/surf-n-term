@@ -259,6 +259,7 @@ impl Terminal for UnixTerminal {
                 }
                 self.write_all(b"m")?;
             }
+            Reset => self.write_all(b"\x1bc")?,
         }
 
         Ok(())

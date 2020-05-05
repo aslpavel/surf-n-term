@@ -13,15 +13,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
-name = "canvas"
-version = "0.1.0"
-dependencies = [
- "libc",
- "nix",
- "signal-hook",
-]
-
-[[package]]
 name = "cc"
 version = "1.0.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -70,6 +61,15 @@ checksum = "94f478ede9f64724c5d173d7bb56099ec3e2d9fc2774aac65d34b8b890405f41"
 dependencies = [
  "arc-swap",
  "libc",
+]
+
+[[package]]
+name = "tty-surface"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "nix",
+ "signal-hook",
 ]
 
 [[package]]
