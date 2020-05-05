@@ -17,6 +17,10 @@ impl Color {
             alpha,
         }
     }
+
+    pub fn rgb_u8(&self) -> (u8, u8, u8) {
+        (self.red, self.green, self.blue)
+    }
 }
 
 impl fmt::Debug for Color {
@@ -70,19 +74,64 @@ impl FromStr for Color {
     }
 }
 
-/*
-pub enum FaceAttr {
-    Bold,
-    Italic,
-    Underline,
-    Blink,
-    Reverse,
-    None,
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct FaceAttrs {
+    bits: u16,
 }
-*/
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FaceAttrs {}
+impl FaceAttrs {
+    pub const EMPTY: Self = FaceAttrs { bits: 0 };
+    pub const BOLD: Self = FaceAttrs { bits: 1 };
+    pub const ITALIC: Self = FaceAttrs { bits: 2 };
+    pub const UNDERLINE: Self = FaceAttrs { bits: 4 };
+    pub const BLINK: Self = FaceAttrs { bits: 8 };
+    pub const REVERSE: Self = FaceAttrs { bits: 16 };
+
+    pub fn is_empty(&self) -> bool {
+        self == &Self::EMPTY
+    }
+
+    pub fn contains(&self, other: Self) -> bool {
+        self.bits & other.bits == other.bits
+    }
+}
+
+impl std::ops::BitOr for FaceAttrs {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits | rhs.bits,
+        }
+    }
+}
+
+impl fmt::Debug for FaceAttrs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_empty() {
+            write!(f, "Empty")?;
+        } else {
+            let mut first = true;
+            for (flag, name) in &[
+                (Self::BOLD, "Bold"),
+                (Self::ITALIC, "Italic"),
+                (Self::UNDERLINE, "Underline"),
+                (Self::BLINK, "Blink"),
+                (Self::REVERSE, "Reverse"),
+            ] {
+                if self.contains(*flag) {
+                    if first {
+                        first = false;
+                        write!(f, "{}", name)?;
+                    } else {
+                        write!(f, " | {}", name)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Face {
@@ -109,7 +158,7 @@ impl Default for Face {
         Self {
             fg: None,
             bg: None,
-            attrs: FaceAttrs {},
+            attrs: FaceAttrs::EMPTY,
         }
     }
 }

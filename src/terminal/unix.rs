@@ -1,4 +1,4 @@
-use super::{Renderer, TerminalError};
+use super::{Renderer, Terminal, TerminalCommand, TerminalError};
 use crate::{Face, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -189,54 +189,94 @@ impl Write for UnixTerminal {
     }
 }
 
-// FIXME: support for different color depth and attributes
-fn set_face(buf: &mut dyn Write, cur: &mut Face, new: Face) -> Result<(), TerminalError> {
-    if cur == &new {
-        return Ok(());
-    }
-    write!(buf, "\x1b[00")?;
-    if cur.bg != new.bg {
-        new.bg
-            .map(|c| write!(buf, ";48;2;{};{};{}", c.red, c.green, c.blue))
-            .transpose()?;
-    }
-    if cur.fg != new.fg {
-        new.fg
-            .map(|c| write!(buf, ";38;2;{};{};{}", c.red, c.green, c.blue))
-            .transpose()?;
-    }
-    if cur.attrs != new.attrs {
-        unimplemented!()
-    }
-    write!(buf, "m")?;
-    std::mem::replace(cur, new);
-    Ok(())
-}
+impl Terminal for UnixTerminal {
+    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), TerminalError> {
+        use TerminalCommand::*;
 
-fn set_cursor(buf: &mut dyn Write, row: usize, col: usize) -> Result<(), TerminalError> {
-    write!(buf, "\x1b[{};{}H", row + 1, col + 1)?;
-    Ok(())
+        match cmd {
+            AutoWrap(enable) => {
+                if enable {
+                    self.write_all(b"\x1b[?7h")?;
+                } else {
+                    self.write_all(b"\x1b[?7l")?;
+                }
+            }
+            AltScreen(enable) => {
+                if enable {
+                    self.write_all(b"\x1b[?1049h")?;
+                } else {
+                    self.write_all(b"\x1b[?1049l")?;
+                }
+            }
+            MouseSupport { enable, motion } => {
+                if enable {
+                    self.write_all(b"\x1b[?1000h")?; // SET_VT200_MOUSE
+                    self.write_all(b"\x1b[?1006h")?; // SET_SGR_EXT_MODE_MOUSE
+                    if motion {
+                        self.write_all(b"\x1b[?1003h")?; // SET_ANY_EVENT_MOUSE
+                    }
+                } else {
+                    self.write_all(b"\x1b[?1003l")?;
+                    self.write_all(b"\x1b[?1006l")?;
+                    self.write_all(b"\x1b[?1000l")?;
+                }
+            }
+            CursorVisible(enable) => {
+                if enable {
+                    self.write_all(b"\x1b[?25h")?;
+                } else {
+                    self.write_all(b"\x1b[?25l")?;
+                }
+            }
+            CursorTo { row, col } => write!(self, "\x1b[{};{}H", row, col)?,
+            CursorReport => self.write_all(b"\x1b[6n")?,
+            CursorSave => self.write_all(b"\x1b[s")?,
+            CursorRestore => self.write_all(b"\x1b[u")?,
+            EraseLineRight => self.write_all(b"\x1b[K")?,
+            EraseLineLeft => self.write_all(b"\x1b[1K")?,
+            EraseLine => self.write_all(b"\x1b[2K")?,
+            Face(face) => {
+                // TODO:
+                //  - support 256 colors and lower
+                //  - attributes
+                self.write_all(b"\x1b[0")?;
+                if let Some(fg) = face.fg {
+                    let (r, g, b) = fg.rgb_u8();
+                    write!(self, ";38;2;{};{};{}", r, g, b)?;
+                }
+                if let Some(bg) = face.bg {
+                    let (r, g, b) = bg.rgb_u8();
+                    write!(self, ";48;2;{};{};{}", r, g, b)?;
+                }
+                self.write_all(b"m")?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Renderer for UnixTerminal {
     fn render(&mut self, surface: &Surface) -> Result<(), TerminalError> {
         let mut cur_face = Face::default();
-        write!(self, "\x1b[s")?; // save cursor
         let shape = surface.shape();
         let data = surface.data();
+        self.execute(TerminalCommand::CursorSave)?;
         for row in 0..shape.height {
-            set_cursor(self, row, 0)?;
+            self.execute(TerminalCommand::CursorTo { row, col: 0 })?;
             for col in 0..shape.width {
                 let cell = &data[shape.index(row, col)];
-                set_face(self, &mut cur_face, cell.face)?;
+                if cur_face != cell.face {
+                    self.execute(TerminalCommand::Face(cell.face))?;
+                    cur_face = cell.face;
+                }
                 match cell.glyph {
                     Some(glyph) => self.write_all(&glyph)?,
                     None => self.write_all(&[b' '])?,
                 };
             }
         }
-        set_face(self, &mut cur_face, Face::default())?;
-        write!(self, "\x1b[u")?; // restore cursor
+        self.execute(TerminalCommand::CursorRestore)?;
         self.flush()?;
         Ok(())
     }

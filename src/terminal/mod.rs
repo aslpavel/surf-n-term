@@ -1,5 +1,5 @@
-use crate::Surface;
-use std::fmt;
+use crate::{Face, Surface};
+use std::{fmt, io::Write};
 
 mod unix;
 
@@ -15,16 +15,46 @@ trait Terminal: Sync + Write {
         F: FnMut(&mut Vec<TerminalEvent>) -> FR;
 }
 
-type BoxTerminal = std::boxed::Box<dyn Terminal>;
- */
 
+ */
+pub type BoxTerminal = std::boxed::Box<dyn Terminal>;
+
+pub trait Terminal: Write {
+    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), TerminalError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalCommand {
+    /// Enable/disable wrapping of the text when it reaches end of the line
     AutoWrap(bool),
+    /// Enable/Disable alternative screen
     AltScreen(bool),
-    MouseEvent(bool),
-    MouseMotionEvent(bool),
-    CursorShow(bool),
+    /// Report mouse events, if motion is ture it will also report mouse movements
+    MouseSupport { enable: bool, motion: bool },
+    /// Hide/Show cursor
+    CursorVisible(bool),
+    /// Request current cursor postion
     CursorReport,
+    /// Move cursor to specified row and column
+    CursorTo { row: usize, col: usize },
+    /// Save current cursor position
+    CursorSave,
+    /// Restore previously saved cursor position
+    CursorRestore,
+    /// Erase line using current background color to the left of the cursor
+    EraseLineLeft,
+    /// Erase line using current background color to the right of the cursor
+    EraseLineRight,
+    /// Erase line using current background color
+    EraseLine,
+    /// Set current face (foreground/background colors and text attributes)
+    Face(Face),
+}
+
+pub enum TerminalKeyMode {
+    Alt,
+    Ctrl,
+    Shift,
 }
 
 pub enum TerminalEvent {}

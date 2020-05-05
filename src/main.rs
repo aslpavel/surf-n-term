@@ -1,5 +1,5 @@
 mod cell;
-pub use crate::cell::{Color, Face};
+pub use crate::cell::{Color, Face, FaceAttrs};
 
 mod surface;
 pub use crate::surface::{Surface, View};
@@ -29,6 +29,7 @@ fn main() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
     term.wait(Some(std::time::Duration::from_secs(100)))?;
     term.debug()?;
     println!("{:?}", term.size());
+    println!("{:?}", FaceAttrs::BOLD | FaceAttrs::ITALIC);
 
     Ok(())
 }
