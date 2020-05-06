@@ -381,17 +381,28 @@ impl<T> std::ops::Add<NFA<T>> for NFA<T> {
     }
 }
 
-impl<T> fmt::Debug for NFA<T> {
+impl<T> fmt::Debug for NFA<T>
+where
+    T: fmt::Debug,
+{
     /// Format NFA as a valid DOT graph
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "\ndigraph NFA {{\n")?;
         write!(f, "  rankdir=\"LR\"\n")?;
         for (from, state) in self.states.iter() {
+            // node
+            write!(f, "  {} [", from.0)?;
             if from == &self.stop {
-                write!(f, "  {} [shape=doublecircle]\n", from.0)?;
+                write!(f, "shape=doublecircle")?;
             } else {
-                write!(f, "  {} [shape=circle]\n", from.0)?;
+                write!(f, "shape=circle")?;
             }
+            if let Some(tag) = self.tags.get(from) {
+                write!(f, ",label=\"{} {{{:?}}}\"", from.0, tag)?;
+            }
+            write!(f, "]\n")?;
+
+            // deges
             for (symbol, to) in state.edges.iter() {
                 write!(
                     f,
@@ -467,17 +478,30 @@ impl<T> DFA<T> {
     }
 }
 
-impl<T> fmt::Debug for DFA<T> {
+impl<T> fmt::Debug for DFA<T>
+where
+    T: fmt::Debug,
+{
     /// Format NFA as a valid DOT graph
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "\ndigraph DFA {{\n")?;
         write!(f, "  rankdir=\"LR\"\n")?;
+
         for from in (0..self.size()).map(DFAStateId) {
+            // node
+            write!(f, "  {} [", from.0)?;
             if self.stops.contains(&from) {
-                write!(f, "  {} [shape=doublecircle]\n", from.0)?;
+                write!(f, "shape=doublecircle")?;
             } else {
-                write!(f, "  {} [shape=circle]\n", from.0)?;
+                write!(f, "shape=circle")?;
             }
+            let tags = &self.tags[from.0];
+            if !tags.is_empty() {
+                write!(f, ",label=\"{} {:?}\"", from.0, tags)?;
+            }
+            write!(f, "]\n")?;
+
+            // edges
             for symbol in 0..self.lang_size {
                 let symbol = symbol as Symbol;
                 match self.transition(from, symbol) {
@@ -494,6 +518,7 @@ impl<T> fmt::Debug for DFA<T> {
                 }
             }
         }
+
         write!(f, "}}\n")?;
         Ok(())
     }
