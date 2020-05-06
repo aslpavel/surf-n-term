@@ -28,13 +28,30 @@ impl NFAState {
 }
 
 #[derive(Clone)]
-pub struct NFA {
+pub struct NFA<T> {
     start: NFAStateId,
     stop: NFAStateId,
+    tags: BTreeMap<NFAStateId, T>,
     states: BTreeMap<NFAStateId, NFAState>,
 }
 
-impl NFA {
+impl<T> NFA<T> {
+    pub fn tag(self, tag: T) -> Self {
+        let Self {
+            start,
+            stop,
+            mut tags,
+            states,
+        } = self;
+        tags.insert(stop, tag);
+        Self {
+            start,
+            stop,
+            tags,
+            states,
+        }
+    }
+
     /// Number of states inside NFA
     pub fn size(&self) -> usize {
         self.states.len()
@@ -44,13 +61,14 @@ impl NFA {
     ///
     /// Contains single state, which is start and stop at the same time
     /// with no edges.
-    pub fn empty() -> NFA {
+    pub fn empty() -> Self {
         let state_id = NFAStateId(0);
         let mut states = BTreeMap::new();
         states.insert(state_id, NFAState::new());
         Self {
             start: state_id,
             stop: state_id,
+            tags: Default::default(),
             states,
         }
     }
@@ -58,7 +76,7 @@ impl NFA {
     /// NFA that matches nothing
     ///
     /// Two disconnected states start and stop.
-    pub fn nothing() -> NFA {
+    pub fn nothing() -> Self {
         let start = NFAStateId(0);
         let stop = NFAStateId(1);
         let mut states = BTreeMap::new();
@@ -67,6 +85,7 @@ impl NFA {
         Self {
             start,
             stop,
+            tags: Default::default(),
             states,
         }
     }
@@ -74,7 +93,7 @@ impl NFA {
     /// Thompson's construction of NFAs chain one after another.
     /// For `a` and `b` regular expressions it is equivalent to `ab` expressions.
     pub fn sequence(nfas: impl IntoIterator<Item = Self>) -> Self {
-        let (mut states, ends) = Self::merge_states(nfas, 0);
+        let (mut states, ends, tags) = Self::merge_states(nfas, 0);
         if ends.is_empty() {
             return Self::empty();
         }
@@ -95,6 +114,7 @@ impl NFA {
         Self {
             start,
             stop,
+            tags,
             states,
         }
     }
@@ -102,7 +122,7 @@ impl NFA {
     /// Thompson's construction of NFA that matches any of the provided NFAs
     /// For `a` and `b` regular expressions it is equivalent to `(a|b)` expressions.
     pub fn choice(nfas: impl IntoIterator<Item = Self>) -> Self {
-        let (mut states, ends) = Self::merge_states(nfas, 2);
+        let (mut states, ends, tags) = Self::merge_states(nfas, 2);
         if ends.is_empty() {
             return Self::nothing();
         }
@@ -122,6 +142,7 @@ impl NFA {
         Self {
             start,
             stop,
+            tags,
             states,
         }
     }
@@ -134,7 +155,7 @@ impl NFA {
     /// For `a` regular expression it is equivalent to `a*`
     pub fn many(self) -> Self {
         // add offset of 2 to state ids
-        let (mut states, ends) = Self::merge_states(once(self), 2);
+        let (mut states, ends, tags) = Self::merge_states(once(self), 2);
         let (from, to) = ends[0];
 
         let start = NFAStateId(0);
@@ -152,6 +173,7 @@ impl NFA {
         Self {
             start,
             stop,
+            tags,
             states,
         }
     }
@@ -169,17 +191,24 @@ impl NFA {
         BTreeMap<NFAStateId, NFAState>,
         // starts/stops
         Vec<(NFAStateId, NFAStateId)>,
+        // tags
+        BTreeMap<NFAStateId, T>,
     ) {
         let mut states_out: BTreeMap<NFAStateId, NFAState> = BTreeMap::new();
         let mut ends_out: Vec<(NFAStateId, NFAStateId)> = Vec::new();
+        let mut tags_out: BTreeMap<NFAStateId, T> = BTreeMap::new();
 
         for NFA {
             start,
             stop,
             states,
+            tags,
         } in nfas
         {
-            ends_out.push((NFAStateId(offset + start.0), NFAStateId(offset + stop.0)));
+            let start = NFAStateId(offset + start.0);
+            let stop = NFAStateId(offset + stop.0);
+            ends_out.push((start, stop));
+
             let mut max_id = 0;
             for (id, state) in states {
                 max_id = std::cmp::max(max_id, id.0);
@@ -195,13 +224,21 @@ impl NFA {
                     .collect();
                 states_out.insert(id, NFAState { edges, epsilons });
             }
+
+            for (state, tag) in tags {
+                tags_out.insert(NFAStateId(offset + state.0), tag);
+            }
+
             offset += max_id + 1;
         }
-        (states_out, ends_out)
+        (states_out, ends_out, tags_out)
     }
 
     /// NFA to DFA using powerset construction
-    pub fn compile(&self) -> DFA {
+    pub fn compile(&self) -> DFA<T>
+    where
+        T: Clone + Ord,
+    {
         // each DFA state is represented as epsilon closure of NFA states `Rc<BTreeSet<NFAStateId>>`
         let mut dfa_states: BTreeMap<NFAStateSet, DFAStateId> = BTreeMap::new();
 
@@ -254,8 +291,8 @@ impl NFA {
             dfa_table.insert(dfa_state_id, dfa_edges);
         }
 
-        let lang_size = Symbol::MAX as usize + 1;
         // by construction all states are dense (meaning they start from 0 and do not have gaps)
+        let lang_size = Symbol::MAX as usize + 1;
         let states = dfa_table
             .into_iter()
             .enumerate()
@@ -264,11 +301,24 @@ impl NFA {
                 (0..lang_size).map(move |symbol| edges.get(&(symbol as Symbol)).copied())
             })
             .collect();
+
+        let mut tags: Vec<BTreeSet<T>> = Vec::new();
+        tags.resize_with(dfa_states.len(), Default::default);
+        for (nfa_state_set, dfa_state_id) in dfa_states {
+            let dfa_tag = &mut tags[dfa_state_id.0];
+            for nfa_state_id in nfa_state_set.iter() {
+                if let Some(tag) = self.tags.get(nfa_state_id) {
+                    dfa_tag.insert(tag.clone());
+                }
+            }
+        }
+
         DFA {
             lang_size,
             states,
             start: dfa_start_id,
             stops: dfa_stops,
+            tags,
         }
     }
 
@@ -290,7 +340,7 @@ impl NFA {
     }
 }
 
-impl<'a> From<&'a str> for NFA {
+impl<'a, T> From<&'a str> for NFA<T> {
     fn from(string: &'a str) -> Self {
         let start = NFAStateId(0);
 
@@ -309,12 +359,13 @@ impl<'a> From<&'a str> for NFA {
         Self {
             start,
             stop: state_id,
+            tags: Default::default(),
             states,
         }
     }
 }
 
-impl std::ops::BitOr<NFA> for NFA {
+impl<T> std::ops::BitOr<NFA<T>> for NFA<T> {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self {
@@ -322,7 +373,7 @@ impl std::ops::BitOr<NFA> for NFA {
     }
 }
 
-impl std::ops::Add<NFA> for NFA {
+impl<T> std::ops::Add<NFA<T>> for NFA<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
@@ -330,7 +381,7 @@ impl std::ops::Add<NFA> for NFA {
     }
 }
 
-impl fmt::Debug for NFA {
+impl<T> fmt::Debug for NFA<T> {
     /// Format NFA as a valid DOT graph
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "\ndigraph NFA {{\n")?;
@@ -362,14 +413,15 @@ impl fmt::Debug for NFA {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DFAStateId(usize);
 
-pub struct DFA {
+pub struct DFA<T> {
     lang_size: usize,
     states: Vec<Option<DFAStateId>>,
     start: DFAStateId,
     stops: BTreeSet<DFAStateId>,
+    tags: Vec<BTreeSet<T>>,
 }
 
-impl DFA {
+impl<T> DFA<T> {
     /// Nuber of states in DFA
     pub fn size(&self) -> usize {
         self.states.len() / self.lang_size
@@ -385,25 +437,37 @@ impl DFA {
         self.stops.contains(&state)
     }
 
+    /// Get tags assocciated with the state
+    pub fn tags(&self, state: DFAStateId) -> &BTreeSet<T> {
+        &self.tags[state.0]
+    }
+
     /// Transition from provided state given symbol
     pub fn transition(&self, state: DFAStateId, symbol: Symbol) -> Option<DFAStateId> {
         self.states[self.lang_size * state.0 + symbol as usize]
     }
 
+    pub fn transition_many(
+        &self,
+        state: DFAStateId,
+        symbols: impl IntoIterator<Item = Symbol>,
+    ) -> Option<DFAStateId> {
+        symbols
+            .into_iter()
+            .try_fold(state, |state, symbol| self.transition(state, symbol))
+    }
+
     /// Check if DFA accepts given input
-    pub fn matches(&self, input: impl IntoIterator<Item = Symbol>) -> bool {
-        let mut state = self.start();
-        for symbol in input {
-            match self.transition(state, symbol) {
-                None => return false,
-                Some(new_state) => state = new_state,
-            }
+    pub fn matches(&self, symbols: impl IntoIterator<Item = Symbol>) -> bool {
+        if let Some(state) = self.transition_many(self.start(), symbols) {
+            self.is_accepting(state)
+        } else {
+            false
         }
-        self.is_accepting(state)
     }
 }
 
-impl fmt::Debug for DFA {
+impl<T> fmt::Debug for DFA<T> {
     /// Format NFA as a valid DOT graph
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "\ndigraph DFA {{\n")?;
@@ -441,17 +505,28 @@ mod tests {
 
     #[test]
     fn test_dfa_simple() {
-        let nfa = NFA::from("abc") | NFA::from("abd");
+        let nfa = NFA::from("abc").tag(1) | NFA::from("abd").tag(2);
         let dfa = nfa.compile();
+
         assert_eq!(dfa.size(), 5);
         assert!(dfa.matches("abc".bytes()));
         assert!(dfa.matches("abd".bytes()));
         assert!(!dfa.matches("abe".bytes()));
+
+        let state = dfa
+            .transition_many(dfa.start(), "abc".bytes())
+            .expect("should match");
+        assert_eq!(dfa.tags(state), &once(1).collect::<BTreeSet<_>>());
+
+        let state = dfa
+            .transition_many(dfa.start(), "abd".bytes())
+            .expect("should match");
+        assert_eq!(dfa.tags(state), &once(2).collect::<BTreeSet<_>>());
     }
 
     #[test]
     fn test_nfa_from_str() {
-        let nfa = NFA::from("abc");
+        let nfa: NFA<()> = NFA::from("abc");
         assert_eq!(nfa.size(), 4);
     }
 }
