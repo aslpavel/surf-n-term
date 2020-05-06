@@ -1,8 +1,8 @@
 use crate::{Face, Surface};
 use std::{fmt, io::Write};
 
+pub mod automata;
 mod common;
-mod parser;
 mod unix;
 
 pub type SystemTerminal = unix::UnixTerminal;

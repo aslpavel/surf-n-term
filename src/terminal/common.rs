@@ -58,7 +58,7 @@ impl Write for IOQueue {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        if self.as_slice().len() > 0 {
+        if !self.as_slice().is_empty() {
             self.chunks.push_back(Default::default());
         }
         Ok(())
