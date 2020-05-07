@@ -2,33 +2,32 @@ use crate::{Face, Surface};
 use std::{
     fmt,
     io::{BufRead, Write},
+    time::Duration,
 };
 
-pub mod automata;
-pub mod common;
-pub mod decoder;
-pub mod unix;
+mod automata;
+pub use automata::{DFA, NFA};
 
+mod common;
+
+mod decoder;
 pub use decoder::TTYDecoder;
 
+mod unix;
 pub type SystemTerminal = unix::UnixTerminal;
 
-/*
-trait Terminal: Sync + Write {
-    fn write(&mut self, command: TerminalCommand) -> Result<(), TerminalError>;
-    fn flush(&mut self) -> Result<(), TerminalError>;
-
-    fn recv<F, FR>(&mut self, f: F) -> FR
-    where
-        F: FnMut(&mut Vec<TerminalEvent>) -> FR;
-}
-
-
- */
-pub type BoxTerminal = std::boxed::Box<dyn Terminal>;
-
+/// Main trait to interact with a Terminal
 pub trait Terminal: Write {
+    /// Schedue TerminalComman for execution
+    ///
+    /// Command will be submitted on the next call to poll `Terminal::poll`
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), TerminalError>;
+
+    /// Poll for TerminalEvent
+    ///
+    /// Only this function actually reads or writes data to/from the terminal.
+    /// None duration blocks indefinitely until event received from the terminal.
+    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, TerminalError>;
 }
 
 pub trait Renderer {
@@ -211,11 +210,11 @@ impl KeyMod {
     pub const CTRL: Self = KeyMod { bits: 4 };
     pub const PRESS: Self = KeyMod { bits: 8 };
 
-    pub fn is_empty(&self) -> bool {
-        self == &Self::EMPTY
+    pub fn is_empty(self) -> bool {
+        self == Self::EMPTY
     }
 
-    pub fn contains(&self, other: Self) -> bool {
+    pub fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
     }
 

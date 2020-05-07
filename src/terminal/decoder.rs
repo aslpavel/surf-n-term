@@ -45,6 +45,12 @@ impl Decoder for TTYDecoder {
     }
 }
 
+impl Default for TTYDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TTYDecoder {
     pub fn new() -> Self {
         let automata = tty_decoder_dfa();
@@ -92,8 +98,7 @@ impl TTYDecoder {
                     } else {
                         self.rescheduled.push(byte);
                     }
-                    let event =
-                        TerminalEvent::Raw(std::mem::replace(&mut self.buffer, Default::default()));
+                    let event = TerminalEvent::Raw(std::mem::take(&mut self.buffer));
                     self.reset();
                     Some(event)
                 }

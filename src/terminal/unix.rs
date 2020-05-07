@@ -4,7 +4,11 @@ use super::{
 };
 use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
-use std::{collections::VecDeque, io::Write, time::Duration};
+use std::{
+    collections::VecDeque,
+    io::Write,
+    time::{Duration, Instant},
+};
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -96,66 +100,6 @@ impl UnixTerminal {
             })
         }
     }
-
-    /// Write all pending data and wait for events
-    pub fn poll(
-        &mut self,
-        timeout: Option<Duration>,
-    ) -> Result<Option<TerminalEvent>, TerminalError> {
-        // NOTE:
-        // Only `select` reliably works with /dev/tty on MacOS, poll for example
-        // always returns POLLNVAL.
-        self.write_queue.flush()?;
-        let mut read_set = nix::FdSet::new();
-        let mut write_set = nix::FdSet::new();
-        let write_fd = self.write_fd;
-        let sigwinch_fd = self.sigwinch_read.as_raw_fd();
-
-        while !self.write_queue.is_empty() || self.events_queue.is_empty() {
-            // update descriptors sets
-            read_set.clear();
-            read_set.insert(self.read_fd);
-            read_set.insert(sigwinch_fd);
-            write_set.clear();
-            if !self.write_queue.is_empty() {
-                write_set.insert(self.write_fd);
-            }
-
-            // wait for descriptors
-            let mut timeout = timeout.map(timeval_from_duration);
-            let select = nix::select(None, &mut read_set, &mut write_set, None, &mut timeout);
-            let _count = guard_io(select, 0)?;
-
-            // process pending output
-            if write_set.contains(self.write_fd) {
-                self.write_queue
-                    .consume_with(|slice| guard_io(nix::write(write_fd, slice), 0))?;
-            }
-            // process SIGWINCH
-            if read_set.contains(sigwinch_fd) {
-                let mut buf = [0u8; 1];
-                if guard_io(nix::read(sigwinch_fd, &mut buf), 0)? != 0 {
-                    self.events_queue
-                        .push_back(TerminalEvent::Resize(self.size()?));
-                }
-            }
-            // process pending input
-            if read_set.contains(self.read_fd) {
-                let mut buf = [0u8; 1024];
-                let size = guard_io(nix::read(self.read_fd, &mut buf), 0)?;
-                self.read_queue.write_all(&buf[..size])?;
-                while let Some(event) = self.decoder.decode(&mut self.read_queue)? {
-                    self.events_queue.push_back(event)
-                }
-            }
-        }
-        Ok(self.events_queue.pop_front())
-    }
-
-    pub fn debug(&mut self) -> Result<(), TerminalError> {
-        println!("\x1b[32;01mEVENTS\x1b[m {:?}", self.events_queue);
-        Ok(())
-    }
 }
 
 impl std::ops::Drop for UnixTerminal {
@@ -182,6 +126,71 @@ impl Write for UnixTerminal {
 }
 
 impl Terminal for UnixTerminal {
+    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, TerminalError> {
+        // NOTE:
+        // Only `select` reliably works with /dev/tty on MacOS, `poll` for example
+        // always returns POLLNVAL.
+        self.write_queue.flush()?;
+        let mut read_set = nix::FdSet::new();
+        let mut write_set = nix::FdSet::new();
+        let write_fd = self.write_fd;
+        let sigwinch_fd = self.sigwinch_read.as_raw_fd();
+
+        let timeout_instant = timeout.map(|dur| Instant::now() + dur);
+        while !self.write_queue.is_empty() || self.events_queue.is_empty() {
+            // update descriptors sets
+            read_set.clear();
+            read_set.insert(self.read_fd);
+            read_set.insert(sigwinch_fd);
+            write_set.clear();
+            if !self.write_queue.is_empty() {
+                write_set.insert(self.write_fd);
+            }
+
+            // process timeout
+            let mut timeout = match timeout_instant {
+                Some(timeout_instant) => {
+                    let now = Instant::now();
+                    if timeout_instant < Instant::now() {
+                        break;
+                    } else {
+                        Some(timeval_from_duration(timeout_instant - now))
+                    }
+                }
+                None => None,
+            };
+
+            // wait for descriptors
+            let select = nix::select(None, &mut read_set, &mut write_set, None, &mut timeout);
+            let _count = guard_io(select, 0)?;
+
+            // process pending output
+            if write_set.contains(self.write_fd) {
+                self.write_queue
+                    .consume_with(|slice| guard_io(nix::write(write_fd, slice), 0))?;
+            }
+            // process SIGWINCH
+            if read_set.contains(sigwinch_fd) {
+                let mut buf = [0u8; 1];
+                if guard_io(nix::read(sigwinch_fd, &mut buf), 0)? != 0 {
+                    self.events_queue
+                        .push_back(TerminalEvent::Resize(self.size()?));
+                }
+            }
+            // process pending input
+            if read_set.contains(self.read_fd) {
+                let mut buf = [0u8; 1024];
+                let size = guard_io(nix::read(self.read_fd, &mut buf), 0)?;
+                self.read_queue.write_all(&buf[..size])?;
+                while let Some(event) = self.decoder.decode(&mut self.read_queue)? {
+                    self.events_queue.push_back(event)
+                }
+            }
+            // process timeout
+        }
+        Ok(self.events_queue.pop_front())
+    }
+
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), TerminalError> {
         use TerminalCommand::*;
 

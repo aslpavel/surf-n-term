@@ -1,4 +1,4 @@
-use std::{boxed::Box, error::Error, io::Write};
+use std::{boxed::Box, error::Error, time::Duration};
 use tty_surface::{Face, Renderer, Surface, SystemTerminal, Terminal, View};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -18,8 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut term = SystemTerminal::new()?;
     term.render(&surface)?;
-    term.write(b"\x1b[6n")?;
-    println!("{:?}", term.poll(None)?);
+    term.poll(Some(Duration::from_secs(0)))?;
 
     Ok(())
 }

@@ -18,7 +18,7 @@ impl Color {
         }
     }
 
-    pub fn rgb_u8(&self) -> (u8, u8, u8) {
+    pub fn rgb_u8(self) -> (u8, u8, u8) {
         (self.red, self.green, self.blue)
     }
 }
@@ -87,11 +87,11 @@ impl FaceAttrs {
     pub const BLINK: Self = FaceAttrs { bits: 8 };
     pub const REVERSE: Self = FaceAttrs { bits: 16 };
 
-    pub fn is_empty(&self) -> bool {
-        self == &Self::EMPTY
+    pub fn is_empty(self) -> bool {
+        self == Self::EMPTY
     }
 
-    pub fn contains(&self, other: Self) -> bool {
+    pub fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
     }
 }
