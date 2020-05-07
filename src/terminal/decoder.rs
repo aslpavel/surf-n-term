@@ -214,6 +214,9 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         .tag(TTYTag::MouseSGR),
     );
 
+    // character event
+    cmds.push(tty_char_nfa().tag(TTYTag::Char));
+
     NFA::choice(cmds).compile()
 }
 
@@ -222,6 +225,11 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
     use TTYTag::*;
     match tag {
         Event(event) => event.clone(),
+        Char => {
+            let string = std::str::from_utf8(data).expect("[TTYDecoder] utf8 expected");
+            let code = string.chars().next().expect("[TTYDecoder] utf8 expected");
+            TerminalEvent::Key(KeyName::Char(code).into())
+        }
         CursorPosition => {
             // "\x1b[{row};{col}R"
             let mut nums = data[2..data.len() - 1].split(|b| *b == b';');
@@ -312,9 +320,24 @@ fn tty_number(nums: &mut dyn Iterator<Item = &[u8]>) -> usize {
     result
 }
 
+fn tty_char_nfa() -> NFA<TTYTag> {
+    let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
+    let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
+    let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
+    let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
+    let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
+    NFA::choice(vec![
+        printable,
+        utf8_two + utf8_tail.clone(),
+        utf8_three + utf8_tail.clone() + utf8_tail.clone(),
+        utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
+    ])
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum TTYTag {
     Event(TerminalEvent),
+    Char,
     CursorPosition,
     TerminalSizeCells,
     TerminalSizePixels,
@@ -330,6 +353,7 @@ impl fmt::Debug for TTYTag {
             TerminalSizeCells => write!(f, "TSC")?,
             TerminalSizePixels => write!(f, "TSP")?,
             MouseSGR => write!(f, "SGR")?,
+            Char => write!(f, "CHR")?,
         }
         Ok(())
     }
@@ -374,11 +398,11 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Raw(vec![b'A'])),
+            Some(TerminalEvent::Key(KeyName::Char('A').into())),
         );
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Raw(vec![b'B'])),
+            Some(TerminalEvent::Key(KeyName::Char('B').into())),
         );
         assert_eq!(decoder.decode(&mut cursor)?, None);
 
@@ -405,11 +429,11 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Raw(vec![b'O'])),
+            Some(TerminalEvent::Key(KeyName::Char('O').into())),
         );
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Raw(vec![b'T'])),
+            Some(TerminalEvent::Key(KeyName::Char('T').into())),
         );
         assert_eq!(decoder.decode(&mut cursor)?, None);
 

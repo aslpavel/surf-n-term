@@ -85,16 +85,6 @@ impl<T> NFA<T> {
         }
     }
 
-    /// Create NFA that matches single digit 0..9
-    pub fn digit() -> Self {
-        Self::predicate(|symbol| symbol.is_ascii_digit())
-    }
-
-    /// Create NFA that matches positive integer number
-    pub fn number() -> Self {
-        Self::digit().some()
-    }
-
     /// Empty NFA
     ///
     /// Contains single state, which is start and stop at the same time
@@ -375,6 +365,16 @@ impl<T> NFA<T> {
             output.insert(state_id);
         }
         Rc::new(output)
+    }
+
+    /// Create NFA that matches single digit 0..9
+    pub fn digit() -> Self {
+        Self::predicate(|symbol| symbol.is_ascii_digit())
+    }
+
+    /// Create NFA that matches positive integer number
+    pub fn number() -> Self {
+        Self::digit().some()
     }
 }
 
