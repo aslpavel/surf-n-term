@@ -35,15 +35,20 @@ pub struct NFA<T> {
     states: BTreeMap<NFAStateId, NFAState>,
 }
 
+/// Nondeterministic finite automaton
+///
+/// References:
+///   - [Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html)
 impl<T> NFA<T> {
-    pub fn tag(self, tag: T) -> Self {
+    // Assign provided tag to the stop state
+    pub fn tag(self, tag: impl Into<T>) -> Self {
         let Self {
             start,
             stop,
             mut tags,
             states,
         } = self;
-        tags.insert(stop, tag);
+        tags.insert(stop, tag.into());
         Self {
             start,
             stop,
@@ -55,6 +60,34 @@ impl<T> NFA<T> {
     /// Number of states inside NFA
     pub fn size(&self) -> usize {
         self.states.len()
+    }
+
+    /// Create NFA that matches single symbol from alphabet given predicate
+    pub fn predicate(pred: impl Fn(Symbol) -> bool) -> Self {
+        let start = NFAStateId(0);
+        let stop = NFAStateId(1);
+        let mut state = NFAState::new();
+        for symbol in 0..=Symbol::max_value() {
+            if pred(symbol) {
+                state.edges.insert(symbol, stop);
+            }
+        }
+
+        let mut states = BTreeMap::new();
+        states.insert(start, state);
+        states.insert(stop, NFAState::new());
+
+        Self {
+            start,
+            stop,
+            tags: Default::default(),
+            states,
+        }
+    }
+
+    /// Create NFA that matches single digit 0..9
+    pub fn digit() -> Self {
+        Self::predicate(|symbol| symbol.is_ascii_digit())
     }
 
     /// Empty NFA
@@ -148,8 +181,11 @@ impl<T> NFA<T> {
     }
 
     /// For `a` regular expression it is equivalent to `a+`
-    pub fn some(self) -> Self {
-        todo!()
+    pub fn some(mut self) -> Self {
+        if let Some(stop) = self.states.get_mut(&self.stop) {
+            stop.epsilons.insert(self.start);
+        }
+        self
     }
 
     /// For `a` regular expression it is equivalent to `a*`
@@ -240,17 +276,17 @@ impl<T> NFA<T> {
         T: Clone + Ord,
     {
         // each DFA state is represented as epsilon closure of NFA states `Rc<BTreeSet<NFAStateId>>`
-        let mut dfa_states: BTreeMap<NFAStateSet, DFAStateId> = BTreeMap::new();
+        let mut dfa_states: BTreeMap<NFAStateSet, DFAState> = BTreeMap::new();
 
         // constructed DFA
-        let mut dfa_table: BTreeMap<DFAStateId, BTreeMap<Symbol, DFAStateId>> = BTreeMap::new();
-        let mut dfa_stops: BTreeSet<DFAStateId> = BTreeSet::new();
+        let mut dfa_table: BTreeMap<DFAState, BTreeMap<Symbol, DFAState>> = BTreeMap::new();
+        let mut dfa_stops: BTreeSet<DFAState> = BTreeSet::new();
 
         // initialize traversal queue with initial state
         let dfa_start = self.epsilon_closure(once(self.start));
-        let dfa_start_id = DFAStateId(0);
+        let dfa_start_id = DFAState(0);
         let mut dfa_queue = vec![(dfa_start_id, dfa_start.clone())]; // to be traversed DFA states
-        dfa_states.insert(dfa_start, DFAStateId(0));
+        dfa_states.insert(dfa_start, DFAState(0));
 
         while let Some((dfa_state_id, dfa_state)) = dfa_queue.pop() {
             // check if this DFA state contains final NFA state
@@ -263,7 +299,7 @@ impl<T> NFA<T> {
                 .collect();
 
             // resolve all edges of the current DFA state
-            let mut dfa_edges: BTreeMap<Symbol, DFAStateId> = BTreeMap::new();
+            let mut dfa_edges: BTreeMap<Symbol, DFAState> = BTreeMap::new();
             for symbol in symbols {
                 // calculate new DFA state for a given symbol
                 let dfa_state_new = dfa_state
@@ -274,7 +310,7 @@ impl<T> NFA<T> {
                 let dfa_state_new_id = match dfa_states.get(&dfa_state_new) {
                     Some(id) => *id,
                     None => {
-                        let id = DFAStateId(dfa_states.len());
+                        let id = DFAState(dfa_states.len());
                         dfa_states.insert(dfa_state_new.clone(), id);
                         dfa_queue.push((id, dfa_state_new));
                         id
@@ -292,13 +328,13 @@ impl<T> NFA<T> {
         }
 
         // by construction all states are dense (meaning they start from 0 and do not have gaps)
-        let lang_size = Symbol::MAX as usize + 1;
+        let lang_size = Symbol::max_value() as usize + 1;
         let states = dfa_table
             .into_iter()
             .enumerate()
             .flat_map(|(index, (state, edges))| {
                 assert_eq!(index, state.0);
-                (0..lang_size).map(move |symbol| edges.get(&(symbol as Symbol)).copied())
+                (0..=Symbol::max_value()).map(move |symbol| edges.get(&symbol).copied())
             })
             .collect();
 
@@ -387,8 +423,9 @@ where
 {
     /// Format NFA as a valid DOT graph
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "\ndigraph NFA {{\n")?;
-        write!(f, "  rankdir=\"LR\"\n")?;
+        writeln!(f, "\ndigraph NFA {{")?;
+        writeln!(f, "  rankdir=\"LR\"")?;
+
         for (from, state) in self.states.iter() {
             // node
             write!(f, "  {} [", from.0)?;
@@ -400,35 +437,45 @@ where
             if let Some(tag) = self.tags.get(from) {
                 write!(f, ",label=\"{} {{{:?}}}\"", from.0, tag)?;
             }
-            write!(f, "]\n")?;
+            writeln!(f, "]")?;
 
             // deges
             for (symbol, to) in state.edges.iter() {
-                write!(
+                writeln!(
                     f,
-                    "  {} -> {} [label=\"{}\"]\n",
+                    "  {} -> {} [label=\"{}\"]",
                     from.0,
                     to.0,
                     char::from(*symbol)
                 )?;
             }
             for to in state.epsilons.iter() {
-                write!(f, "  {} -> {} [color=red]\n", from.0, to.0)?;
+                writeln!(f, "  {} -> {} [color=red]", from.0, to.0)?;
             }
         }
-        write!(f, "}}\n")?;
+
+        writeln!(f, "}}")?;
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DFAStateId(usize);
+pub struct DFAState(usize);
+
+pub struct DFAStateInfo<T> {
+    /// Input can be accepted at this point
+    pub accepting: bool,
+    /// There is no outgoing edges from this state
+    pub terminal: bool,
+    /// All tags associated with this node
+    pub tags: BTreeSet<T>,
+}
 
 pub struct DFA<T> {
     lang_size: usize,
-    states: Vec<Option<DFAStateId>>,
-    start: DFAStateId,
-    stops: BTreeSet<DFAStateId>,
+    states: Vec<Option<DFAState>>,
+    start: DFAState,
+    stops: BTreeSet<DFAState>,
     tags: Vec<BTreeSet<T>>,
 }
 
@@ -439,30 +486,30 @@ impl<T> DFA<T> {
     }
 
     /// Get start state of the DFA
-    pub fn start(&self) -> DFAStateId {
+    pub fn start(&self) -> DFAState {
         self.start
     }
 
     /// Check if provided state is an accepting state
-    pub fn is_accepting(&self, state: DFAStateId) -> bool {
+    pub fn is_accepting(&self, state: DFAState) -> bool {
         self.stops.contains(&state)
     }
 
     /// Get tags assocciated with the state
-    pub fn tags(&self, state: DFAStateId) -> &BTreeSet<T> {
+    pub fn tags(&self, state: DFAState) -> &BTreeSet<T> {
         &self.tags[state.0]
     }
 
     /// Transition from provided state given symbol
-    pub fn transition(&self, state: DFAStateId, symbol: Symbol) -> Option<DFAStateId> {
+    pub fn transition(&self, state: DFAState, symbol: Symbol) -> Option<DFAState> {
         self.states[self.lang_size * state.0 + symbol as usize]
     }
 
     pub fn transition_many(
         &self,
-        state: DFAStateId,
+        state: DFAState,
         symbols: impl IntoIterator<Item = Symbol>,
-    ) -> Option<DFAStateId> {
+    ) -> Option<DFAState> {
         symbols
             .into_iter()
             .try_fold(state, |state, symbol| self.transition(state, symbol))
@@ -482,12 +529,12 @@ impl<T> fmt::Debug for DFA<T>
 where
     T: fmt::Debug,
 {
-    /// Format NFA as a valid DOT graph
+    /// Format DFA as a valid DOT graph
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "\ndigraph DFA {{\n")?;
-        write!(f, "  rankdir=\"LR\"\n")?;
+        writeln!(f, "\ndigraph DFA {{")?;
+        writeln!(f, "  rankdir=\"LR\"")?;
 
-        for from in (0..self.size()).map(DFAStateId) {
+        for from in (0..self.size()).map(DFAState) {
             // node
             write!(f, "  {} [", from.0)?;
             if self.stops.contains(&from) {
@@ -499,7 +546,7 @@ where
             if !tags.is_empty() {
                 write!(f, ",label=\"{} {:?}\"", from.0, tags)?;
             }
-            write!(f, "]\n")?;
+            writeln!(f, "]")?;
 
             // edges
             for symbol in 0..self.lang_size {
@@ -507,19 +554,19 @@ where
                 match self.transition(from, symbol) {
                     None => continue,
                     Some(to) => {
-                        write!(
+                        writeln!(
                             f,
-                            "  {} -> {} [label=\"{}\"]\n",
+                            "  {} -> {} [label=\"{}\"]",
                             from.0,
                             to.0,
-                            char::from(symbol)
+                            char::from(symbol).escape_default(),
                         )?;
                     }
                 }
             }
         }
 
-        write!(f, "}}\n")?;
+        writeln!(f, "}}")?;
         Ok(())
     }
 }
@@ -553,5 +600,13 @@ mod tests {
     fn test_nfa_from_str() {
         let nfa: NFA<()> = NFA::from("abc");
         assert_eq!(nfa.size(), 4);
+    }
+
+    #[test]
+    fn test_digit() {
+        let number: DFA<()> = NFA::digit().some().compile();
+        assert!(!number.matches("".bytes()));
+        assert!(number.matches("127".bytes()));
+        assert!(!number.matches("13a".bytes()));
     }
 }

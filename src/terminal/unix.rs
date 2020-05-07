@@ -1,4 +1,4 @@
-use super::{common::IOQueue, Renderer, Terminal, TerminalCommand, TerminalError};
+use super::{common::IOQueue, Renderer, Terminal, TerminalCommand, TerminalError, TerminalSize};
 use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -21,14 +21,6 @@ mod nix {
         Error,
     };
     pub use std::os::unix::{io::RawFd, net::UnixStream};
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TerminalSize {
-    pub width: usize,
-    pub height: usize,
-    pub width_pixels: usize,
-    pub height_pixels: usize,
 }
 
 pub struct UnixTerminal {
@@ -207,7 +199,7 @@ impl Terminal for UnixTerminal {
                     self.write_all(b"\x1b[?1049l")?;
                 }
             }
-            MouseSupport { enable, motion } => {
+            MouseReport { enable, motion } => {
                 if enable {
                     self.write_all(b"\x1b[?1000h")?; // SET_VT200_MOUSE
                     self.write_all(b"\x1b[?1006h")?; // SET_SGR_EXT_MODE_MOUSE
