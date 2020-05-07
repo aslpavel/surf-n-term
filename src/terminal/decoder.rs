@@ -525,4 +525,19 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_char() -> Result<(), TerminalError> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\u{1F431}")?;
+
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Key(KeyName::Char('🐱').into())),
+        );
+
+        Ok(())
+    }
 }
