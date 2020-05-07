@@ -534,6 +534,9 @@ where
             } else {
                 write!(f, "shape=circle")?;
             }
+            if info.terminal {
+                write!(f, ",color=red")?
+            }
             if !info.tags.is_empty() {
                 write!(f, ",label=\"{} {:?}\"", from.0, &info.tags)?;
             }
