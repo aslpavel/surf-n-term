@@ -63,6 +63,7 @@ pub enum TerminalCommand {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalEvent {
     Key(Key),
+    CursorPosition { row: usize, col: usize },
     Resize(TerminalSize),
     Raw(Vec<u8>),
 }
@@ -73,6 +74,7 @@ impl fmt::Debug for TerminalEvent {
         match self {
             Key(key) => write!(f, "{:?}", key)?,
             Resize(size) => write!(f, "{:?}", size)?,
+            CursorPosition { row, col } => write!(f, "Cursor({}, {})", row, col)?,
             Raw(raw) => write!(f, "Raw({:?})", String::from_utf8_lossy(raw))?,
         }
         Ok(())
@@ -94,15 +96,26 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn new(name: KeyName) -> Self {
+    pub fn new(name: KeyName, mode: KeyMod) -> Self {
+        Self { name, mode }
+    }
+}
+
+impl From<KeyName> for Key {
+    fn from(name: KeyName) -> Self {
         Self {
             name,
             mode: KeyMod::EMPTY,
         }
     }
+}
 
-    pub fn with_mode(self, mode: KeyMod) -> Self {
-        Self { mode, ..self }
+impl From<(KeyName, KeyMod)> for Key {
+    fn from(pair: (KeyName, KeyMod)) -> Self {
+        Self {
+            name: pair.0,
+            mode: pair.1,
+        }
     }
 }
 

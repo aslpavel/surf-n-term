@@ -1,6 +1,6 @@
 use super::{
     automata::{DFAState, DFA, NFA},
-    Key, KeyName, TerminalError, TerminalEvent,
+    Key, KeyMod, KeyName, TerminalError, TerminalEvent,
 };
 use std::{fmt, io::BufRead};
 
@@ -12,12 +12,15 @@ pub trait Decoder {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum TTYTag {
     Event(TerminalEvent),
+    CursorPosition,
 }
 
 impl fmt::Debug for TTYTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use TTYTag::*;
         match self {
-            TTYTag::Event(event) => write!(f, "{:?}", event)?,
+            Event(event) => write!(f, "{:?}", event)?,
+            CursorPosition => write!(f, "CPR")?,
         }
         Ok(())
     }
@@ -72,28 +75,7 @@ impl Decoder for TTYDecoder {
 
 impl TTYDecoder {
     pub fn new() -> Self {
-        let mut cmds: Vec<NFA<TTYTag>> = Vec::new();
-
-        type N = NFA<TTYTag>;
-        let key = |string, key| N::from(string).tag(TerminalEvent::Key(Key::new(key)));
-
-        // F{1-12}
-        cmds.push(key("\x1bOP", KeyName::F1));
-        cmds.push(key("\x1bOQ", KeyName::F2));
-        cmds.push(key("\x1bOR", KeyName::F3));
-        cmds.push(key("\x1bOS", KeyName::F4));
-        cmds.push(key("\x1b[15~", KeyName::F5));
-        cmds.push(key("\x1b[17~", KeyName::F6));
-        cmds.push(key("\x1b[18~", KeyName::F7));
-        cmds.push(key("\x1b[19~", KeyName::F8));
-        cmds.push(key("\x1b[20~", KeyName::F9));
-        cmds.push(key("\x1b[21~", KeyName::F10));
-        cmds.push(key("\x1b[23~", KeyName::F11));
-        cmds.push(key("\x1b[24~", KeyName::F12));
-
-        cmds.push(key("\x1b", KeyName::Esc));
-
-        let automata = N::choice(cmds).compile();
+        let automata = tty_decoder_dfa();
         let state = automata.start();
         Self {
             automata,
@@ -119,7 +101,7 @@ impl TTYDecoder {
                         .iter()
                         .next()
                         .expect("[TTYDecoder] found untagged accepting state");
-                    let event = self.event_from_tag(tag);
+                    let event = tty_decoder_event(tag, &self.buffer);
                     if info.terminal {
                         // report event
                         self.reset();
@@ -160,15 +142,94 @@ impl TTYDecoder {
         self.buffer.clear();
         self.state = self.automata.start();
     }
+}
 
-    /// Convert tag to a TerminalEvent
-    ///
-    /// Buffer must contain currently matched sequence.
-    fn event_from_tag(&self, tag: &TTYTag) -> TerminalEvent {
-        match tag {
-            TTYTag::Event(event) => event.clone(),
+fn tty_decoder_dfa() -> DFA<TTYTag> {
+    let mut cmds: Vec<NFA<TTYTag>> = Vec::new();
+
+    // construct NFA for basic key (no additional parsing is needed)
+    fn basic_key(seq: &str, key: impl Into<Key>) -> NFA<TTYTag> {
+        NFA::from(seq).tag(TerminalEvent::Key(key.into()))
+    }
+    // F{1-12}
+    cmds.push(basic_key("\x1bOP", KeyName::F1));
+    cmds.push(basic_key("\x1bOQ", KeyName::F2));
+    cmds.push(basic_key("\x1bOR", KeyName::F3));
+    cmds.push(basic_key("\x1bOS", KeyName::F4));
+    cmds.push(basic_key("\x1b[15~", KeyName::F5));
+    cmds.push(basic_key("\x1b[17~", KeyName::F6));
+    cmds.push(basic_key("\x1b[18~", KeyName::F7));
+    cmds.push(basic_key("\x1b[19~", KeyName::F8));
+    cmds.push(basic_key("\x1b[20~", KeyName::F9));
+    cmds.push(basic_key("\x1b[21~", KeyName::F10));
+    cmds.push(basic_key("\x1b[23~", KeyName::F11));
+    cmds.push(basic_key("\x1b[24~", KeyName::F12));
+
+    cmds.push(basic_key("\x1b", KeyName::Esc));
+    cmds.push(basic_key("\x1b[5~", KeyName::PageUp));
+    cmds.push(basic_key("\x1b[6~", KeyName::PageDown));
+    cmds.push(basic_key("\x1b[H", KeyName::Home));
+    cmds.push(basic_key("\x1b[1~", KeyName::Home));
+    cmds.push(basic_key("\x1b[F", KeyName::End));
+    cmds.push(basic_key("\x1b[4~", KeyName::End));
+
+    // arrows
+    cmds.push(basic_key("\x1b[A", KeyName::Up));
+    cmds.push(basic_key("\x1b[B", KeyName::Down));
+    cmds.push(basic_key("\x1b[C", KeyName::Right));
+    cmds.push(basic_key("\x1b[D", KeyName::Left));
+    cmds.push(basic_key("\x1b[1;2A", (KeyName::Up, KeyMod::SHIFT)));
+    cmds.push(basic_key("\x1b[1;2B", (KeyName::Down, KeyMod::SHIFT)));
+    cmds.push(basic_key("\x1b[1;2C", (KeyName::Right, KeyMod::SHIFT)));
+    cmds.push(basic_key("\x1b[1;2D", (KeyName::Left, KeyMod::SHIFT)));
+    cmds.push(basic_key("\x1b[1;9A", (KeyName::Up, KeyMod::ALT)));
+    cmds.push(basic_key("\x1b[1;9B", (KeyName::Down, KeyMod::ALT)));
+    cmds.push(basic_key("\x1b[1;9C", (KeyName::Right, KeyMod::ALT)));
+    cmds.push(basic_key("\x1b[1;9D", (KeyName::Left, KeyMod::ALT)));
+
+    // response to `CursorReport` ("\x1b[6n")
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b["),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("R"),
+        ])
+        .tag(TTYTag::CursorPosition),
+    );
+
+    NFA::choice(cmds).compile()
+}
+
+/// Convert tag plus current match to a TerminalEvent
+fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
+    use TTYTag::*;
+    match tag {
+        Event(event) => event.clone(),
+        CursorPosition => {
+            let mut nums = data[2..data.len() - 1].split(|b| *b == b';');
+            let row = tty_number(
+                nums.next()
+                    .expect("[TTYDecoder::CursorPosition] number expected"),
+            );
+            let col = tty_number(
+                nums.next()
+                    .expect("[TTYDecoder::CursorPosition] number expected"),
+            );
+            TerminalEvent::CursorPosition { row, col }
         }
     }
+}
+
+fn tty_number(data: &[u8]) -> usize {
+    let mut result = 0usize;
+    let mut mult = 1usize;
+    for byte in data.iter().rev() {
+        result += (byte - b'0') as usize * mult;
+        mult *= 10;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -192,13 +253,13 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(Key::new(KeyName::F3)))
+            Some(TerminalEvent::Key(KeyName::F3.into()))
         );
         assert_eq!(cursor.position(), 3);
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(Key::new(KeyName::F5)))
+            Some(TerminalEvent::Key(KeyName::F5.into()))
         );
         assert_eq!(cursor.position(), 3 + 5);
 
@@ -230,7 +291,7 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(Key::new(KeyName::Esc)))
+            Some(TerminalEvent::Key(KeyName::Esc.into()))
         );
 
         assert_eq!(
@@ -242,6 +303,21 @@ mod tests {
             Some(TerminalEvent::Raw(vec![b'T'])),
         );
         assert_eq!(decoder.decode(&mut cursor)?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_cursor_position() -> Result<(), TerminalError> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[97;15R")?;
+
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::CursorPosition { row: 97, col: 15 }),
+        );
 
         Ok(())
     }

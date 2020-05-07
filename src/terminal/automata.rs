@@ -90,6 +90,11 @@ impl<T> NFA<T> {
         Self::predicate(|symbol| symbol.is_ascii_digit())
     }
 
+    /// Create NFA that matches positive integer number
+    pub fn number() -> Self {
+        Self::digit().some()
+    }
+
     /// Empty NFA
     ///
     /// Contains single state, which is start and stop at the same time
