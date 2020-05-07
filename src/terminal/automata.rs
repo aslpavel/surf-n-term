@@ -441,7 +441,7 @@ where
             }
             writeln!(f, "]")?;
 
-            // deges
+            // edges
             for (symbol, to) in state.edges.iter() {
                 writeln!(
                     f,

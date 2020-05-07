@@ -1,35 +1,12 @@
 use super::{
     automata::{DFAState, DFA, NFA},
-    Key, KeyMod, KeyName, TerminalError, TerminalEvent,
+    Key, KeyMod, KeyName, TerminalError, TerminalEvent, TerminalSize,
 };
 use std::{fmt, io::BufRead};
 
 pub trait Decoder {
     type Item;
     fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, TerminalError>;
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum TTYTag {
-    Event(TerminalEvent),
-    CursorPosition,
-}
-
-impl fmt::Debug for TTYTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TTYTag::*;
-        match self {
-            Event(event) => write!(f, "{:?}", event)?,
-            CursorPosition => write!(f, "CPR")?,
-        }
-        Ok(())
-    }
-}
-
-impl From<TerminalEvent> for TTYTag {
-    fn from(event: TerminalEvent) -> TTYTag {
-        TTYTag::Event(event)
-    }
 }
 
 #[derive(Debug)]
@@ -199,6 +176,30 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         .tag(TTYTag::CursorPosition),
     );
 
+    // size of the terminal in cells response to "\x1b[18t"
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b[8;"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("t"),
+        ])
+        .tag(TTYTag::TerminalSizeCells),
+    );
+
+    // size of the terminal in pixels response to "\x1b[14t"
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b[4;"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("t"),
+        ])
+        .tag(TTYTag::TerminalSizePixels),
+    );
+
     NFA::choice(cmds).compile()
 }
 
@@ -219,6 +220,32 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
             );
             TerminalEvent::CursorPosition { row, col }
         }
+        TerminalSizeCells | TerminalSizePixels => {
+            let mut nums = data[4..data.len() - 1].split(|b| *b == b';');
+            let height = tty_number(
+                nums.next()
+                    .expect("[TTYDecoder::TerminalSize] number expected"),
+            );
+            let width = tty_number(
+                nums.next()
+                    .expect("[TTYDecoder::TerminalSize] number expected"),
+            );
+            if tag == &TerminalSizeCells {
+                TerminalEvent::Size(TerminalSize {
+                    height,
+                    width,
+                    width_pixels: 0,
+                    height_pixels: 0,
+                })
+            } else {
+                TerminalEvent::Size(TerminalSize {
+                    height: 0,
+                    width: 0,
+                    width_pixels: width,
+                    height_pixels: height,
+                })
+            }
+        }
     }
 }
 
@@ -230,6 +257,33 @@ fn tty_number(data: &[u8]) -> usize {
         mult *= 10;
     }
     result
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum TTYTag {
+    Event(TerminalEvent),
+    CursorPosition,
+    TerminalSizeCells,
+    TerminalSizePixels,
+}
+
+impl fmt::Debug for TTYTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use TTYTag::*;
+        match self {
+            Event(event) => write!(f, "{:?}", event)?,
+            CursorPosition => write!(f, "CPR")?,
+            TerminalSizeCells => write!(f, "TSC")?,
+            TerminalSizePixels => write!(f, "TSP")?,
+        }
+        Ok(())
+    }
+}
+
+impl From<TerminalEvent> for TTYTag {
+    fn from(event: TerminalEvent) -> TTYTag {
+        TTYTag::Event(event)
+    }
 }
 
 #[cfg(test)]
@@ -317,6 +371,36 @@ mod tests {
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::CursorPosition { row: 97, col: 15 }),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_terminal_size() -> Result<(), TerminalError> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[4;3104;1482t")?;
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Size(TerminalSize {
+                width: 0,
+                height: 0,
+                width_pixels: 1482,
+                height_pixels: 3104,
+            })),
+        );
+
+        write!(cursor.get_mut(), "\x1b[8;101;202t")?;
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Size(TerminalSize {
+                width: 202,
+                height: 101,
+                width_pixels: 0,
+                height_pixels: 0,
+            })),
         );
 
         Ok(())

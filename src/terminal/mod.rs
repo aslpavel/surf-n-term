@@ -65,6 +65,7 @@ pub enum TerminalEvent {
     Key(Key),
     CursorPosition { row: usize, col: usize },
     Resize(TerminalSize),
+    Size(TerminalSize),
     Raw(Vec<u8>),
 }
 
@@ -73,7 +74,8 @@ impl fmt::Debug for TerminalEvent {
         use TerminalEvent::*;
         match self {
             Key(key) => write!(f, "{:?}", key)?,
-            Resize(size) => write!(f, "{:?}", size)?,
+            Resize(size) => write!(f, "Resize({:?})", size)?,
+            Size(size) => write!(f, "Size({:?})", size)?,
             CursorPosition { row, col } => write!(f, "Cursor({}, {})", row, col)?,
             Raw(raw) => write!(f, "Raw({:?})", String::from_utf8_lossy(raw))?,
         }
