@@ -1,6 +1,6 @@
 use super::{
     automata::{DFAState, DFA, NFA},
-    Key, KeyMod, KeyName, TerminalError, TerminalEvent, TerminalSize,
+    Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent, TerminalSize,
 };
 use std::{fmt, io::BufRead};
 
@@ -200,6 +200,20 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         .tag(TTYTag::TerminalSizePixels),
     );
 
+    // mouse events
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b[<"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::predicate(|b| b == b'm' || b == b'M'),
+        ])
+        .tag(TTYTag::MouseSGR),
+    );
+
     NFA::choice(cmds).compile()
 }
 
@@ -209,27 +223,17 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
     match tag {
         Event(event) => event.clone(),
         CursorPosition => {
+            // "\x1b[{row};{col}R"
             let mut nums = data[2..data.len() - 1].split(|b| *b == b';');
-            let row = tty_number(
-                nums.next()
-                    .expect("[TTYDecoder::CursorPosition] number expected"),
-            );
-            let col = tty_number(
-                nums.next()
-                    .expect("[TTYDecoder::CursorPosition] number expected"),
-            );
+            let row = tty_number(&mut nums);
+            let col = tty_number(&mut nums);
             TerminalEvent::CursorPosition { row, col }
         }
         TerminalSizeCells | TerminalSizePixels => {
+            // "\x1b[(4|8);{height};{width}t"
             let mut nums = data[4..data.len() - 1].split(|b| *b == b';');
-            let height = tty_number(
-                nums.next()
-                    .expect("[TTYDecoder::TerminalSize] number expected"),
-            );
-            let width = tty_number(
-                nums.next()
-                    .expect("[TTYDecoder::TerminalSize] number expected"),
-            );
+            let height = tty_number(&mut nums);
+            let width = tty_number(&mut nums);
             if tag == &TerminalSizeCells {
                 TerminalEvent::Size(TerminalSize {
                     height,
@@ -246,10 +250,59 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
                 })
             }
         }
+        MouseSGR => {
+            // "\x1b[<{event};{row};{col}(m|M)"
+            // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
+            let mut nums = data[3..data.len() - 1].split(|b| *b == b';');
+            let event = tty_number(&mut nums);
+            let row = tty_number(&mut nums);
+            let col = tty_number(&mut nums);
+
+            let mut mode = KeyMod::EMPTY;
+            if event & 4 != 0 {
+                mode = mode | KeyMod::SHIFT;
+            }
+            if event & 8 != 0 {
+                mode = mode | KeyMod::ALT;
+            }
+            if event & 16 != 0 {
+                mode = mode | KeyMod::CTRL;
+            }
+            if data[data.len() - 1] == b'M' {
+                mode = mode | KeyMod::PRESS;
+            }
+
+            let button = event & 3;
+            let name = if event & 64 != 0 {
+                if button == 0 {
+                    KeyName::MouseWheelUp
+                } else if button == 1 {
+                    KeyName::MouseWheelDown
+                } else {
+                    KeyName::MouseMove
+                }
+            } else if button == 0 {
+                KeyName::MouseLeft
+            } else if button == 1 {
+                KeyName::MouseRight
+            } else if button == 2 {
+                KeyName::MouseMiddle
+            } else {
+                KeyName::MouseMove
+            };
+
+            TerminalEvent::Mouse(Mouse {
+                name,
+                mode,
+                row,
+                col,
+            })
+        }
     }
 }
 
-fn tty_number(data: &[u8]) -> usize {
+fn tty_number(nums: &mut dyn Iterator<Item = &[u8]>) -> usize {
+    let data = nums.next().expect("[TTYDecoder] number expected");
     let mut result = 0usize;
     let mut mult = 1usize;
     for byte in data.iter().rev() {
@@ -265,6 +318,7 @@ enum TTYTag {
     CursorPosition,
     TerminalSizeCells,
     TerminalSizePixels,
+    MouseSGR,
 }
 
 impl fmt::Debug for TTYTag {
@@ -275,6 +329,7 @@ impl fmt::Debug for TTYTag {
             CursorPosition => write!(f, "CPR")?,
             TerminalSizeCells => write!(f, "TSC")?,
             TerminalSizePixels => write!(f, "TSP")?,
+            MouseSGR => write!(f, "SGR")?,
         }
         Ok(())
     }
@@ -401,6 +456,36 @@ mod tests {
                 width_pixels: 0,
                 height_pixels: 0,
             })),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_mouse_sgr() -> Result<(), TerminalError> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[<0;24;14M")?;
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Mouse(Mouse {
+                name: KeyName::MouseLeft,
+                mode: KeyMod::PRESS,
+                row: 24,
+                col: 14
+            }))
+        );
+
+        write!(cursor.get_mut(), "\x1b[<24;33;26m")?;
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Mouse(Mouse {
+                name: KeyName::MouseLeft,
+                mode: KeyMod::ALT | KeyMod::CTRL,
+                row: 33,
+                col: 26
+            }))
         );
 
         Ok(())

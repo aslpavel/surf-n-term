@@ -67,6 +67,7 @@ pub enum TerminalEvent {
     Resize(TerminalSize),
     Size(TerminalSize),
     Raw(Vec<u8>),
+    Mouse(Mouse),
 }
 
 impl fmt::Debug for TerminalEvent {
@@ -78,6 +79,7 @@ impl fmt::Debug for TerminalEvent {
             Size(size) => write!(f, "Size({:?})", size)?,
             CursorPosition { row, col } => write!(f, "Cursor({}, {})", row, col)?,
             Raw(raw) => write!(f, "Raw({:?})", String::from_utf8_lossy(raw))?,
+            Mouse(mouse) => write!(f, "{:?}", mouse)?,
         }
         Ok(())
     }
@@ -92,9 +94,32 @@ pub struct TerminalSize {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Mouse {
+    pub name: KeyName,
+    pub mode: KeyMod,
+    pub row: usize,
+    pub col: usize,
+}
+
+impl fmt::Debug for Mouse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.mode.is_empty() {
+            write!(f, "{:?}[{},{}]", self.name, self.row, self.col)?;
+        } else {
+            write!(
+                f,
+                "{:?}-{:?}[{},{}]",
+                self.name, self.mode, self.row, self.col
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key {
-    name: KeyName,
-    mode: KeyMod,
+    pub name: KeyName,
+    pub mode: KeyMod,
 }
 
 impl Key {
@@ -156,6 +181,12 @@ pub enum KeyName {
     Right,
     Left,
     Char(char),
+    MouseRight,
+    MouseMove,
+    MouseLeft,
+    MouseMiddle,
+    MouseWheelUp,
+    MouseWheelDown,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -165,9 +196,10 @@ pub struct KeyMod {
 
 impl KeyMod {
     pub const EMPTY: Self = KeyMod { bits: 0 };
-    pub const ALT: Self = KeyMod { bits: 1 };
-    pub const CTRL: Self = KeyMod { bits: 2 };
-    pub const SHIFT: Self = KeyMod { bits: 4 };
+    pub const SHIFT: Self = KeyMod { bits: 1 };
+    pub const ALT: Self = KeyMod { bits: 2 };
+    pub const CTRL: Self = KeyMod { bits: 4 };
+    pub const PRESS: Self = KeyMod { bits: 8 };
 
     pub fn is_empty(&self) -> bool {
         self == &Self::EMPTY
@@ -175,6 +207,10 @@ impl KeyMod {
 
     pub fn contains(&self, other: Self) -> bool {
         self.bits & other.bits == other.bits
+    }
+
+    pub fn from_bits(bits: u8) -> Self {
+        Self { bits }
     }
 }
 
@@ -198,6 +234,7 @@ impl fmt::Debug for KeyMod {
                 (Self::ALT, "Alt"),
                 (Self::CTRL, "Ctrl"),
                 (Self::SHIFT, "Shift"),
+                (Self::PRESS, "Press"),
             ] {
                 if self.contains(*flag) {
                     if first {
