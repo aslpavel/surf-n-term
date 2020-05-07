@@ -1,13 +1,7 @@
-mod cell;
-pub use crate::cell::{Color, Face, FaceAttrs};
+use std::{boxed::Box, error::Error, io::Write};
+use tty_surface::{Face, Renderer, Surface, SystemTerminal, Terminal, View};
 
-mod surface;
-pub use crate::surface::{Surface, View};
-
-pub mod terminal;
-pub use crate::terminal::{Renderer, SystemTerminal};
-
-fn main() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let bg = Face::default().with_bg(Some("#3c3836".parse()?));
     let one = Face::default().with_bg(Some("#d3869b".parse()?));
     let two = Face::default().with_bg(Some("#b8bb26".parse()?));
@@ -24,12 +18,8 @@ fn main() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
 
     let mut term = SystemTerminal::new()?;
     term.render(&surface)?;
-    // term.write(&[46; 8192][..])?;
-    // term.write("\x1b[6n")?;
-    term.wait(Some(std::time::Duration::from_secs(100)))?;
-    term.debug()?;
-    println!("{:?}", term.size());
-    println!("{:?}", FaceAttrs::BOLD | FaceAttrs::ITALIC);
+    term.write(b"\x1b[6n")?;
+    println!("{:?}", term.poll(None)?);
 
     Ok(())
 }

@@ -1,10 +1,15 @@
 use crate::{Face, Surface};
-use std::{fmt, io::Write};
+use std::{
+    fmt,
+    io::{BufRead, Write},
+};
 
 pub mod automata;
 pub mod common;
-pub mod parser;
+pub mod decoder;
 pub mod unix;
+
+pub use decoder::TTYDecoder;
 
 pub type SystemTerminal = unix::UnixTerminal;
 
@@ -28,6 +33,11 @@ pub trait Terminal: Write {
 
 pub trait Renderer {
     fn render(&mut self, surface: &Surface) -> Result<(), TerminalError>;
+}
+
+pub trait Decoder {
+    type Item;
+    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, TerminalError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

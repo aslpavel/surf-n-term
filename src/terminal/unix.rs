@@ -1,10 +1,10 @@
-use super::{common::IOQueue, Renderer, Terminal, TerminalCommand, TerminalError, TerminalSize};
+use super::{
+    common::IOQueue, Decoder, Renderer, TTYDecoder, Terminal, TerminalCommand, TerminalError,
+    TerminalEvent, TerminalSize,
+};
 use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
-use std::{
-    io::{Read, Write},
-    time::Duration,
-};
+use std::{collections::VecDeque, io::Write, time::Duration};
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -28,6 +28,8 @@ pub struct UnixTerminal {
     write_queue: IOQueue,
     read_fd: nix::RawFd,
     read_queue: IOQueue,
+    decoder: TTYDecoder,
+    events_queue: VecDeque<TerminalEvent>,
     termios_saved: nix::Termios,
     sigwinch_read: nix::UnixStream,
     sigwinch_id: signal_hook::SigId,
@@ -67,6 +69,8 @@ impl UnixTerminal {
             write_queue: Default::default(),
             read_fd,
             read_queue: Default::default(),
+            decoder: TTYDecoder::new(),
+            events_queue: Default::default(),
             termios_saved,
             sigwinch_read,
             sigwinch_id,
@@ -93,7 +97,11 @@ impl UnixTerminal {
         }
     }
 
-    pub fn wait(&mut self, timeout: Option<Duration>) -> Result<(), TerminalError> {
+    /// Write all pending data and wait for events
+    pub fn poll(
+        &mut self,
+        timeout: Option<Duration>,
+    ) -> Result<Option<TerminalEvent>, TerminalError> {
         // NOTE:
         // Only `select` reliably works with /dev/tty on MacOS, poll for example
         // always returns POLLNVAL.
@@ -103,7 +111,7 @@ impl UnixTerminal {
         let write_fd = self.write_fd;
         let sigwinch_fd = self.sigwinch_read.as_raw_fd();
 
-        while !self.write_queue.is_empty() || self.read_queue.is_empty() {
+        while !self.write_queue.is_empty() || self.events_queue.is_empty() {
             // update descriptors sets
             read_set.clear();
             read_set.insert(self.read_fd);
@@ -120,7 +128,6 @@ impl UnixTerminal {
 
             // process pending output
             if write_set.contains(self.write_fd) {
-                println!("WRITE");
                 self.write_queue
                     .consume_with(|slice| guard_io(nix::write(write_fd, slice), 0))?;
             }
@@ -128,31 +135,25 @@ impl UnixTerminal {
             if read_set.contains(sigwinch_fd) {
                 let mut buf = [0u8; 1];
                 if guard_io(nix::read(sigwinch_fd, &mut buf), 0)? != 0 {
-                    // TODO: enqueue resize event
-                    println!("RESIZED: {:?}", self.size());
+                    self.events_queue
+                        .push_back(TerminalEvent::Resize(self.size()?));
                 }
             }
             // process pending input
             if read_set.contains(self.read_fd) {
-                println!("READ");
                 let mut buf = [0u8; 1024];
                 let size = guard_io(nix::read(self.read_fd, &mut buf), 0)?;
                 self.read_queue.write_all(&buf[..size])?;
+                while let Some(event) = self.decoder.decode(&mut self.read_queue)? {
+                    self.events_queue.push_back(event)
+                }
             }
-            println!("\x1b[31;01mloop\x1b[m");
         }
-        Ok(())
-    }
-
-    pub fn write(&mut self, data: impl AsRef<[u8]>) -> Result<(), TerminalError> {
-        self.write_queue.write_all(data.as_ref())?;
-        Ok(())
+        Ok(self.events_queue.pop_front())
     }
 
     pub fn debug(&mut self) -> Result<(), TerminalError> {
-        let mut read = String::new();
-        self.read_queue.read_to_string(&mut read)?;
-        println!("\x1b[32;01mREAD\x1b[m {:?}", read);
+        println!("\x1b[32;01mEVENTS\x1b[m {:?}", self.events_queue);
         Ok(())
     }
 }

@@ -1,13 +1,8 @@
 use super::{
     automata::{DFAState, DFA, NFA},
-    Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent, TerminalSize,
+    Decoder, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent, TerminalSize,
 };
 use std::{fmt, io::BufRead};
-
-pub trait Decoder {
-    type Item;
-    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, TerminalError>;
-}
 
 #[derive(Debug)]
 pub struct TTYDecoder {
@@ -275,18 +270,18 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
             let button = event & 3;
             let name = if event & 64 != 0 {
                 if button == 0 {
-                    KeyName::MouseWheelUp
-                } else if button == 1 {
                     KeyName::MouseWheelDown
+                } else if button == 1 {
+                    KeyName::MouseWheelUp
                 } else {
                     KeyName::MouseMove
                 }
             } else if button == 0 {
                 KeyName::MouseLeft
             } else if button == 1 {
-                KeyName::MouseRight
-            } else if button == 2 {
                 KeyName::MouseMiddle
+            } else if button == 2 {
+                KeyName::MouseRight
             } else {
                 KeyName::MouseMove
             };
@@ -477,14 +472,25 @@ mod tests {
             }))
         );
 
-        write!(cursor.get_mut(), "\x1b[<24;33;26m")?;
+        write!(cursor.get_mut(), "\x1b[<26;33;26m")?;
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::Mouse(Mouse {
-                name: KeyName::MouseLeft,
+                name: KeyName::MouseRight,
                 mode: KeyMod::ALT | KeyMod::CTRL,
                 row: 33,
                 col: 26
+            }))
+        );
+
+        write!(cursor.get_mut(), "\x1b[<65;142;30M")?;
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Mouse(Mouse {
+                name: KeyName::MouseWheelUp,
+                mode: KeyMod::PRESS,
+                row: 142,
+                col: 30,
             }))
         );
 
