@@ -50,8 +50,9 @@ impl Decoder for TTYDecoder {
         for symbol in input.fill_buf()?.iter() {
             match self.automata.transition(self.state, *symbol) {
                 Some(state) => {
-                    if self.automata.is_accepting(state) {
-                        if let Some(tag) = self.automata.tags(state).iter().next() {
+                    let info = self.automata.info(state);
+                    if info.accepting {
+                        if let Some(tag) = info.tags.iter().next() {
                             match tag {
                                 TTYTag::Event(event) => {
                                     self.possible.replace(event.clone());

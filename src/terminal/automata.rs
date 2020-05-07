@@ -277,10 +277,8 @@ impl<T> NFA<T> {
     {
         // each DFA state is represented as epsilon closure of NFA states `Rc<BTreeSet<NFAStateId>>`
         let mut dfa_states: BTreeMap<NFAStateSet, DFAState> = BTreeMap::new();
-
         // constructed DFA
         let mut dfa_table: BTreeMap<DFAState, BTreeMap<Symbol, DFAState>> = BTreeMap::new();
-        let mut dfa_stops: BTreeSet<DFAState> = BTreeSet::new();
 
         // initialize traversal queue with initial state
         let dfa_start = self.epsilon_closure(once(self.start));
@@ -289,9 +287,6 @@ impl<T> NFA<T> {
         dfa_states.insert(dfa_start, DFAState(0));
 
         while let Some((dfa_state_id, dfa_state)) = dfa_queue.pop() {
-            // check if this DFA state contains final NFA state
-            let is_final = dfa_state.contains(&self.stop);
-
             // find all unique symbols leading from the current DFA state
             let symbols: BTreeSet<Symbol> = dfa_state
                 .iter()
@@ -319,12 +314,26 @@ impl<T> NFA<T> {
                 // update edges of the current DFA state
                 dfa_edges.insert(symbol, dfa_state_new_id);
             }
-
-            // update DFA
-            if is_final {
-                dfa_stops.insert(dfa_state_id);
-            }
+            // update DFA table
             dfa_table.insert(dfa_state_id, dfa_edges);
+        }
+
+        // construct state information
+        let mut infos: Vec<DFAStateInfo<T>> = Vec::new();
+        infos.resize_with(dfa_states.len(), || DFAStateInfo {
+            accepting: false,
+            terminal: false,
+            tags: Default::default(),
+        });
+        for (dfa_state, dfa_state_id) in dfa_states {
+            let info = &mut infos[dfa_state_id.0];
+            info.accepting = dfa_state.contains(&self.stop);
+            info.terminal = dfa_table[&dfa_state_id].is_empty();
+            for nfa_state_id in dfa_state.iter() {
+                if let Some(tag) = self.tags.get(nfa_state_id) {
+                    info.tags.insert(tag.clone());
+                }
+            }
         }
 
         // by construction all states are dense (meaning they start from 0 and do not have gaps)
@@ -338,23 +347,11 @@ impl<T> NFA<T> {
             })
             .collect();
 
-        let mut tags: Vec<BTreeSet<T>> = Vec::new();
-        tags.resize_with(dfa_states.len(), Default::default);
-        for (nfa_state_set, dfa_state_id) in dfa_states {
-            let dfa_tag = &mut tags[dfa_state_id.0];
-            for nfa_state_id in nfa_state_set.iter() {
-                if let Some(tag) = self.tags.get(nfa_state_id) {
-                    dfa_tag.insert(tag.clone());
-                }
-            }
-        }
-
         DFA {
-            lang_size,
-            states,
             start: dfa_start_id,
-            stops: dfa_stops,
-            tags,
+            states,
+            infos,
+            lang_size,
         }
     }
 
@@ -472,11 +469,10 @@ pub struct DFAStateInfo<T> {
 }
 
 pub struct DFA<T> {
-    lang_size: usize,
-    states: Vec<Option<DFAState>>,
     start: DFAState,
-    stops: BTreeSet<DFAState>,
-    tags: Vec<BTreeSet<T>>,
+    states: Vec<Option<DFAState>>,
+    infos: Vec<DFAStateInfo<T>>,
+    lang_size: usize,
 }
 
 impl<T> DFA<T> {
@@ -490,14 +486,9 @@ impl<T> DFA<T> {
         self.start
     }
 
-    /// Check if provided state is an accepting state
-    pub fn is_accepting(&self, state: DFAState) -> bool {
-        self.stops.contains(&state)
-    }
-
-    /// Get tags assocciated with the state
-    pub fn tags(&self, state: DFAState) -> &BTreeSet<T> {
-        &self.tags[state.0]
+    /// Get information about DFA state
+    pub fn info(&self, state: DFAState) -> &DFAStateInfo<T> {
+        &self.infos[state.0]
     }
 
     /// Transition from provided state given symbol
@@ -518,7 +509,7 @@ impl<T> DFA<T> {
     /// Check if DFA accepts given input
     pub fn matches(&self, symbols: impl IntoIterator<Item = Symbol>) -> bool {
         if let Some(state) = self.transition_many(self.start(), symbols) {
-            self.is_accepting(state)
+            self.info(state).accepting
         } else {
             false
         }
@@ -536,15 +527,15 @@ where
 
         for from in (0..self.size()).map(DFAState) {
             // node
+            let info = self.info(from);
             write!(f, "  {} [", from.0)?;
-            if self.stops.contains(&from) {
+            if info.accepting {
                 write!(f, "shape=doublecircle")?;
             } else {
                 write!(f, "shape=circle")?;
             }
-            let tags = &self.tags[from.0];
-            if !tags.is_empty() {
-                write!(f, ",label=\"{} {:?}\"", from.0, tags)?;
+            if !info.tags.is_empty() {
+                write!(f, ",label=\"{} {:?}\"", from.0, &info.tags)?;
             }
             writeln!(f, "]")?;
 
@@ -588,12 +579,12 @@ mod tests {
         let state = dfa
             .transition_many(dfa.start(), "abc".bytes())
             .expect("should match");
-        assert_eq!(dfa.tags(state), &once(1).collect::<BTreeSet<_>>());
+        assert_eq!(&dfa.info(state).tags, &once(1).collect::<BTreeSet<_>>());
 
         let state = dfa
             .transition_many(dfa.start(), "abd".bytes())
             .expect("should match");
-        assert_eq!(dfa.tags(state), &once(2).collect::<BTreeSet<_>>());
+        assert_eq!(&dfa.info(state).tags, &once(2).collect::<BTreeSet<_>>());
     }
 
     #[test]
