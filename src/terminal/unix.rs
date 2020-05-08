@@ -6,7 +6,7 @@ use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
-    io::Write,
+    io::{Cursor, Write},
     time::{Duration, Instant},
 };
 
@@ -31,7 +31,6 @@ pub struct UnixTerminal {
     write_fd: nix::RawFd,
     write_queue: IOQueue,
     read_fd: nix::RawFd,
-    read_queue: IOQueue,
     decoder: TTYDecoder,
     events_queue: VecDeque<TerminalEvent>,
     termios_saved: nix::Termios,
@@ -72,7 +71,6 @@ impl UnixTerminal {
             write_fd,
             write_queue: Default::default(),
             read_fd,
-            read_queue: Default::default(),
             decoder: TTYDecoder::new(),
             events_queue: Default::default(),
             termios_saved,
@@ -137,6 +135,7 @@ impl Terminal for UnixTerminal {
         let sigwinch_fd = self.sigwinch_read.as_raw_fd();
 
         let timeout_instant = timeout.map(|dur| Instant::now() + dur);
+        let mut first_loop = true;  // execute first loop even if timeout is 0
         while !self.write_queue.is_empty() || self.events_queue.is_empty() {
             // update descriptors sets
             read_set.clear();
@@ -148,11 +147,15 @@ impl Terminal for UnixTerminal {
             }
 
             // process timeout
-            let mut timeout = match timeout_instant {
+            let mut delay = match timeout_instant {
                 Some(timeout_instant) => {
                     let now = Instant::now();
                     if timeout_instant < Instant::now() {
-                        break;
+                        if first_loop {
+                            Some(timeval_from_duration(Duration::new(0, 0)))
+                        } else {
+                            break;
+                        }
                     } else {
                         Some(timeval_from_duration(timeout_instant - now))
                     }
@@ -161,7 +164,7 @@ impl Terminal for UnixTerminal {
             };
 
             // wait for descriptors
-            let select = nix::select(None, &mut read_set, &mut write_set, None, &mut timeout);
+            let select = nix::select(None, &mut read_set, &mut write_set, None, &mut delay);
             let _count = guard_io(select, 0)?;
 
             // process pending output
@@ -181,12 +184,15 @@ impl Terminal for UnixTerminal {
             if read_set.contains(self.read_fd) {
                 let mut buf = [0u8; 1024];
                 let size = guard_io(nix::read(self.read_fd, &mut buf), 0)?;
-                self.read_queue.write_all(&buf[..size])?;
-                while let Some(event) = self.decoder.decode(&mut self.read_queue)? {
+                // parse events
+                let mut read_queue = Cursor::new(&buf[..size]);
+                while let Some(event) = self.decoder.decode(&mut read_queue)? {
                     self.events_queue.push_back(event)
                 }
             }
-            // process timeout
+
+            // indicate that first loop was executed
+            first_loop = false;
         }
         Ok(self.events_queue.pop_front())
     }
