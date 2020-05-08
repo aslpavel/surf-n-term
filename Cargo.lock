@@ -480,6 +480,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "surf_n_term"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "libc",
+ "nix",
+ "signal-hook",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -507,16 +517,6 @@ checksum = "45e4bc5ac99433e0dcb8b9f309dd271a165ae37dde129b9e0ce1bfdd8bfe4891"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "tty-surface"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "libc",
- "nix",
- "signal-hook",
 ]
 
 [[package]]

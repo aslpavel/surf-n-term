@@ -1,5 +1,5 @@
 [package]
-name = "tty-surface"
+name = "surf_n_term"
 version = "0.1.0"
 authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 edition = "2018"

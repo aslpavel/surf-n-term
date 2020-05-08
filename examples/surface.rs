@@ -1,5 +1,5 @@
 use std::{boxed::Box, error::Error, time::Duration};
-use tty_surface::{Face, Renderer, Surface, SystemTerminal, Terminal, View};
+use surf_n_term::{Face, Renderer, Surface, SystemTerminal, Terminal, View};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let bg = Face::default().with_bg(Some("#3c3836".parse()?));
@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut term = SystemTerminal::new()?;
     term.render(&surface)?;
-    term.poll(Some(Duration::from_secs(0)))?;
+    term.poll(Some(Duration::from_secs(1)))?;
 
     Ok(())
 }
