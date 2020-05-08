@@ -183,6 +183,13 @@ impl<T> NFA<T> {
         self
     }
 
+    pub fn optional(mut self) -> Self {
+        if let Some(start) = self.states.get_mut(&self.start) {
+            start.epsilons.insert(self.stop);
+        }
+        self
+    }
+
     /// For `a` regular expression it is equivalent to `a*`
     pub fn many(self) -> Self {
         // add offset of 2 to state ids
