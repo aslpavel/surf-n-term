@@ -448,7 +448,7 @@ where
                     "  {} -> {} [label=\"{}\"]",
                     from.0,
                     to.0,
-                    char::from(*symbol)
+                    char::from(*symbol).escape_default(),
                 )?;
             }
             for to in state.epsilons.iter() {

@@ -8,5 +8,6 @@ pub use crate::surface::{Surface, View};
 
 pub mod terminal;
 pub use crate::terminal::{
-    Key, KeyMod, KeyName, Renderer, SystemTerminal, Terminal, TerminalCommand, TerminalEvent,
+    Decoder, Key, KeyMod, KeyName, Renderer, SystemTerminal, TTYDecoder, Terminal, TerminalCommand,
+    TerminalEvent,
 };

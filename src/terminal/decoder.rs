@@ -215,9 +215,23 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     );
 
     // character event
-    cmds.push(tty_char_nfa().tag(TTYTag::Char));
+    cmds.push(tty_decoder_char().tag(TTYTag::Char));
 
     NFA::choice(cmds).compile()
+}
+
+fn tty_decoder_char() -> NFA<TTYTag> {
+    let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
+    let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
+    let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
+    let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
+    let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
+    NFA::choice(vec![
+        printable,
+        utf8_two + utf8_tail.clone(),
+        utf8_three + utf8_tail.clone() + utf8_tail.clone(),
+        utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
+    ])
 }
 
 /// Convert tag plus current match to a TerminalEvent
@@ -318,20 +332,6 @@ fn tty_number(nums: &mut dyn Iterator<Item = &[u8]>) -> usize {
         mult *= 10;
     }
     result
-}
-
-fn tty_char_nfa() -> NFA<TTYTag> {
-    let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
-    let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
-    let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
-    let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
-    let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-    NFA::choice(vec![
-        printable,
-        utf8_two + utf8_tail.clone(),
-        utf8_three + utf8_tail.clone() + utf8_tail.clone(),
-        utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
-    ])
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
