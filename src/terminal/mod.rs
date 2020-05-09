@@ -39,16 +39,12 @@ pub trait Decoder {
     fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, TerminalError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalCommand {
-    /// Enable/disable wrapping of the text when it reaches end of the line
-    AutoWrap(bool),
-    /// Enable/Disable alternative screen
-    AltScreen(bool),
-    /// Report mouse events, if motion is ture it will also report mouse movements
-    MouseReport { enable: bool, motion: bool },
-    /// Hide/Show cursor
-    CursorVisible(bool),
+    /// Control specified DEC mode (DECSET|DECRST)
+    DecModeSet { enable: bool, mode: DecMode },
+    /// Report specified DEC mode (DECRQM)
+    DecModeReport(DecMode),
     /// Request current cursor postion
     CursorReport,
     /// Move cursor to specified row and column
@@ -69,14 +65,97 @@ pub enum TerminalCommand {
     Reset,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DecMode {
+    /// Visibility of the cursor
+    VisibleCursor = 25,
+    /// Wrapping of the text when it reaches end of the line
+    AutoWrap = 7,
+    /// Enable/Disable mouse reporting
+    MouseReport = 1000,
+    /// Report mouse motion events if `MouseReport` is enabled
+    MouseMotions = 1003,
+    /// Report mouse event in SGR format
+    MouseSGR = 1006,
+    /// Alternative screen mode
+    AltScreen = 1049,
+    /// Kitty keyboard mode https://sw.kovidgoyal.net/kitty/protocol-extensions.html
+    KittyKeyboard = 2017,
+}
+
+impl DecMode {
+    fn from_usize(code: usize) -> Option<Self> {
+        use DecMode::*;
+        for mode in [
+            VisibleCursor,
+            AutoWrap,
+            MouseReport,
+            MouseMotions,
+            MouseSGR,
+            AltScreen,
+            KittyKeyboard,
+        ]
+        .iter()
+        {
+            if code == *mode as usize {
+                return Some(*mode);
+            }
+        }
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DecModeStatus {
+    NotRecognized = 0,
+    Enabled = 1,
+    Disabled = 2,
+    PermanentlyEnabled = 3,
+    PermanentlyDisabled = 4,
+}
+
+impl DecModeStatus {
+    fn from_usize(code: usize) -> Option<Self> {
+        use DecModeStatus::*;
+        for status in [
+            NotRecognized,
+            Enabled,
+            Disabled,
+            PermanentlyEnabled,
+            PermanentlyDisabled,
+        ]
+        .iter()
+        {
+            if code == *status as usize {
+                return Some(*status);
+            }
+        }
+        None
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalEvent {
+    // Key press event
     Key(Key),
-    CursorPosition { row: usize, col: usize },
-    Resize(TerminalSize),
-    Size(TerminalSize),
-    Raw(Vec<u8>),
+    // Mouse event
     Mouse(Mouse),
+    // Current cursor position
+    CursorPosition {
+        row: usize,
+        col: usize,
+    },
+    // Terminal was resized
+    Resize(TerminalSize),
+    // Current terminal size
+    Size(TerminalSize),
+    // DEC mode status
+    DecMode {
+        mode: DecMode,
+        status: DecModeStatus,
+    },
+    // Unrecognized bytes (TODO: remove Vec and just use u8)
+    Raw(Vec<u8>),
 }
 
 impl fmt::Debug for TerminalEvent {
@@ -84,11 +163,12 @@ impl fmt::Debug for TerminalEvent {
         use TerminalEvent::*;
         match self {
             Key(key) => write!(f, "{:?}", key)?,
+            Mouse(mouse) => write!(f, "{:?}", mouse)?,
+            CursorPosition { row, col } => write!(f, "Cursor({}, {})", row, col)?,
             Resize(size) => write!(f, "Resize({:?})", size)?,
             Size(size) => write!(f, "Size({:?})", size)?,
-            CursorPosition { row, col } => write!(f, "Cursor({}, {})", row, col)?,
+            DecMode { mode, status } => write!(f, "DecMode({:?}, {:?})", mode, status)?,
             Raw(raw) => write!(f, "Raw({:?})", String::from_utf8_lossy(raw))?,
-            Mouse(mouse) => write!(f, "{:?}", mouse)?,
         }
         Ok(())
     }

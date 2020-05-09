@@ -1,27 +1,25 @@
 use std::{boxed::Box, error::Error, time::Duration};
-use surf_n_term::{Key, KeyName, SystemTerminal, Terminal, TerminalEvent};
+use surf_n_term::{
+    DecMode, Key, KeyName, SystemTerminal, Terminal, TerminalCommand, TerminalEvent,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let q = Key::from(KeyName::Char('q'));
+    let mut term = SystemTerminal::new()?;
 
+    // query DEC modes
+    use TerminalCommand::*;
+    term.execute(DecModeReport(DecMode::MouseReport))?;
+
+    // read terminal events
     let timeout = Duration::from_secs(10);
     println!("Program will exit after {:?} of idling ...", timeout);
-
-    let mut term = SystemTerminal::new()?;
-    // term.execute(TerminalCommand::MouseReport {
-    //     enable: true,
-    //     motion: true,
-    // })?;
+    let q = Key::from(KeyName::Char('q'));
     while let Some(event) = term.poll(Some(timeout))? {
         match event {
             TerminalEvent::Key(key) if key == q => break,
             _ => println!("{:?}", event),
         }
     }
-    // term.execute(TerminalCommand::MouseReport {
-    //     enable: false,
-    // motion: false,
-    // })?;
-    // term.poll(Some(Duration::new(0, 0)))?;
+
     Ok(())
 }

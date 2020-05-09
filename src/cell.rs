@@ -1,6 +1,6 @@
 use std::{fmt, ops::Deref, str::FromStr};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Color {
     pub red: u8,
     pub green: u8,
@@ -74,7 +74,7 @@ impl FromStr for Color {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceAttrs {
     bits: u16,
 }
@@ -133,7 +133,7 @@ impl fmt::Debug for FaceAttrs {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Face {
     pub fg: Option<Color>,
     pub bg: Option<Color>,

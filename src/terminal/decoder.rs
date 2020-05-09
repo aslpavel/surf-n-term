@@ -1,6 +1,7 @@
 use super::{
     automata::{DFAState, DFA, NFA},
-    Decoder, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent, TerminalSize,
+    DecModeStatus, Decoder, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent,
+    TerminalSize,
 };
 use std::{fmt, io::BufRead};
 
@@ -79,7 +80,8 @@ impl TTYDecoder {
                         .iter()
                         .next()
                         .expect("[TTYDecoder] found untagged accepting state");
-                    let event = tty_decoder_event(tag, &self.buffer);
+                    let event = tty_decoder_event(tag, &self.buffer)
+                        .unwrap_or_else(|| TerminalEvent::Raw(self.buffer.clone()));
                     if info.terminal {
                         // report event
                         self.reset();
@@ -193,6 +195,18 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         }
     }
 
+    // DEC mode report
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b[?"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("$y"),
+        ])
+        .tag(TTYTag::DecMode),
+    );
+
     // response to `CursorReport` ("\x1b[6n")
     cmds.push(
         NFA::sequence(vec![
@@ -264,27 +278,36 @@ fn tty_decoder_char() -> NFA<TTYTag> {
 }
 
 /// Convert tag plus current match to a TerminalEvent
-fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
+fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
     use TTYTag::*;
-    match tag {
+    let event = match tag {
         Event(event) => event.clone(),
         Char => {
             let string = std::str::from_utf8(data).expect("[TTYDecoder] utf8 expected");
             let code = string.chars().next().expect("[TTYDecoder] utf8 expected");
             TerminalEvent::Key(KeyName::Char(code).into())
         }
+        DecMode => {
+            // "\x1b[?{mode};{status}$y"
+            let mut nums = tty_numbers(&data[3..data.len() - 2]);
+            TerminalEvent::DecMode {
+                mode: super::DecMode::from_usize(nums.next()?)?,
+                status: DecModeStatus::from_usize(nums.next()?)?,
+            }
+        }
         CursorPosition => {
             // "\x1b[{row};{col}R"
-            let mut nums = data[2..data.len() - 1].split(|b| *b == b';');
-            let row = tty_number(&mut nums);
-            let col = tty_number(&mut nums);
-            TerminalEvent::CursorPosition { row, col }
+            let mut nums = tty_numbers(&data[2..data.len() - 1]);
+            TerminalEvent::CursorPosition {
+                row: nums.next()?,
+                col: nums.next()?,
+            }
         }
         TerminalSizeCells | TerminalSizePixels => {
             // "\x1b[(4|8);{height};{width}t"
-            let mut nums = data[4..data.len() - 1].split(|b| *b == b';');
-            let height = tty_number(&mut nums);
-            let width = tty_number(&mut nums);
+            let mut nums = tty_numbers(&data[4..data.len() - 1]);
+            let height = nums.next()?;
+            let width = nums.next()?;
             if tag == &TerminalSizeCells {
                 TerminalEvent::Size(TerminalSize {
                     height,
@@ -304,10 +327,10 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
         MouseSGR => {
             // "\x1b[<{event};{row};{col}(m|M)"
             // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
-            let mut nums = data[3..data.len() - 1].split(|b| *b == b';');
-            let event = tty_number(&mut nums);
-            let row = tty_number(&mut nums);
-            let col = tty_number(&mut nums);
+            let mut nums = tty_numbers(&data[3..data.len() - 1]);
+            let event = nums.next()?;
+            let row = nums.next()?;
+            let col = nums.next()?;
 
             let mut mode = KeyMod::EMPTY;
             if event & 4 != 0 {
@@ -349,18 +372,20 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> TerminalEvent {
                 col,
             })
         }
-    }
+    };
+    Some(event)
 }
 
-fn tty_number(nums: &mut dyn Iterator<Item = &[u8]>) -> usize {
-    let data = nums.next().expect("[TTYDecoder] number expected");
-    let mut result = 0usize;
-    let mut mult = 1usize;
-    for byte in data.iter().rev() {
-        result += (byte - b'0') as usize * mult;
-        mult *= 10;
-    }
-    result
+fn tty_numbers(data: &[u8]) -> impl Iterator<Item = usize> + '_ {
+    data.split(|b| *b == b';').map(|num| {
+        let mut result = 0usize;
+        let mut mult = 1usize;
+        for byte in num.iter().rev() {
+            result += (byte - b'0') as usize * mult;
+            mult *= 10;
+        }
+        result
+    })
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -371,6 +396,7 @@ enum TTYTag {
     TerminalSizeCells,
     TerminalSizePixels,
     MouseSGR,
+    DecMode,
 }
 
 impl fmt::Debug for TTYTag {
@@ -383,6 +409,7 @@ impl fmt::Debug for TTYTag {
             TerminalSizePixels => write!(f, "TSP")?,
             MouseSGR => write!(f, "SGR")?,
             Char => write!(f, "CHR")?,
+            DecMode => write!(f, "DCM")?,
         }
         Ok(())
     }
@@ -565,6 +592,36 @@ mod tests {
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::Key(KeyName::Char('🐱').into())),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_dec_mode() -> Result<(), TerminalError> {
+        use crate::DecMode;
+
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[?1000;1$y")?;
+
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::DecMode {
+                mode: DecMode::MouseReport,
+                status: DecModeStatus::Enabled,
+            }),
+        );
+
+        write!(cursor.get_mut(), "\x1b[?2017;0$y")?;
+
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::DecMode {
+                mode: DecMode::KittyKeyboard,
+                status: DecModeStatus::NotRecognized,
+            }),
         );
 
         Ok(())

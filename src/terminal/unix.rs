@@ -201,39 +201,12 @@ impl Terminal for UnixTerminal {
         use TerminalCommand::*;
 
         match cmd {
-            AutoWrap(enable) => {
-                if enable {
-                    self.write_all(b"\x1b[?7h")?;
-                } else {
-                    self.write_all(b"\x1b[?7l")?;
-                }
+            DecModeSet { enable, mode } => {
+                let flag = if enable { "h" } else { "l" };
+                write!(self, "\x1b[?{}{}", mode as usize, flag)?;
             }
-            AltScreen(enable) => {
-                if enable {
-                    self.write_all(b"\x1b[?1049h")?;
-                } else {
-                    self.write_all(b"\x1b[?1049l")?;
-                }
-            }
-            MouseReport { enable, motion } => {
-                if enable {
-                    self.write_all(b"\x1b[?1000h")?; // SET_VT200_MOUSE
-                    self.write_all(b"\x1b[?1006h")?; // SET_SGR_EXT_MODE_MOUSE
-                    if motion {
-                        self.write_all(b"\x1b[?1003h")?; // SET_ANY_EVENT_MOUSE
-                    }
-                } else {
-                    self.write_all(b"\x1b[?1003l")?;
-                    self.write_all(b"\x1b[?1006l")?;
-                    self.write_all(b"\x1b[?1000l")?;
-                }
-            }
-            CursorVisible(enable) => {
-                if enable {
-                    self.write_all(b"\x1b[?25h")?;
-                } else {
-                    self.write_all(b"\x1b[?25l")?;
-                }
+            DecModeReport(mode) => {
+                write!(self, "\x1b[?{}$p", mode as usize)?;
             }
             CursorTo { row, col } => write!(self, "\x1b[{};{}H", row, col)?,
             CursorReport => self.write_all(b"\x1b[6n")?,
