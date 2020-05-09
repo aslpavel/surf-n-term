@@ -263,6 +263,8 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     NFA::choice(cmds).compile()
 }
 
+/// Mostly UTF-8 matcher but for one-byte codes only restricted to
+// pritable subset.
 fn tty_decoder_char() -> NFA<TTYTag> {
     let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
     let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);

@@ -6,9 +6,23 @@ use surf_n_term::{
 fn main() -> Result<(), Box<dyn Error>> {
     let mut term = SystemTerminal::new()?;
 
+    // get size
+    println!("{:?}", term.size()?);
+
     // query DEC modes
     use TerminalCommand::*;
+    term.execute(DecModeReport(DecMode::VisibleCursor))?;
+    term.execute(DecModeReport(DecMode::AutoWrap))?;
     term.execute(DecModeReport(DecMode::MouseReport))?;
+    term.execute(DecModeReport(DecMode::MouseSGR))?;
+    term.execute(DecModeReport(DecMode::MouseMotions))?;
+    term.execute(DecModeReport(DecMode::AltScreen))?;
+    term.execute(DecModeReport(DecMode::KittyKeyboard))?;
+    term.execute(CursorReport)?;
+
+    use std::io::Write;
+    // term.write_all(b"\x1bP+q62656c\x1b\\")?;
+    term.write_all(b"\x1b[14t")?;
 
     // read terminal events
     let timeout = Duration::from_secs(10);
