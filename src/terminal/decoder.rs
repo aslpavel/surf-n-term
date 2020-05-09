@@ -128,41 +128,70 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     fn basic_key(seq: &str, key: impl Into<Key>) -> NFA<TTYTag> {
         NFA::from(seq).tag(TerminalEvent::Key(key.into()))
     }
-    // F{1-12}
-    cmds.push(basic_key("\x1bOP", KeyName::F1));
-    cmds.push(basic_key("\x1bOQ", KeyName::F2));
-    cmds.push(basic_key("\x1bOR", KeyName::F3));
-    cmds.push(basic_key("\x1bOS", KeyName::F4));
-    cmds.push(basic_key("\x1b[15~", KeyName::F5));
-    cmds.push(basic_key("\x1b[17~", KeyName::F6));
-    cmds.push(basic_key("\x1b[18~", KeyName::F7));
-    cmds.push(basic_key("\x1b[19~", KeyName::F8));
-    cmds.push(basic_key("\x1b[20~", KeyName::F9));
-    cmds.push(basic_key("\x1b[21~", KeyName::F10));
-    cmds.push(basic_key("\x1b[23~", KeyName::F11));
-    cmds.push(basic_key("\x1b[24~", KeyName::F12));
+
+    // [Reference](http://www.leonerd.org.uk/hacks/fixterms/)
+    // but it does not always match real behaviour
 
     cmds.push(basic_key("\x1b", KeyName::Esc));
-    cmds.push(basic_key("\x1b[5~", KeyName::PageUp));
-    cmds.push(basic_key("\x1b[6~", KeyName::PageDown));
-    cmds.push(basic_key("\x1b[H", KeyName::Home));
-    cmds.push(basic_key("\x1b[1~", KeyName::Home));
-    cmds.push(basic_key("\x1b[F", KeyName::End));
-    cmds.push(basic_key("\x1b[4~", KeyName::End));
 
-    // arrows
-    cmds.push(basic_key("\x1b[A", KeyName::Up));
-    cmds.push(basic_key("\x1b[B", KeyName::Down));
-    cmds.push(basic_key("\x1b[C", KeyName::Right));
-    cmds.push(basic_key("\x1b[D", KeyName::Left));
-    cmds.push(basic_key("\x1b[1;2A", (KeyName::Up, KeyMod::SHIFT)));
-    cmds.push(basic_key("\x1b[1;2B", (KeyName::Down, KeyMod::SHIFT)));
-    cmds.push(basic_key("\x1b[1;2C", (KeyName::Right, KeyMod::SHIFT)));
-    cmds.push(basic_key("\x1b[1;2D", (KeyName::Left, KeyMod::SHIFT)));
-    cmds.push(basic_key("\x1b[1;9A", (KeyName::Up, KeyMod::ALT)));
-    cmds.push(basic_key("\x1b[1;9B", (KeyName::Down, KeyMod::ALT)));
-    cmds.push(basic_key("\x1b[1;9C", (KeyName::Right, KeyMod::ALT)));
-    cmds.push(basic_key("\x1b[1;9D", (KeyName::Left, KeyMod::ALT)));
+    for byte in (0..=255u8).filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+        let c = char::from(byte);
+        cmds.push(basic_key(
+            &format!("\x1b{}", c),
+            (KeyName::Char(c), KeyMod::ALT),
+        ));
+        cmds.push(basic_key(
+            &(char::from(byte & 0x1f)).to_string(),
+            (KeyName::Char(c), KeyMod::CTRL),
+        ));
+    }
+
+    for (name, code) in [
+        (KeyName::Home, "1"),
+        (KeyName::End, "4"),
+        (KeyName::PageUp, "5"),
+        (KeyName::PageDown, "6"),
+        (KeyName::F5, "15"),
+        (KeyName::F6, "17"),
+        (KeyName::F7, "18"),
+        (KeyName::F8, "19"),
+        (KeyName::F9, "20"),
+        (KeyName::F10, "21"),
+        (KeyName::F11, "23"),
+        (KeyName::F12, "24"),
+    ]
+    .iter()
+    {
+        cmds.push(basic_key(&format!("\x1b[{}~", code), *name));
+        for mode in 1..8 {
+            cmds.push(basic_key(
+                &format!("\x1b[{};{}~", code, mode + 1),
+                (*name, KeyMod::from_bits(mode)),
+            ));
+        }
+    }
+    for (name, code_empty, code) in [
+        (KeyName::Up, "[", "A"),
+        (KeyName::Down, "[", "B"),
+        (KeyName::Right, "[", "C"),
+        (KeyName::Left, "[", "D"),
+        (KeyName::End, "[", "F"),
+        (KeyName::Home, "[", "H"),
+        (KeyName::F1, "O", "P"),
+        (KeyName::F2, "O", "Q"),
+        (KeyName::F3, "O", "R"),
+        (KeyName::F4, "O", "S"),
+    ]
+    .iter()
+    {
+        cmds.push(basic_key(&format!("\x1b{}{}", code_empty, code), *name));
+        for mode in 1..8 {
+            cmds.push(basic_key(
+                &format!("\x1b[1;{}{}", mode + 1, code),
+                (*name, KeyMod::from_bits(mode)),
+            ));
+        }
+    }
 
     // response to `CursorReport` ("\x1b[6n")
     cmds.push(

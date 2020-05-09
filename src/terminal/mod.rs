@@ -204,6 +204,7 @@ pub struct KeyMod {
 }
 
 impl KeyMod {
+    // order of bits is significant used by TTYDecoder
     pub const EMPTY: Self = KeyMod { bits: 0 };
     pub const SHIFT: Self = KeyMod { bits: 1 };
     pub const ALT: Self = KeyMod { bits: 2 };

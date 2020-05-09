@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut term = SystemTerminal::new()?;
     term.render(&surface)?;
-    term.poll(Some(Duration::from_secs(1)))?;
+    term.poll(Some(Duration::from_secs(0)))?;
 
     Ok(())
 }

@@ -135,7 +135,7 @@ impl Terminal for UnixTerminal {
         let sigwinch_fd = self.sigwinch_read.as_raw_fd();
 
         let timeout_instant = timeout.map(|dur| Instant::now() + dur);
-        let mut first_loop = true;  // execute first loop even if timeout is 0
+        let mut first_loop = true; // execute first loop even if timeout is 0
         while !self.write_queue.is_empty() || self.events_queue.is_empty() {
             // update descriptors sets
             read_set.clear();
