@@ -3,7 +3,7 @@ use std::{
     error::Error,
     io::{Cursor, Seek, SeekFrom, Write},
 };
-use surf_n_term::{Decoder, TTYDecoder};
+use surf_n_term::{Decoder, decoder::TTYDecoder};
 
 const SMALL_SET: &str = "\x1bOR\x1b[15~\x1b[97;15R\x1b[4;3104;1482t\x1b[8;101;202t\x1b[<0;24;14M\x1b[<65;142;30M\u{1F431}ABC";
 

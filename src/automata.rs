@@ -1,3 +1,8 @@
+//! NFA and DFA
+//!
+//! This module implements NFA (Nondeterministic finite automaton) which is can be combined
+//! in more complicated one with Thompson's construction and complied to DFA (Deterministic
+//! finaite automaton).
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
