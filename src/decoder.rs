@@ -1,9 +1,15 @@
-use crate::terminal::{
-    DecModeStatus, Decoder, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent,
-    TerminalSize,
-};
 use crate::automata::{DFAState, DFA, NFA};
+use crate::terminal::{
+    DecModeStatus, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent, TerminalSize,
+};
 use std::{fmt, io::BufRead};
+
+pub trait Decoder {
+    type Item;
+    type Error;
+
+    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, Self::Error>;
+}
 
 #[derive(Debug)]
 pub struct TTYDecoder {
@@ -21,8 +27,9 @@ pub struct TTYDecoder {
 
 impl Decoder for TTYDecoder {
     type Item = TerminalEvent;
+    type Error = TerminalError;
 
-    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, TerminalError> {
+    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, Self::Error> {
         // process rescheduled data first
         while let Some(byte) = self.rescheduled.pop() {
             let event = self.decode_byte(byte);

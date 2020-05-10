@@ -9,9 +9,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut surface = Surface::new(10, 20);
     surface.fill(|_, _, cell| cell.face = bg);
-    surface.view_mut(..1, ..2).fill(|_, _, cell| cell.face = one);
-    surface.view_mut(-1.., -2..).fill(|_, _, cell| cell.face = two);
-    surface.view_mut(.., 3..4).fill(|_, _, cell| cell.face = three);
+    surface
+        .view_mut(..1, ..2)
+        .fill(|_, _, cell| cell.face = one);
+    surface
+        .view_mut(-1.., -2..)
+        .fill(|_, _, cell| cell.face = two);
+    surface
+        .view_mut(.., 3..4)
+        .fill(|_, _, cell| cell.face = three);
     surface
         .view_mut(3..4, ..-1)
         .fill(|_, _, cell| cell.face = three);

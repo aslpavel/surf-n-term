@@ -1,9 +1,5 @@
 use crate::{Face, Surface};
-use std::{
-    fmt,
-    io::{BufRead, Write},
-    time::Duration,
-};
+use std::{fmt, io::Write, time::Duration};
 
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
@@ -21,11 +17,6 @@ pub trait Terminal: Write {
 
 pub trait Renderer {
     fn render(&mut self, surface: &Surface) -> Result<(), TerminalError>;
-}
-
-pub trait Decoder {
-    type Item;
-    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, TerminalError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

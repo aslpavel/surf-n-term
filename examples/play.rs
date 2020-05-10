@@ -1,8 +1,8 @@
 use std::{boxed::Box, error::Error, io::Write, time::Duration};
-use surf_n_term::{Face, Renderer, Surface, SystemTerminal, Terminal, TerminalCommand, View};
+use surf_n_term::{Face, SystemTerminal, Terminal, TerminalCommand};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let bg = Face::default().with_bg(Some("#3c3836".parse()?));
+    // let bg = Face::default().with_bg(Some("#3c3836".parse()?));
     let purple = Face::default().with_bg(Some("#d3869b".parse()?));
     let green = Face::default().with_bg(Some("#b8bb26".parse()?));
     let red = Face::default().with_bg(Some("#fb4934".parse()?));

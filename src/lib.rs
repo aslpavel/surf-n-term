@@ -8,8 +8,8 @@ pub use surface::{Surface, View, ViewMut};
 
 pub mod terminal;
 pub use terminal::{
-    DecMode, DecModeStatus, Decoder, Key, KeyMod, KeyName, Renderer,
-    Terminal, TerminalCommand, TerminalEvent
+    DecMode, DecModeStatus, Key, KeyMod, KeyName, Renderer, Terminal, TerminalCommand,
+    TerminalEvent,
 };
 
 pub mod automata;

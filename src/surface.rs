@@ -1,5 +1,5 @@
 use crate::cell::Cell;
-use std::ops::{Range, Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
@@ -213,11 +213,7 @@ pub fn resolve_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize
         Bound::Included(start) => (*start, 0),
         Bound::Excluded(start) => (*start, 1),
     };
-    let offset = if start >= size {
-        1
-    } else {
-        offset
-    };
+    let offset = if start >= size { 1 } else { offset };
     let start = clip(start + size, 0, 2 * size - 1) % size + offset;
 
     let (end, offset) = match bound.end_bound() {
@@ -225,11 +221,7 @@ pub fn resolve_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize
         Bound::Included(end) => (*end, 1),
         Bound::Excluded(end) => (*end, 0),
     };
-    let offset = if end >= size {
-        1
-    } else {
-        offset
-    };
+    let offset = if end >= size { 1 } else { offset };
     let end = clip(end + size, 0, 2 * size - 1) % size + offset;
 
     if end <= start {
@@ -242,8 +234,8 @@ pub fn resolve_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize
 /// Construt new offset and shape for
 fn view_shape<RS, CS>(shape: Shape, rows: RS, cols: CS) -> (Range<usize>, Shape)
 where
-   RS: RangeBounds<i32>,
-   CS: RangeBounds<i32>,
+    RS: RangeBounds<i32>,
+    CS: RangeBounds<i32>,
 {
     match (
         resolve_bound(cols, shape.width),
@@ -271,24 +263,21 @@ where
                 row_stride: 0,
                 col_stride: 0,
             };
-            let range = Range {
-                start: 0,
-                end: 0,
-            };
+            let range = Range { start: 0, end: 0 };
             (range, shape)
         }
     }
 }
 
-
+/*
 use crate::TerminalCommand;
 
 pub fn diff(src: &Surface, dst: &Surface) -> Vec<TerminalCommand> {
     let mut cmds = Vec::new();
     let shape = src.shape();
     for row in 0..shape.height as i32 {
-        let src_line = src.view(row..row+1, ..);
-        let dst_line = dst.view(row..row+1, ..);
+        let src_line = src.view(row..row + 1, ..);
+        let dst_line = dst.view(row..row + 1, ..);
         for (src_cell, dst_cell) in src_line.iter().zip(dst_line.iter()) {
             if src_cell != dst_cell {
                 todo!()
@@ -297,6 +286,7 @@ pub fn diff(src: &Surface, dst: &Surface) -> Vec<TerminalCommand> {
     }
     cmds
 }
+*/
 
 #[cfg(test)]
 mod tests {

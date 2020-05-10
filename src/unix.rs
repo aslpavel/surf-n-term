@@ -1,9 +1,8 @@
 use crate::common::IOQueue;
+use crate::decoder::{Decoder, TTYDecoder};
 use crate::terminal::{
-    Decoder, Renderer, Terminal, TerminalCommand, TerminalError,
-    TerminalEvent, TerminalSize,
+    Renderer, Terminal, TerminalCommand, TerminalError, TerminalEvent, TerminalSize,
 };
-use crate::decoder::TTYDecoder;
 use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
