@@ -4,7 +4,7 @@ mod cell;
 pub use crate::cell::{Color, Face, FaceAttrs};
 
 mod surface;
-pub use crate::surface::{Surface, View};
+pub use crate::surface::{Surface, View, ViewMut};
 
 pub mod terminal;
 pub use crate::terminal::{

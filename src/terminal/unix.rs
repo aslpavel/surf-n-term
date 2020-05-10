@@ -208,7 +208,7 @@ impl Terminal for UnixTerminal {
             DecModeReport(mode) => {
                 write!(self, "\x1b[?{}$p", mode as usize)?;
             }
-            CursorTo { row, col } => write!(self, "\x1b[{};{}H", row, col)?,
+            CursorTo { row, col } => write!(self, "\x1b[{};{}H", row + 1, col + 1)?,
             CursorReport => self.write_all(b"\x1b[6n")?,
             CursorSave => self.write_all(b"\x1b[s")?,
             CursorRestore => self.write_all(b"\x1b[u")?,
@@ -262,7 +262,7 @@ impl Renderer for UnixTerminal {
                     cur_face = cell.face;
                 }
                 match cell.glyph {
-                    Some(glyph) => self.write_all(&glyph)?,
+                    Some(glyph) => write!(self, "{}", glyph)?,
                     None => self.write_all(&[b' '])?,
                 };
             }

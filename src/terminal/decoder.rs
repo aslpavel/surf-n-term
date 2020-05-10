@@ -286,7 +286,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         Event(event) => event.clone(),
         Char => {
             let string = std::str::from_utf8(data).expect("[TTYDecoder] utf8 expected");
-            let code = string.chars().next().expect("[TTYDecoder] utf8 expected");
+            let code = string.chars().next()?;
             TerminalEvent::Key(KeyName::Char(code).into())
         }
         DecMode => {

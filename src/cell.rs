@@ -1,4 +1,4 @@
-use std::{fmt, ops::Deref, str::FromStr};
+use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Color {
@@ -163,21 +163,10 @@ impl Default for Face {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Glyph([u8; 5]);
-
-impl Deref for Glyph {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[derive(Clone)]
 pub struct Cell {
     pub face: Face,
-    pub glyph: Option<Glyph>,
+    pub glyph: Option<char>,
 }
 
 impl Default for Cell {
