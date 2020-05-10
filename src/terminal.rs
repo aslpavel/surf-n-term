@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::{Face, Surface};
 use std::{fmt, io::Write, time::Duration};
 
@@ -6,17 +7,17 @@ pub trait Terminal: Write {
     /// Schedue TerminalComman for execution
     ///
     /// Command will be submitted on the next call to poll `Terminal::poll`
-    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), TerminalError>;
+    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error>;
 
     /// Poll for TerminalEvent
     ///
     /// Only this function actually reads or writes data to/from the terminal.
     /// None duration blocks indefinitely until event received from the terminal.
-    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, TerminalError>;
+    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error>;
 }
 
 pub trait Renderer {
-    fn render(&mut self, surface: &Surface) -> Result<(), TerminalError>;
+    fn render(&mut self, surface: &Surface) -> Result<(), Error>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,7 +29,7 @@ pub enum TerminalCommand {
     /// Request current cursor postion
     CursorReport,
     /// Move cursor to specified row and column
-    CursorTo { row: usize, col: usize },
+    CursorTo(Position),
     /// Save current cursor position
     CursorSave,
     /// Restore previously saved cursor position
@@ -61,6 +62,18 @@ pub enum DecMode {
     AltScreen = 1049,
     /// Kitty keyboard mode https://sw.kovidgoyal.net/kitty/protocol-extensions.html
     KittyKeyboard = 2017,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Position {
+    pub row: usize,
+    pub col: usize,
+}
+
+impl Position {
+    pub fn new(row: usize, col: usize) -> Self {
+        Self { row, col }
+    }
 }
 
 impl DecMode {
@@ -317,33 +330,5 @@ impl fmt::Debug for KeyMod {
             }
         }
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub enum TerminalError {
-    IOError(std::io::Error),
-    NixError(nix::Error),
-    Closed,
-    NotATTY,
-}
-
-impl fmt::Display for TerminalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for TerminalError {}
-
-impl From<std::io::Error> for TerminalError {
-    fn from(error: std::io::Error) -> Self {
-        Self::IOError(error)
-    }
-}
-
-impl From<nix::Error> for TerminalError {
-    fn from(error: nix::Error) -> Self {
-        Self::NixError(error)
     }
 }

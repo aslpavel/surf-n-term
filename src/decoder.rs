@@ -1,7 +1,6 @@
 use crate::automata::{DFAState, DFA, NFA};
-use crate::terminal::{
-    DecModeStatus, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent, TerminalSize,
-};
+use crate::error::Error;
+use crate::terminal::{DecModeStatus, Key, KeyMod, KeyName, Mouse, TerminalEvent, TerminalSize};
 use std::{fmt, io::BufRead};
 
 pub trait Decoder {
@@ -27,7 +26,7 @@ pub struct TTYDecoder {
 
 impl Decoder for TTYDecoder {
     type Item = TerminalEvent;
-    type Error = TerminalError;
+    type Error = Error;
 
     fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, Self::Error> {
         // process rescheduled data first
@@ -436,7 +435,7 @@ mod tests {
     use std::io::{Cursor, Write};
 
     #[test]
-    fn test_basic() -> Result<(), TerminalError> {
+    fn test_basic() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -475,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reschedule() -> Result<(), TerminalError> {
+    fn test_reschedule() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -506,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cursor_position() -> Result<(), TerminalError> {
+    fn test_cursor_position() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -521,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_size() -> Result<(), TerminalError> {
+    fn test_terminal_size() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -551,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mouse_sgr() -> Result<(), TerminalError> {
+    fn test_mouse_sgr() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -592,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn test_char() -> Result<(), TerminalError> {
+    fn test_char() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -607,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dec_mode() -> Result<(), TerminalError> {
+    fn test_dec_mode() -> Result<(), Error> {
         use crate::DecMode;
 
         let mut cursor = Cursor::new(Vec::new());

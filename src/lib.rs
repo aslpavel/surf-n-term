@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+pub mod error;
+
 mod cell;
 pub use cell::{Color, Face, FaceAttrs};
 
@@ -8,7 +10,7 @@ pub use surface::{Surface, View, ViewMut};
 
 pub mod terminal;
 pub use terminal::{
-    DecMode, DecModeStatus, Key, KeyMod, KeyName, Renderer, Terminal, TerminalCommand,
+    DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Renderer, Terminal, TerminalCommand,
     TerminalEvent,
 };
 

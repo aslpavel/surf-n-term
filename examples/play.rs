@@ -1,5 +1,5 @@
 use std::{boxed::Box, error::Error, io::Write, time::Duration};
-use surf_n_term::{Face, SystemTerminal, Terminal, TerminalCommand};
+use surf_n_term::{Face, Position, SystemTerminal, Terminal, TerminalCommand};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // let bg = Face::default().with_bg(Some("#3c3836".parse()?));
@@ -12,19 +12,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         use TerminalCommand::*;
         term.execute(CursorSave)?;
 
-        term.execute(CursorTo { row: 20, col: 0 })?;
+        term.execute(CursorTo(Position::new(20, 0)))?;
         term.execute(Face(purple))?;
         write!(&mut term, "\x1b[1J")?;
 
-        term.execute(CursorTo { row: 0, col: 0 })?;
+        term.execute(CursorTo(Position::new(0, 0)))?;
         write!(&mut term, "Erase chars")?;
-        term.execute(CursorTo { row: 1, col: 20 })?;
+        term.execute(CursorTo(Position::new(1, 20)))?;
         term.execute(Face(green))?;
         write!(&mut term, "\x1b[10X")?;
 
-        term.execute(CursorTo { row: 3, col: 0 })?;
+        term.execute(CursorTo(Position::new(3, 0)))?;
         write!(&mut term, "Erase right")?;
-        term.execute(CursorTo { row: 4, col: 10 })?;
+        term.execute(CursorTo(Position::new(4, 10)))?;
         term.execute(Face(green))?;
         term.execute(EraseLineRight)?;
 

@@ -1,8 +1,7 @@
 use crate::common::IOQueue;
 use crate::decoder::{Decoder, TTYDecoder};
-use crate::terminal::{
-    Renderer, Terminal, TerminalCommand, TerminalError, TerminalEvent, TerminalSize,
-};
+use crate::error::Error;
+use crate::terminal::{Position, Renderer, Terminal, TerminalCommand, TerminalEvent, TerminalSize};
 use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -40,9 +39,9 @@ pub struct UnixTerminal {
 }
 
 impl UnixTerminal {
-    pub fn new_from_fd(write_fd: nix::RawFd, read_fd: nix::RawFd) -> Result<Self, TerminalError> {
+    pub fn new_from_fd(write_fd: nix::RawFd, read_fd: nix::RawFd) -> Result<Self, Error> {
         if !nix::isatty(write_fd)? || !nix::isatty(read_fd)? {
-            return Err(TerminalError::NotATTY);
+            return Err(Error::NotATTY);
         }
 
         // switching terminal into a raw mode
@@ -80,12 +79,12 @@ impl UnixTerminal {
         })
     }
 
-    pub fn new() -> Result<Self, TerminalError> {
+    pub fn new() -> Result<Self, Error> {
         let tty = nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty())?;
         Self::new_from_fd(tty, tty)
     }
 
-    pub fn size(&self) -> Result<TerminalSize, TerminalError> {
+    pub fn size(&self) -> Result<TerminalSize, Error> {
         unsafe {
             let mut winsize: nix::winsize = std::mem::zeroed();
             if libc::ioctl(self.write_fd, nix::TIOCGWINSZ, &mut winsize) < 0 {
@@ -125,7 +124,7 @@ impl Write for UnixTerminal {
 }
 
 impl Terminal for UnixTerminal {
-    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, TerminalError> {
+    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error> {
         // NOTE:
         // Only `select` reliably works with /dev/tty on MacOS, `poll` for example
         // always returns POLLNVAL.
@@ -198,7 +197,7 @@ impl Terminal for UnixTerminal {
         Ok(self.events_queue.pop_front())
     }
 
-    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), TerminalError> {
+    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         use TerminalCommand::*;
 
         match cmd {
@@ -209,7 +208,7 @@ impl Terminal for UnixTerminal {
             DecModeReport(mode) => {
                 write!(self, "\x1b[?{}$p", mode as usize)?;
             }
-            CursorTo { row, col } => write!(self, "\x1b[{};{}H", row + 1, col + 1)?,
+            CursorTo(pos) => write!(self, "\x1b[{};{}H", pos.row + 1, pos.col + 1)?,
             CursorReport => self.write_all(b"\x1b[6n")?,
             CursorSave => self.write_all(b"\x1b[s")?,
             CursorRestore => self.write_all(b"\x1b[u")?,
@@ -249,13 +248,13 @@ impl Terminal for UnixTerminal {
 }
 
 impl Renderer for UnixTerminal {
-    fn render(&mut self, surface: &Surface) -> Result<(), TerminalError> {
+    fn render(&mut self, surface: &Surface) -> Result<(), Error> {
         let mut cur_face = Face::default();
         let shape = surface.shape();
         let data = surface.data();
         self.execute(TerminalCommand::CursorSave)?;
         for row in 0..shape.height {
-            self.execute(TerminalCommand::CursorTo { row, col: 0 })?;
+            self.execute(TerminalCommand::CursorTo(Position::new(row, 0)))?;
             for col in 0..shape.width {
                 let cell = &data[shape.index(row, col)];
                 if cur_face != cell.face {

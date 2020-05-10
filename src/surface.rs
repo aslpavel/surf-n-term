@@ -272,18 +272,28 @@ where
 /*
 use crate::TerminalCommand;
 
-pub fn diff(src: &Surface, dst: &Surface) -> Vec<TerminalCommand> {
+pub fn diff(src_surf: &Surface, dst_surf: &Surface) -> Vec<TerminalCommand> {
+    use TerminalCommand::*
+
     let mut cmds = Vec::new();
-    let shape = src.shape();
-    for row in 0..shape.height as i32 {
-        let src_line = src.view(row..row + 1, ..);
-        let dst_line = dst.view(row..row + 1, ..);
-        for (src_cell, dst_cell) in src_line.iter().zip(dst_line.iter()) {
-            if src_cell != dst_cell {
-                todo!()
+    let mut cursor = CursorTo { row: 0, col: 0};
+
+    cmds.push(cursor);
+    let src_shape = src_surf.shape();
+    for row in 0..shape.height {
+        for col in 0..shape.width {
+            match (src_surf.get(row, col), dst_surf.get(row, col)) {
+                (Some(src), Some(dst)) => {
+                    if src == dst {
+                        continue;
+                    }
+                    if cursor
+                }
+                _ => break,
             }
         }
     }
+
     cmds
 }
 */
