@@ -1,8 +1,8 @@
-use super::{
-    automata::{DFAState, DFA, NFA},
+use crate::terminal::{
     DecModeStatus, Decoder, Key, KeyMod, KeyName, Mouse, TerminalError, TerminalEvent,
     TerminalSize,
 };
+use crate::automata::{DFAState, DFA, NFA};
 use std::{fmt, io::BufRead};
 
 #[derive(Debug)]
@@ -293,7 +293,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             // "\x1b[?{mode};{status}$y"
             let mut nums = tty_numbers(&data[3..data.len() - 2]);
             TerminalEvent::DecMode {
-                mode: super::DecMode::from_usize(nums.next()?)?,
+                mode: crate::terminal::DecMode::from_usize(nums.next()?)?,
                 status: DecModeStatus::from_usize(nums.next()?)?,
             }
         }

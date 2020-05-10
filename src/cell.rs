@@ -163,7 +163,7 @@ impl Default for Face {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cell {
     pub face: Face,
     pub glyph: Option<char>,

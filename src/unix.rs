@@ -1,7 +1,9 @@
-use super::{
-    common::IOQueue, Decoder, Renderer, TTYDecoder, Terminal, TerminalCommand, TerminalError,
+use crate::common::IOQueue;
+use crate::terminal::{
+    Decoder, Renderer, Terminal, TerminalCommand, TerminalError,
     TerminalEvent, TerminalSize,
 };
+use crate::decoder::TTYDecoder;
 use crate::{Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{

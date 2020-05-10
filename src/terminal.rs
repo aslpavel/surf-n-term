@@ -5,17 +5,6 @@ use std::{
     time::Duration,
 };
 
-mod automata;
-pub use automata::{DFA, NFA};
-
-mod common;
-
-mod decoder;
-pub use decoder::TTYDecoder;
-
-mod unix;
-pub type SystemTerminal = unix::UnixTerminal;
-
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
     /// Schedue TerminalComman for execution
@@ -84,7 +73,7 @@ pub enum DecMode {
 }
 
 impl DecMode {
-    fn from_usize(code: usize) -> Option<Self> {
+    pub fn from_usize(code: usize) -> Option<Self> {
         use DecMode::*;
         for mode in [
             VisibleCursor,
@@ -115,7 +104,7 @@ pub enum DecModeStatus {
 }
 
 impl DecModeStatus {
-    fn from_usize(code: usize) -> Option<Self> {
+    pub fn from_usize(code: usize) -> Option<Self> {
         use DecModeStatus::*;
         for status in [
             NotRecognized,

@@ -41,7 +41,7 @@ pub trait View {
         }
     }
 
-    fn view<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceView<'_>
+    fn view<RS, CS>(&self, rows: RS, cols: CS) -> SurfaceView<'_>
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
@@ -281,17 +281,22 @@ where
 }
 
 
-/*
-pub fn diff(src: &Surface, dst: &mut Surface) -> Vec<TerminalCommand> {
+use crate::TerminalCommand;
+
+pub fn diff(src: &Surface, dst: &Surface) -> Vec<TerminalCommand> {
     let mut cmds = Vec::new();
     let shape = src.shape();
     for row in 0..shape.height as i32 {
         let src_line = src.view(row..row+1, ..);
         let dst_line = dst.view(row..row+1, ..);
+        for (src_cell, dst_cell) in src_line.iter().zip(dst_line.iter()) {
+            if src_cell != dst_cell {
+                todo!()
+            }
+        }
     }
     cmds
 }
-*/
 
 #[cfg(test)]
 mod tests {
