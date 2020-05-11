@@ -16,6 +16,7 @@ pub use terminal::{
 
 pub mod automata;
 pub mod decoder;
+pub mod encoder;
 
 mod unix;
 pub type SystemTerminal = unix::UnixTerminal;

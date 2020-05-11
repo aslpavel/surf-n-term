@@ -1,8 +1,9 @@
 use crate::common::IOQueue;
 use crate::decoder::{Decoder, TTYDecoder};
+use crate::encoder::{Encoder, TTYEncoder};
 use crate::error::Error;
 use crate::terminal::{Position, Renderer, Terminal, TerminalCommand, TerminalEvent, TerminalSize};
-use crate::{Cell, Face, FaceAttrs, Surface, View};
+use crate::{Cell, Face, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
@@ -29,6 +30,7 @@ mod nix {
 
 pub struct UnixTerminal {
     write_fd: nix::RawFd,
+    encoder: TTYEncoder,
     write_queue: IOQueue,
     read_fd: nix::RawFd,
     decoder: TTYDecoder,
@@ -69,6 +71,7 @@ impl UnixTerminal {
 
         Ok(Self {
             write_fd,
+            encoder: TTYEncoder::new(),
             write_queue: Default::default(),
             read_fd,
             decoder: TTYDecoder::new(),
@@ -198,53 +201,7 @@ impl Terminal for UnixTerminal {
     }
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
-        use TerminalCommand::*;
-
-        match cmd {
-            DecModeSet { enable, mode } => {
-                let flag = if enable { "h" } else { "l" };
-                write!(self, "\x1b[?{}{}", mode as usize, flag)?;
-            }
-            DecModeReport(mode) => {
-                write!(self, "\x1b[?{}$p", mode as usize)?;
-            }
-            CursorTo(pos) => write!(self, "\x1b[{};{}H", pos.row + 1, pos.col + 1)?,
-            CursorReport => self.write_all(b"\x1b[6n")?,
-            CursorSave => self.write_all(b"\x1b[s")?,
-            CursorRestore => self.write_all(b"\x1b[u")?,
-            EraseLineRight => self.write_all(b"\x1b[K")?,
-            EraseLineLeft => self.write_all(b"\x1b[1K")?,
-            EraseLine => self.write_all(b"\x1b[2K")?,
-            EraseChars(count) => write!(self, "\x1b[{}X", count)?,
-            Face(face) => {
-                self.write_all(b"\x1b[00")?;
-                if let Some(fg) = face.fg {
-                    let (r, g, b) = fg.rgb_u8();
-                    write!(self, ";38;2;{};{};{}", r, g, b)?;
-                }
-                if let Some(bg) = face.bg {
-                    let (r, g, b) = bg.rgb_u8();
-                    write!(self, ";48;2;{};{};{}", r, g, b)?;
-                }
-                if !face.attrs.is_empty() {
-                    for (flag, code) in &[
-                        (FaceAttrs::BOLD, b";01"),
-                        (FaceAttrs::ITALIC, b";03"),
-                        (FaceAttrs::UNDERLINE, b";04"),
-                        (FaceAttrs::BLINK, b";05"),
-                        (FaceAttrs::REVERSE, b";07"),
-                    ] {
-                        if face.attrs.contains(*flag) {
-                            self.write_all(*code)?;
-                        }
-                    }
-                }
-                self.write_all(b"m")?;
-            }
-            Reset => self.write_all(b"\x1bc")?,
-        }
-
-        Ok(())
+        self.encoder.encode(&mut self.write_queue, cmd)
     }
 }
 
