@@ -72,6 +72,7 @@ impl Encoder for TTYEncoder {
                 out.write_all(b"m")?;
             }
             Reset => out.write_all(b"\x1bc")?,
+            Char(c) => write!(out, "{}", c)?,
         }
 
         Ok(())

@@ -1,24 +1,20 @@
 #![allow(clippy::type_complexity)]
 
-pub mod error;
-
+pub mod automata;
 mod cell;
-pub use cell::{Cell, Color, Face, FaceAttrs};
-
+mod common;
+pub mod decoder;
+pub mod encoder;
+pub mod error;
 mod surface;
-pub use surface::{Surface, View, ViewMut};
-
 pub mod terminal;
+mod unix;
+
+pub use cell::{Cell, Color, Face, FaceAttrs};
+pub use surface::{Surface, View, ViewMut};
 pub use terminal::{
     DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Renderer, Terminal, TerminalCommand,
     TerminalEvent,
 };
 
-pub mod automata;
-pub mod decoder;
-pub mod encoder;
-
-mod unix;
 pub type SystemTerminal = unix::UnixTerminal;
-
-mod common;

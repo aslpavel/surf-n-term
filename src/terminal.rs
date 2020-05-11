@@ -46,6 +46,8 @@ pub enum TerminalCommand {
     EraseChars(usize),
     /// Full reset of the terminal
     Reset,
+    /// Put character
+    Char(char),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

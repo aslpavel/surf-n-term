@@ -42,7 +42,7 @@ pub trait View {
         self.shape().width
     }
 
-    /// Get item at specified `row` and `col`
+    /// Get a reference to item at specified `row` and `col`
     fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
         self.data().get(self.shape().index(row, col))
     }
@@ -89,7 +89,7 @@ impl<'a, Item> Iterator for ViewIter<'a, Item> {
                 self.col = 0;
                 self.row += 1;
             }
-            Some(&self.data[index])
+            self.data.get(index)
         }
     }
 }
@@ -101,7 +101,13 @@ pub trait ViewMut: View {
     /// use `Self::get_mut` function instead to access items.
     fn data_mut(&mut self) -> &mut [Self::Item];
 
-     /// Create mutable sub-view restricted by `rows` and `cols` bounds.
+    /// Get a mutable reference to item at specified `row` and `col`
+    fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut Self::Item> {
+        let shape = self.shape();
+        self.data_mut().get_mut(shape.index(row, col))
+    }
+
+    /// Create mutable sub-view restricted by `rows` and `cols` bounds.
     fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceViewMut<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
@@ -110,6 +116,14 @@ pub trait ViewMut: View {
         let (range, shape) = view_shape(self.shape(), rows, cols);
         let data = &mut self.data_mut()[range];
         SurfaceViewMut { shape, data }
+    }
+
+    fn iter_mut(&mut self) -> ViewMutIter<'_, Self::Item> {
+        ViewMutIter {
+            col: 0,
+            shape: self.shape(),
+            data: self.data_mut(),
+        }
     }
 
     /// Fill view with the `fill` function.
@@ -127,6 +141,41 @@ pub trait ViewMut: View {
                 let item = std::mem::replace(&mut data[index], tmp);
                 tmp = std::mem::replace(&mut data[index], fill(row, col, item));
             }
+        }
+    }
+}
+
+pub struct ViewMutIter<'a, Item: 'a> {
+    col: usize,
+    shape: Shape,
+    data: &'a mut [Item],
+}
+
+impl<'a, Item: 'a> Iterator for ViewMutIter<'a, Item>
+where Item: std::fmt::Debug,
+{
+    type Item = &'a mut Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.data.is_empty() {
+            None
+        } else {
+            let data = std::mem::replace(&mut self.data, &mut []);
+            if data.len() < self.shape.col_stride {
+                return None;
+            }
+            let (item, data) = data.split_at_mut(self.shape.col_stride);
+            self.col += 1;
+            if self.col < self.shape.width {
+                self.data = data
+            } else {
+                let offset = self.shape.row_stride - self.shape.width * self.shape.col_stride;
+                if data.len() >= offset {
+                    let (_gap, data) = data.split_at_mut(offset);
+                    self.data = data
+                }
+            }
+            item.get_mut(0)
         }
     }
 }
@@ -322,7 +371,11 @@ mod tests {
         surf.view_mut(.., ..1).fill(|_, _, _| 1);
         surf.view_mut(1..2, ..).fill(|_, _, _| 2);
         surf.view_mut(.., -1..).fill(|_, _, _| 3);
-        let reference: Vec<u8> = vec![1, 0, 0, 3, 2, 2, 2, 3, 1, 0, 0, 3];
+        let reference: Vec<u8> = vec![
+            1, 0, 0, 3, // 0
+            2, 2, 2, 3, // 1
+            1, 0, 0, 3, // 2
+        ];
         assert_eq!(surf.iter().copied().collect::<Vec<_>>(), reference);
 
         let view = surf.view(3..3, ..);
@@ -335,5 +388,34 @@ mod tests {
         assert_eq!(view.iter().count(), 2);
         assert_eq!(view.get(0, 1), Some(&2u8));
         assert_eq!(view.get(0, 2), None);
+    }
+
+    #[test]
+    fn test_view_mut_iter() {
+        let mut data: Vec<usize> = Vec::new();
+        data.resize_with(12, || 0);
+        let mut surf = SurfaceViewMut {
+            data: &mut data,
+            shape: Shape {
+                row_stride: 4,
+                col_stride: 2,
+                width: 2,
+                height: 3,
+            },
+        };
+
+        let mut view = surf.view_mut(.., 1..);
+        assert_eq!(view.iter().count(), 3);
+        assert_eq!(view.iter_mut().count(), 3);
+
+        for (index, value) in view.iter_mut().enumerate() {
+            *value = index + 1;
+        }
+        let reference = vec![
+            0, 0, 1, 0, // 0
+            0, 0, 2, 0, // 1
+            0, 0, 3, 0, // 2
+        ];
+        assert_eq!(data, reference);
     }
 }
