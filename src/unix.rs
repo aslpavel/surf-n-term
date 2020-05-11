@@ -2,7 +2,7 @@ use crate::common::IOQueue;
 use crate::decoder::{Decoder, TTYDecoder};
 use crate::error::Error;
 use crate::terminal::{Position, Renderer, Terminal, TerminalCommand, TerminalEvent, TerminalSize};
-use crate::{Face, FaceAttrs, Surface, View};
+use crate::{Cell, Face, FaceAttrs, Surface, View};
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
@@ -215,6 +215,7 @@ impl Terminal for UnixTerminal {
             EraseLineRight => self.write_all(b"\x1b[K")?,
             EraseLineLeft => self.write_all(b"\x1b[1K")?,
             EraseLine => self.write_all(b"\x1b[2K")?,
+            EraseChars(count) => write!(self, "\x1b[{}X", count)?,
             Face(face) => {
                 self.write_all(b"\x1b[00")?;
                 if let Some(fg) = face.fg {
@@ -248,7 +249,7 @@ impl Terminal for UnixTerminal {
 }
 
 impl Renderer for UnixTerminal {
-    fn render(&mut self, surface: &Surface) -> Result<(), Error> {
+    fn render(&mut self, surface: &Surface<Cell>) -> Result<(), Error> {
         let mut cur_face = Face::default();
         let shape = surface.shape();
         let data = surface.data();

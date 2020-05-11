@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::{Face, Surface};
+use crate::{Cell, Face, Surface};
 use std::{fmt, io::Write, time::Duration};
 
 /// Main trait to interact with a Terminal
@@ -17,7 +17,7 @@ pub trait Terminal: Write {
 }
 
 pub trait Renderer {
-    fn render(&mut self, surface: &Surface) -> Result<(), Error>;
+    fn render(&mut self, surface: &Surface<Cell>) -> Result<(), Error>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,6 +42,8 @@ pub enum TerminalCommand {
     EraseLine,
     /// Set current face (foreground/background colors and text attributes)
     Face(Face),
+    /// Erase specified ammount of characters to the right from current cursor position
+    EraseChars(usize),
     /// Full reset of the terminal
     Reset,
 }

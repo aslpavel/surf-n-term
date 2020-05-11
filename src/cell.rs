@@ -169,6 +169,12 @@ pub struct Cell {
     pub glyph: Option<char>,
 }
 
+impl Cell {
+    pub fn with_face(self, face: Face) -> Self {
+        Self { face, ..self }
+    }
+}
+
 impl Default for Cell {
     fn default() -> Self {
         Self {

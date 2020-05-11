@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         write!(&mut term, "Erase chars")?;
         term.execute(CursorTo(Position::new(1, 20)))?;
         term.execute(Face(green))?;
-        write!(&mut term, "\x1b[10X")?;
+        term.execute(EraseChars(10))?;
 
         term.execute(CursorTo(Position::new(3, 0)))?;
         write!(&mut term, "Erase right")?;

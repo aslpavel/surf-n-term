@@ -1,4 +1,4 @@
-use crate::cell::Cell;
+// use crate::cell::Cell;
 use std::ops::{Bound, Range, RangeBounds};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -16,9 +16,9 @@ impl Shape {
 }
 
 pub trait View {
+    type Item;
     fn shape(&self) -> Shape;
-
-    fn data(&self) -> &[Cell];
+    fn data(&self) -> &[Self::Item];
 
     fn is_empty(&self) -> bool {
         self.data().is_empty()
@@ -32,7 +32,7 @@ pub trait View {
         self.shape().width
     }
 
-    fn get(&self, row: usize, col: usize) -> Option<&Cell> {
+    fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
         let shape = self.shape();
         if row >= shape.height || col >= shape.width {
             None
@@ -41,7 +41,7 @@ pub trait View {
         }
     }
 
-    fn view<RS, CS>(&self, rows: RS, cols: CS) -> SurfaceView<'_>
+    fn view<RS, CS>(&self, rows: RS, cols: CS) -> SurfaceView<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
@@ -51,7 +51,7 @@ pub trait View {
         SurfaceView { shape, data }
     }
 
-    fn iter(&self) -> ViewIter<'_> {
+    fn iter(&self) -> ViewIter<'_, Self::Item> {
         ViewIter {
             row: 0,
             col: 0,
@@ -61,15 +61,15 @@ pub trait View {
     }
 }
 
-pub struct ViewIter<'a> {
+pub struct ViewIter<'a, Item> {
     row: usize,
     col: usize,
     shape: Shape,
-    data: &'a [Cell],
+    data: &'a [Item],
 }
 
-impl<'a> Iterator for ViewIter<'a> {
-    type Item = &'a Cell;
+impl<'a, Item> Iterator for ViewIter<'a, Item> {
+    type Item = &'a Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row >= self.shape.height || self.col >= self.shape.width {
@@ -77,7 +77,7 @@ impl<'a> Iterator for ViewIter<'a> {
         } else {
             let index = self.shape.index(self.row, self.col);
             self.col += 1;
-            if self.col > self.shape.width {
+            if self.col >= self.shape.width {
                 self.col = 0;
                 self.row += 1;
             }
@@ -87,9 +87,9 @@ impl<'a> Iterator for ViewIter<'a> {
 }
 
 pub trait ViewMut: View {
-    fn data_mut(&mut self) -> &mut [Cell];
+    fn data_mut(&mut self) -> &mut [Self::Item];
 
-    fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceViewMut<'_>
+    fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceViewMut<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
@@ -101,26 +101,33 @@ pub trait ViewMut: View {
 
     fn fill<F>(&mut self, mut fill: F)
     where
-        F: FnMut(usize, usize, &mut Cell),
+        F: FnMut(usize, usize, Self::Item) -> Self::Item,
+        Self::Item: Default,
     {
         let shape = self.shape();
         let data = self.data_mut();
+        let mut tmp = Self::Item::default();
         for row in 0..shape.height {
             for col in 0..shape.width {
-                fill(row, col, &mut data[shape.index(row, col)])
+                let index = shape.index(row, col);
+                let item = std::mem::replace(&mut data[index], tmp);
+                tmp = std::mem::replace(&mut data[index], fill(row, col, item));
             }
         }
     }
 }
 
 #[derive(Clone)]
-pub struct Surface {
+pub struct Surface<Item> {
     shape: Shape,
-    data: Vec<Cell>,
+    data: Vec<Item>,
 }
 
-impl Surface {
-    pub fn new(height: usize, width: usize) -> Self {
+impl<Item> Surface<Item> {
+    pub fn new(height: usize, width: usize) -> Self
+    where
+        Item: Default,
+    {
         let mut data = Vec::new();
         data.resize_with(height * width, Default::default);
         Self {
@@ -135,54 +142,60 @@ impl Surface {
     }
 }
 
-impl View for Surface {
+impl<Item> View for Surface<Item> {
+    type Item = Item;
+
     fn shape(&self) -> Shape {
         self.shape
     }
 
-    fn data(&self) -> &[Cell] {
+    fn data(&self) -> &[Self::Item] {
         &self.data
     }
 }
 
-impl ViewMut for Surface {
-    fn data_mut(&mut self) -> &mut [Cell] {
+impl<Item> ViewMut for Surface<Item> {
+    fn data_mut(&mut self) -> &mut [Self::Item] {
         &mut self.data
     }
 }
 
-pub struct SurfaceView<'a> {
+pub struct SurfaceView<'a, Item> {
     shape: Shape,
-    data: &'a [Cell],
+    data: &'a [Item],
 }
 
-impl<'a> View for SurfaceView<'a> {
+impl<'a, Item> View for SurfaceView<'a, Item> {
+    type Item = Item;
+
     fn shape(&self) -> Shape {
         self.shape
     }
 
-    fn data(&self) -> &[Cell] {
+    fn data(&self) -> &[Self::Item] {
         &self.data
     }
 }
 
-pub struct SurfaceViewMut<'a> {
+pub struct SurfaceViewMut<'a, Item> {
     shape: Shape,
-    data: &'a mut [Cell],
+    data: &'a mut [Item],
 }
 
-impl<'a> View for SurfaceViewMut<'a> {
+impl<'a, Item> View for SurfaceViewMut<'a, Item> {
+    type Item = Item;
+
     fn shape(&self) -> Shape {
         self.shape
     }
 
-    fn data(&self) -> &[Cell] {
+    fn data(&self) -> &[Self::Item] {
         &self.data
     }
 }
 
-impl<'a> ViewMut for SurfaceViewMut<'a> {
-    fn data_mut(&mut self) -> &mut [Cell] {
+impl<'a, Item> ViewMut for SurfaceViewMut<'a, Item> {
+    fn data_mut(&mut self) -> &mut [Self::Item] {
         &mut self.data
     }
 }
@@ -202,7 +215,7 @@ where
 }
 
 /// Resolve bounds the same way python or numpy does for ranges when indexing arrays
-pub fn resolve_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usize)> {
+pub fn view_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usize)> {
     //  (index + size) % size - almost works
     //  0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5  6  7  8  9
     //-10 -9 -8 -7 -6 -5 -4 -3 -2 -1  0  1  2  3  4  5  6  7  8  9
@@ -238,8 +251,8 @@ where
     CS: RangeBounds<i32>,
 {
     match (
-        resolve_bound(cols, shape.width),
-        resolve_bound(rows, shape.height),
+        view_bound(cols, shape.width),
+        view_bound(rows, shape.height),
     ) {
         (Some((col_start, col_end)), Some((row_start, row_end))) => {
             let width = col_end - col_start;
@@ -270,47 +283,86 @@ where
 }
 
 /*
-use crate::TerminalCommand;
+use crate::{Position, TerminalCommand};
+
+struct DiffStatet {
+    cmds: Vec<TerminalCommand>,
+    face: Face,
+    cursor: Position,
+}
 
 pub fn diff(src_surf: &Surface, dst_surf: &Surface) -> Vec<TerminalCommand> {
-    use TerminalCommand::*
+    use TerminalCommand::*;
 
     let mut cmds = Vec::new();
-    let mut cursor = CursorTo { row: 0, col: 0};
 
-    cmds.push(cursor);
+    // initialize to known state
+    cmds.push(CursorSave);
+    // current cursor position
+    let mut cursor = Position::new(0, 0);
+    cmds.push(CursorTo(cursor));
+    // currently applied face
+    let mut face = crate::Face::default();
+    cmds.push(Face(face));
+    // erase region
+    let mut erase: Option<usize> = None;
+
     let src_shape = src_surf.shape();
-    for row in 0..shape.height {
-        for col in 0..shape.width {
+    for row in 0..src_shape.height {
+        for col in 0..src_shape.width {
             match (src_surf.get(row, col), dst_surf.get(row, col)) {
-                (Some(src), Some(dst)) => {
+                (Some(src), Some(dst)) =>
+                    // nothing todo
                     if src == dst {
                         continue;
                     }
-                    if cursor
+                    if src.glyph.is_none() || src.glyph == Some(' ') {
+
+                    } else {
+
+                    }
+                    if src.face != dst.face && src.face != face {
+                        cmds.push(Face(src.face));
+                        face = src.face;
+                    }
+
                 }
                 _ => break,
             }
         }
     }
 
+    cmds.push(CursorRestore);
     cmds
 }
 */
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_bound;
+    use super::*;
 
     #[test]
-    fn test_resolve_range() {
-        assert_eq!(resolve_bound(.., 10), Some((0, 10)));
-        assert_eq!(resolve_bound(..-1, 10), Some((0, 9)));
-        assert_eq!(resolve_bound(..=-1, 10), Some((0, 10)));
-        assert_eq!(resolve_bound(-5..8, 10), Some((5, 8)));
-        assert_eq!(resolve_bound(-10.., 10), Some((0, 10)));
-        assert_eq!(resolve_bound(..20, 10), Some((0, 10)));
-        assert_eq!(resolve_bound(10..20, 10), None);
-        assert_eq!(resolve_bound(9..20, 10), Some((9, 10)));
+    fn test_view_bound() {
+        assert_eq!(view_bound(.., 10), Some((0, 10)));
+        assert_eq!(view_bound(..-1, 10), Some((0, 9)));
+        assert_eq!(view_bound(..=-1, 10), Some((0, 10)));
+        assert_eq!(view_bound(-5..8, 10), Some((5, 8)));
+        assert_eq!(view_bound(-10.., 10), Some((0, 10)));
+        assert_eq!(view_bound(..20, 10), Some((0, 10)));
+        assert_eq!(view_bound(10..20, 10), None);
+        assert_eq!(view_bound(9..20, 10), Some((9, 10)));
+    }
+
+    #[test]
+    fn test_surface() {
+        let mut surf: Surface<u8> = Surface::new(3, 4);
+        surf.view_mut(.., ..1).fill(|_, _, _| 1);
+        assert_eq!(surf.iter().sum::<u8>(), 3);
+        surf.view_mut(1..2, ..).fill(|_, _, _| 2);
+        assert_eq!(surf.iter().sum::<u8>(), 10);
+        surf.view_mut(.., -1..).fill(|_, _, _| 3);
+        assert_eq!(surf.iter().sum::<u8>(), 17);
+        let reference: Vec<u8> = vec![1, 0, 0, 3, 2, 2, 2, 3, 1, 0, 0, 3];
+        assert_eq!(surf.iter().copied().collect::<Vec<_>>(), reference);
     }
 }

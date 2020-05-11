@@ -3,7 +3,7 @@
 pub mod error;
 
 mod cell;
-pub use cell::{Color, Face, FaceAttrs};
+pub use cell::{Cell, Color, Face, FaceAttrs};
 
 mod surface;
 pub use surface::{Surface, View, ViewMut};
