@@ -1,4 +1,3 @@
-// use crate::cell::Cell;
 use std::ops::{Bound, Range, RangeBounds};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -10,6 +9,7 @@ pub struct Shape {
 }
 
 impl Shape {
+    #[inline]
     pub fn index(&self, row: usize, col: usize) -> usize {
         row * self.row_stride + col * self.col_stride
     }
@@ -17,30 +17,37 @@ impl Shape {
 
 pub trait View {
     type Item;
+
+    /// Shape describes data layout inside `Self::data()` slice.
     fn shape(&self) -> Shape;
+
+    /// Slice containing all the items
+    ///
+    /// **Note:** This slice also include elements not belonging to this view,
+    /// use `Self::get` function instead to access items.
     fn data(&self) -> &[Self::Item];
 
+    /// Returns `true` if the view contains no elements
     fn is_empty(&self) -> bool {
         self.data().is_empty()
     }
 
-    fn hight(&self) -> usize {
+    /// Height of the view
+    fn height(&self) -> usize {
         self.shape().height
     }
 
+    /// Width of the view
     fn width(&self) -> usize {
         self.shape().width
     }
 
+    /// Get item at specified `row` and `col`
     fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
-        let shape = self.shape();
-        if row >= shape.height || col >= shape.width {
-            None
-        } else {
-            self.data().get(shape.index(row, col))
-        }
+        self.data().get(self.shape().index(row, col))
     }
 
+    /// Create read only sub-view restricted by `rows` and `cols` bounds.
     fn view<RS, CS>(&self, rows: RS, cols: CS) -> SurfaceView<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
@@ -51,6 +58,7 @@ pub trait View {
         SurfaceView { shape, data }
     }
 
+    /// Iterator over all items
     fn iter(&self) -> ViewIter<'_, Self::Item> {
         ViewIter {
             row: 0,
@@ -87,8 +95,13 @@ impl<'a, Item> Iterator for ViewIter<'a, Item> {
 }
 
 pub trait ViewMut: View {
+    /// Mutable slice containing all the items
+    ///
+    /// **Note:** This slice also include elements not belonging to this view,
+    /// use `Self::get_mut` function instead to access items.
     fn data_mut(&mut self) -> &mut [Self::Item];
 
+     /// Create mutable sub-view restricted by `rows` and `cols` bounds.
     fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceViewMut<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
@@ -99,6 +112,7 @@ pub trait ViewMut: View {
         SurfaceViewMut { shape, data }
     }
 
+    /// Fill view with the `fill` function.
     fn fill<F>(&mut self, mut fill: F)
     where
         F: FnMut(usize, usize, Self::Item) -> Self::Item,
@@ -282,61 +296,6 @@ where
     }
 }
 
-/*
-use crate::{Position, TerminalCommand};
-
-struct DiffStatet {
-    cmds: Vec<TerminalCommand>,
-    face: Face,
-    cursor: Position,
-}
-
-pub fn diff(src_surf: &Surface, dst_surf: &Surface) -> Vec<TerminalCommand> {
-    use TerminalCommand::*;
-
-    let mut cmds = Vec::new();
-
-    // initialize to known state
-    cmds.push(CursorSave);
-    // current cursor position
-    let mut cursor = Position::new(0, 0);
-    cmds.push(CursorTo(cursor));
-    // currently applied face
-    let mut face = crate::Face::default();
-    cmds.push(Face(face));
-    // erase region
-    let mut erase: Option<usize> = None;
-
-    let src_shape = src_surf.shape();
-    for row in 0..src_shape.height {
-        for col in 0..src_shape.width {
-            match (src_surf.get(row, col), dst_surf.get(row, col)) {
-                (Some(src), Some(dst)) =>
-                    // nothing todo
-                    if src == dst {
-                        continue;
-                    }
-                    if src.glyph.is_none() || src.glyph == Some(' ') {
-
-                    } else {
-
-                    }
-                    if src.face != dst.face && src.face != face {
-                        cmds.push(Face(src.face));
-                        face = src.face;
-                    }
-
-                }
-                _ => break,
-            }
-        }
-    }
-
-    cmds.push(CursorRestore);
-    cmds
-}
-*/
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,13 +315,25 @@ mod tests {
     #[test]
     fn test_surface() {
         let mut surf: Surface<u8> = Surface::new(3, 4);
+        assert!(!surf.is_empty());
+        assert_eq!(surf.get(2, 3), Some(&0u8));
+        assert_eq!(surf.get(2, 4), None);
+
         surf.view_mut(.., ..1).fill(|_, _, _| 1);
-        assert_eq!(surf.iter().sum::<u8>(), 3);
         surf.view_mut(1..2, ..).fill(|_, _, _| 2);
-        assert_eq!(surf.iter().sum::<u8>(), 10);
         surf.view_mut(.., -1..).fill(|_, _, _| 3);
-        assert_eq!(surf.iter().sum::<u8>(), 17);
         let reference: Vec<u8> = vec![1, 0, 0, 3, 2, 2, 2, 3, 1, 0, 0, 3];
         assert_eq!(surf.iter().copied().collect::<Vec<_>>(), reference);
+
+        let view = surf.view(3..3, ..);
+        assert!(view.is_empty());
+        assert_eq!(view.get(0, 0), None);
+
+        let view = surf.view(1..2, 1..3);
+        assert_eq!(view.width(), 2);
+        assert_eq!(view.height(), 1);
+        assert_eq!(view.iter().count(), 2);
+        assert_eq!(view.get(0, 1), Some(&2u8));
+        assert_eq!(view.get(0, 2), None);
     }
 }
