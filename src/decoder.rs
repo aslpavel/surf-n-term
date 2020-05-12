@@ -337,8 +337,8 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
             let mut nums = tty_numbers(&data[3..data.len() - 1]);
             let event = nums.next()?;
-            let row = nums.next()?;
-            let col = nums.next()?;
+            let col = nums.next()? - 1;
+            let row = nums.next()? - 1;
 
             let mut mode = KeyMod::EMPTY;
             if event & 4 != 0 {
@@ -560,8 +560,8 @@ mod tests {
             Some(TerminalEvent::Mouse(Mouse {
                 name: KeyName::MouseLeft,
                 mode: KeyMod::PRESS,
-                row: 24,
-                col: 14
+                row: 13,
+                col: 23
             }))
         );
 
@@ -571,8 +571,8 @@ mod tests {
             Some(TerminalEvent::Mouse(Mouse {
                 name: KeyName::MouseRight,
                 mode: KeyMod::ALT | KeyMod::CTRL,
-                row: 33,
-                col: 26
+                row: 25,
+                col: 32
             }))
         );
 
@@ -582,8 +582,8 @@ mod tests {
             Some(TerminalEvent::Mouse(Mouse {
                 name: KeyName::MouseWheelUp,
                 mode: KeyMod::PRESS,
-                row: 142,
-                col: 30,
+                row: 29,
+                col: 141,
             }))
         );
 
