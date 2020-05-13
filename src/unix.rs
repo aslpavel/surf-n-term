@@ -214,7 +214,7 @@ impl Renderer for UnixTerminal {
         for row in 0..shape.height {
             self.execute(TerminalCommand::CursorTo(Position::new(row, 0)))?;
             for col in 0..shape.width {
-                let cell = &data[shape.index(row, col)];
+                let cell = &data[shape.offset(row, col)];
                 if cur_face != cell.face {
                     self.execute(TerminalCommand::Face(cell.face))?;
                     cur_face = cell.face;

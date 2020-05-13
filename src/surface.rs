@@ -9,9 +9,17 @@ pub struct Shape {
 }
 
 impl Shape {
+    /// Convert row and col to offset.
     #[inline]
-    pub fn index(&self, row: usize, col: usize) -> usize {
+    pub fn offset(&self, row: usize, col: usize) -> usize {
         row * self.row_stride + col * self.col_stride
+    }
+
+    pub fn nth(&self, row: usize, col: usize, nth: usize) -> (usize, usize) {
+        let index = row * self.width + col + nth;
+        let row = index / self.width;
+        let col = index - row * self.width;
+        (row, col)
     }
 }
 
@@ -44,7 +52,7 @@ pub trait View {
 
     /// Get a reference to item at specified `row` and `col`
     fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
-        self.data().get(self.shape().index(row, col))
+        self.data().get(self.shape().offset(row, col))
     }
 
     /// Create read only sub-view restricted by `rows` and `cols` bounds.
@@ -83,13 +91,13 @@ impl<'a, Item> Iterator for ViewIter<'a, Item> {
         if self.row >= self.shape.height || self.col >= self.shape.width {
             None
         } else {
-            let index = self.shape.index(self.row, self.col);
+            let offset = self.shape.offset(self.row, self.col);
             self.col += 1;
             if self.col >= self.shape.width {
                 self.col = 0;
                 self.row += 1;
             }
-            self.data.get(index)
+            self.data.get(offset)
         }
     }
 }
@@ -104,7 +112,7 @@ pub trait ViewMut: View {
     /// Get a mutable reference to item at specified `row` and `col`
     fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut Self::Item> {
         let shape = self.shape();
-        self.data_mut().get_mut(shape.index(row, col))
+        self.data_mut().get_mut(shape.offset(row, col))
     }
 
     /// Create mutable sub-view restricted by `rows` and `cols` bounds.
@@ -120,6 +128,7 @@ pub trait ViewMut: View {
 
     fn iter_mut(&mut self) -> ViewMutIter<'_, Self::Item> {
         ViewMutIter {
+            row: 0,
             col: 0,
             shape: self.shape(),
             data: self.data_mut(),
@@ -137,46 +146,64 @@ pub trait ViewMut: View {
         let mut tmp = Self::Item::default();
         for row in 0..shape.height {
             for col in 0..shape.width {
-                let index = shape.index(row, col);
-                let item = std::mem::replace(&mut data[index], tmp);
-                tmp = std::mem::replace(&mut data[index], fill(row, col, item));
+                let offset = shape.offset(row, col);
+                let item = std::mem::replace(&mut data[offset], tmp);
+                tmp = std::mem::replace(&mut data[offset], fill(row, col, item));
             }
+        }
+    }
+
+    fn insert(&mut self, row: usize, col: usize, items: impl IntoIterator<Item = Self::Item>) {
+        let index = row * self.shape().width + col;
+        let mut iter = self.iter_mut();
+        if index > 0 {
+            iter.nth(index - 1);
+        }
+        for (src, dst) in items.into_iter().zip(iter) {
+            *dst = src
         }
     }
 }
 
 pub struct ViewMutIter<'a, Item: 'a> {
+    row: usize,
     col: usize,
     shape: Shape,
     data: &'a mut [Item],
 }
 
-impl<'a, Item: 'a> Iterator for ViewMutIter<'a, Item>
-where Item: std::fmt::Debug,
-{
+impl<'a, Item: 'a> Iterator for ViewMutIter<'a, Item> {
     type Item = &'a mut Item;
 
     fn next(&mut self) -> Option<Self::Item> {
+        self.nth(0)
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if self.data.is_empty() {
-            None
-        } else {
-            let data = std::mem::replace(&mut self.data, &mut []);
-            if data.len() < self.shape.col_stride {
-                return None;
-            }
-            let (item, data) = data.split_at_mut(self.shape.col_stride);
-            self.col += 1;
-            if self.col < self.shape.width {
-                self.data = data
-            } else {
-                let offset = self.shape.row_stride - self.shape.width * self.shape.col_stride;
-                if data.len() >= offset {
-                    let (_gap, data) = data.split_at_mut(offset);
-                    self.data = data
-                }
-            }
-            item.get_mut(0)
+            return None;
         }
+
+        let offset = self.shape.offset(self.row, self.col);
+        let (r_cut, c_cut) = self.shape.nth(self.row, self.col, n + 1);
+        let o_cut = self.shape.offset(r_cut, c_cut) - offset;
+        let o_val = if n == 0 {
+            0
+        } else {
+            let (r_val, c_val) = self.shape.nth(self.row, self.col, n);
+            self.shape.offset(r_val, c_val) - offset
+        };
+
+        let data = std::mem::replace(&mut self.data, &mut []);
+        let (head, data) = data.split_at_mut(std::cmp::min(data.len(), o_cut));
+        let result = head.get_mut(o_val);
+
+        self.row = r_cut;
+        self.col = c_cut;
+        if !result.is_none() {
+            self.data = data;
+        }
+        result
     }
 }
 
@@ -328,7 +355,7 @@ where
             let start = col_start * shape.col_stride + row_start * shape.row_stride;
             let range = Range {
                 start,
-                end: start + shape.index(height - 1, width),
+                end: start + shape.offset(height - 1, width),
             };
             (range, shape)
         }
@@ -393,29 +420,42 @@ mod tests {
     #[test]
     fn test_view_mut_iter() {
         let mut data: Vec<usize> = Vec::new();
-        data.resize_with(12, || 0);
+        data.resize_with(18, || 0);
         let mut surf = SurfaceViewMut {
             data: &mut data,
             shape: Shape {
-                row_stride: 4,
+                row_stride: 6,
                 col_stride: 2,
-                width: 2,
+                width: 3,
                 height: 3,
             },
         };
 
         let mut view = surf.view_mut(.., 1..);
-        assert_eq!(view.iter().count(), 3);
-        assert_eq!(view.iter_mut().count(), 3);
+        assert_eq!(view.iter().count(), 6);
+        // assert_eq!(view.iter_mut().count(), 6);
 
         for (index, value) in view.iter_mut().enumerate() {
             *value = index + 1;
         }
         let reference = vec![
-            0, 0, 1, 0, // 0
-            0, 0, 2, 0, // 1
-            0, 0, 3, 0, // 2
+            0, 0, 1, 0, 2, 0, // 0
+            0, 0, 3, 0, 4, 0, // 1
+            0, 0, 5, 0, 6, 0, // 2
         ];
         assert_eq!(data, reference);
+
+        let mut surf: Surface<usize> = Surface::new(3, 7);
+        surf.fill(|row, col, _| (row * 7 + col) % 10);
+        // 0 1 | 2 3 4 5 | 6
+        // 7 8 | 9 0 1 2 | 3
+        // 4 5 | 6 7 8 9 | 1
+        let mut view = surf.view_mut(.., 2..-1);
+        let mut iter = view.iter_mut();
+        assert_eq!(iter.next().cloned(), Some(2));
+        assert_eq!(iter.nth(1).cloned(), Some(4));
+        assert_eq!(iter.nth(6).cloned(), Some(7));
+        assert_eq!(iter.nth(1).cloned(), Some(9));
+        assert_eq!(iter.next(), None);
     }
 }
