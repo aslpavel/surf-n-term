@@ -60,6 +60,7 @@ pub trait View {
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
+        Self: Sized,
     {
         let (range, shape) = view_shape(self.shape(), rows, cols);
         let data = &self.data()[range];
@@ -120,6 +121,7 @@ pub trait ViewMut: View {
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
+        Self: Sized,
     {
         let (range, shape) = view_shape(self.shape(), rows, cols);
         let data = &mut self.data_mut()[range];
@@ -140,6 +142,7 @@ pub trait ViewMut: View {
     where
         F: FnMut(usize, usize, Self::Item) -> Self::Item,
         Self::Item: Default,
+        Self: Sized,
     {
         let shape = self.shape();
         let data = self.data_mut();
@@ -153,7 +156,11 @@ pub trait ViewMut: View {
         }
     }
 
-    fn insert(&mut self, row: usize, col: usize, items: impl IntoIterator<Item = Self::Item>) {
+    fn insert<IS>(&mut self, row: usize, col: usize, items: IS)
+    where
+        IS: IntoIterator<Item = Self::Item>,
+        Self: Sized,
+    {
         let index = row * self.shape().width + col;
         let mut iter = self.iter_mut();
         if index > 0 {
@@ -457,5 +464,14 @@ mod tests {
         assert_eq!(iter.nth(6).cloned(), Some(7));
         assert_eq!(iter.nth(1).cloned(), Some(9));
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_view_dyn() {
+        let mut surf: Surface<usize> = Surface::new(1,1);
+        // make sure that View is object-safe
+        let _: &dyn View<Item = usize> = &surf.view(.., ..);
+        // make sure that ViewMut is object-safe
+        let _: &mut dyn ViewMut<Item = usize> = &mut surf.view_mut(.., ..);
     }
 }
