@@ -86,21 +86,6 @@ impl UnixTerminal {
         let tty = nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty())?;
         Self::new_from_fd(tty, tty)
     }
-
-    pub fn size(&self) -> Result<TerminalSize, Error> {
-        unsafe {
-            let mut winsize: nix::winsize = std::mem::zeroed();
-            if libc::ioctl(self.write_fd, nix::TIOCGWINSZ, &mut winsize) < 0 {
-                return Err(nix::Error::last().into());
-            }
-            Ok(TerminalSize {
-                height: winsize.ws_row as usize,
-                width: winsize.ws_col as usize,
-                height_pixels: winsize.ws_ypixel as usize,
-                width_pixels: winsize.ws_xpixel as usize,
-            })
-        }
-    }
 }
 
 impl std::ops::Drop for UnixTerminal {
@@ -202,6 +187,21 @@ impl Terminal for UnixTerminal {
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         self.encoder.encode(&mut self.write_queue, cmd)
+    }
+
+    fn size(&self) -> Result<TerminalSize, Error> {
+        unsafe {
+            let mut winsize: nix::winsize = std::mem::zeroed();
+            if libc::ioctl(self.write_fd, nix::TIOCGWINSZ, &mut winsize) < 0 {
+                return Err(nix::Error::last().into());
+            }
+            Ok(TerminalSize {
+                height: winsize.ws_row as usize,
+                width: winsize.ws_col as usize,
+                height_pixels: winsize.ws_ypixel as usize,
+                width_pixels: winsize.ws_xpixel as usize,
+            })
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use std::{boxed::Box, error::Error, time::Duration};
-use surf_n_term::{Cell, Face, Renderer, Surface, SystemTerminal, Terminal, ViewMut};
+use surf_n_term::{Cell, Face, Renderer, Surface, SystemTerminal, Terminal, ViewMutExt};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let bg = Face::default().with_bg(Some("#3c3836".parse()?));
@@ -8,19 +8,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let red = Face::default().with_bg(Some("#fb4934".parse()?));
 
     let mut surface: Surface<Cell> = Surface::new(10, 20);
-    surface.fill(|_, _, cell| cell.with_face(bg));
-    surface
-        .view_mut(..1, ..2)
-        .fill(|_, _, cell| cell.with_face(purple));
-    surface
-        .view_mut(-1.., -2..)
-        .fill(|_, _, cell| cell.with_face(green));
-    surface
-        .view_mut(.., 3..4)
-        .fill(|_, _, cell| cell.with_face(red));
-    surface
-        .view_mut(3..4, ..-1)
-        .fill(|_, _, cell| cell.with_face(red));
+    surface.fill(Cell::new(bg, None));
+    surface.view_mut(..1, ..2).fill(Cell::new(purple, None));
+    surface.view_mut(-1.., -2..).fill(Cell::new(green, None));
+    surface.view_mut(.., 3..4).fill(Cell::new(red, None));
+    surface.view_mut(3..4, ..-1).fill(Cell::new(red, None));
 
     let mut term = SystemTerminal::new()?;
     term.render(&surface)?;

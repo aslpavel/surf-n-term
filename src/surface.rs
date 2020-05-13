@@ -34,7 +34,9 @@ pub trait View {
     /// **Note:** This slice also include elements not belonging to this view,
     /// use `Self::get` function instead to access items.
     fn data(&self) -> &[Self::Item];
+}
 
+pub trait ViewExt: View {
     /// Returns `true` if the view contains no elements
     fn is_empty(&self) -> bool {
         self.data().is_empty()
@@ -52,7 +54,12 @@ pub trait View {
 
     /// Get a reference to item at specified `row` and `col`
     fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
-        self.data().get(self.shape().offset(row, col))
+        let shape = self.shape();
+        if row < shape.height && col < shape.width {
+            self.data().get(shape.offset(row, col))
+        } else {
+            None
+        }
     }
 
     /// Create read only sub-view restricted by `rows` and `cols` bounds.
@@ -60,7 +67,6 @@ pub trait View {
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
-        Self: Sized,
     {
         let (range, shape) = view_shape(self.shape(), rows, cols);
         let data = &self.data()[range];
@@ -77,6 +83,8 @@ pub trait View {
         }
     }
 }
+
+impl<V: View> ViewExt for V {}
 
 pub struct ViewIter<'a, Item> {
     row: usize,
@@ -105,31 +113,31 @@ impl<'a, Item> Iterator for ViewIter<'a, Item> {
 
 impl<'a, T> View for &'a T
 where
-    T: View,
+    T: View + ?Sized,
 {
     type Item = T::Item;
 
     fn shape(&self) -> Shape {
-        T::shape(&self)
+        (**self).shape()
     }
 
     fn data(&self) -> &[Self::Item] {
-        T::data(&self)
+        (**self).data()
     }
 }
 
 impl<'a, T> View for &'a mut T
 where
-    T: View,
+    T: View + ?Sized,
 {
     type Item = T::Item;
 
     fn shape(&self) -> Shape {
-        T::shape(self)
+        (**self).shape()
     }
 
     fn data(&self) -> &[Self::Item] {
-        T::data(self)
+        (**self).data()
     }
 }
 
@@ -143,15 +151,20 @@ pub trait ViewMut: View {
     /// Get a mutable reference to item at specified `row` and `col`
     fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut Self::Item> {
         let shape = self.shape();
-        self.data_mut().get_mut(shape.offset(row, col))
+        if row < shape.height && col < shape.width {
+            self.data_mut().get_mut(shape.offset(row, col))
+        } else {
+            None
+        }
     }
+}
 
+pub trait ViewMutExt: ViewMut {
     /// Create mutable sub-view restricted by `rows` and `cols` bounds.
     fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceViewMut<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
-        Self: Sized,
     {
         let (range, shape) = view_shape(self.shape(), rows, cols);
         let data = &mut self.data_mut()[range];
@@ -168,11 +181,10 @@ pub trait ViewMut: View {
     }
 
     /// Fill view with the `fill` function.
-    fn fill<F>(&mut self, mut fill: F)
+    fn fill_with<F>(&mut self, mut fill: F)
     where
         F: FnMut(usize, usize, Self::Item) -> Self::Item,
         Self::Item: Default,
-        Self: Sized,
     {
         let shape = self.shape();
         let data = self.data_mut();
@@ -186,10 +198,22 @@ pub trait ViewMut: View {
         }
     }
 
+    fn fill(&mut self, item: Self::Item)
+    where
+        Self::Item: Clone,
+    {
+        let shape = self.shape();
+        let data = self.data_mut();
+        for row in 0..shape.height {
+            for col in 0..shape.width {
+                data[shape.offset(row, col)] = item.clone();
+            }
+        }
+    }
+
     fn insert<IS>(&mut self, row: usize, col: usize, items: IS)
     where
         IS: IntoIterator<Item = Self::Item>,
-        Self: Sized,
     {
         let index = row * self.shape().width + col;
         let mut iter = self.iter_mut();
@@ -200,7 +224,22 @@ pub trait ViewMut: View {
             *dst = src
         }
     }
+
+    fn clear(&mut self)
+    where
+        Self::Item: Default,
+    {
+        let shape = self.shape();
+        let data = self.data_mut();
+        for row in 0..shape.height {
+            for col in 0..shape.width {
+                data[shape.offset(row, col)] = Default::default();
+            }
+        }
+    }
 }
+
+impl<V: ViewMut> ViewMutExt for V {}
 
 pub struct ViewMutIter<'a, Item: 'a> {
     row: usize,
@@ -246,10 +285,10 @@ impl<'a, Item: 'a> Iterator for ViewMutIter<'a, Item> {
 
 impl<'a, T> ViewMut for &'a mut T
 where
-    T: ViewMut,
+    T: ViewMut + ?Sized,
 {
     fn data_mut(&mut self) -> &mut [Self::Item] {
-        T::data_mut(self)
+        (**self).data_mut()
     }
 }
 
@@ -296,6 +335,7 @@ impl<Item> ViewMut for Surface<Item> {
     }
 }
 
+#[derive(Clone)]
 pub struct SurfaceView<'a, Item> {
     shape: Shape,
     data: &'a [Item],
@@ -441,15 +481,23 @@ mod tests {
         assert_eq!(surf.get(2, 3), Some(&0u8));
         assert_eq!(surf.get(2, 4), None);
 
-        surf.view_mut(.., ..1).fill(|_, _, _| 1);
-        surf.view_mut(1..2, ..).fill(|_, _, _| 2);
-        surf.view_mut(.., -1..).fill(|_, _, _| 3);
+        surf.view_mut(.., ..1).fill(1);
+        surf.view_mut(1..2, ..).fill(2);
+        surf.view_mut(.., -1..).fill(3);
         let reference: Vec<u8> = vec![
             1, 0, 0, 3, // 0
             2, 2, 2, 3, // 1
             1, 0, 0, 3, // 2
         ];
         assert_eq!(surf.iter().copied().collect::<Vec<_>>(), reference);
+
+        let view = surf.view(..2, ..2);
+        assert!(view.get(0, 3).is_none());
+        assert!(view.get(2, 0).is_none());
+
+        let mut view = surf.view_mut(..2, ..2);
+        assert!(view.get_mut(0, 3).is_none());
+        assert!(view.get_mut(2, 0).is_none());
 
         let view = surf.view(3..3, ..);
         assert!(view.is_empty());
@@ -492,7 +540,7 @@ mod tests {
         assert_eq!(data, reference);
 
         let mut surf: Surface<usize> = Surface::new(3, 7);
-        surf.fill(|row, col, _| (row * 7 + col) % 10);
+        surf.fill_with(|row, col, _| (row * 7 + col) % 10);
         // 0 1 | 2 3 4 5 | 6
         // 7 8 | 9 0 1 2 | 3
         // 4 5 | 6 7 8 9 | 1
@@ -509,20 +557,37 @@ mod tests {
     fn test_view_dyn() {
         let mut surf: Surface<usize> = Surface::new(1, 1);
 
-        fn is_view_dyn(_: &dyn View<Item = usize>) {}
+        fn is_view_dyn(view: &dyn View<Item = usize>) {
+            let _ = view.view(.., ..);
+        }
         is_view_dyn(&surf);
         is_view_dyn(&surf.view(.., ..));
 
-        fn is_view_mut_dyn(_: &mut dyn ViewMut<Item = usize>) {}
+        fn is_view_mut_dyn(mut view: &mut dyn ViewMut<Item = usize>) {
+            let _ = view.view_mut(.., ..);
+        }
         is_view_mut_dyn(&mut surf);
         is_view_mut_dyn(&mut surf.view_mut(.., ..));
 
-        fn is_view<V: View>(_: V) {}
+        fn is_view<V: View>(view: V) {
+            let _ = view.view(.., ..);
+        }
         is_view(surf.clone());
         is_view(&surf);
 
-        fn is_view_mut<V: ViewMut>(_: V) {}
+        fn is_view_mut<V: ViewMut>(mut view: V) {
+            let _ = view.view_mut(.., ..);
+        }
         is_view_mut(surf.clone());
         is_view_mut(&mut surf);
+    }
+
+    #[test]
+    fn terst_clear() {
+        let mut surf: Surface<usize> = Surface::new(2, 2);
+        surf.fill_with(|r, c, _| r * 2 + c + 1);
+        assert_eq!(surf.data(), &[1, 2, 3, 4]);
+        surf.view_mut(.., 1..).clear();
+        assert_eq!(surf.data(), &[1, 0, 3, 0]);
     }
 }

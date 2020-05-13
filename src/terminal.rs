@@ -9,11 +9,14 @@ pub trait Terminal: Write {
     /// Command will be submitted on the next call to poll `Terminal::poll`
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error>;
 
-    /// Poll for TerminalEvent
+    /// Poll the Terminal
     ///
-    /// Only this function actually reads or writes data to/from the terminal.
+    /// Only this function actually reads from or writes to the terminal.
     /// None duration blocks indefinitely until event received from the terminal.
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error>;
+
+    /// Get terminal size
+    fn size(&self) -> Result<TerminalSize, Error>;
 }
 
 pub trait Renderer {
@@ -131,7 +134,7 @@ impl DecModeStatus {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalEvent {
     // Key press event
     Key(Key),
@@ -153,22 +156,6 @@ pub enum TerminalEvent {
     },
     // Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
-}
-
-impl fmt::Debug for TerminalEvent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TerminalEvent::*;
-        match self {
-            Key(key) => write!(f, "{:?}", key)?,
-            Mouse(mouse) => write!(f, "{:?}", mouse)?,
-            CursorPosition { row, col } => write!(f, "Cursor({}, {})", row, col)?,
-            Resize(size) => write!(f, "Resize({:?})", size)?,
-            Size(size) => write!(f, "Size({:?})", size)?,
-            DecMode { mode, status } => write!(f, "DecMode({:?}, {:?})", mode, status)?,
-            Raw(raw) => write!(f, "Raw({:?})", String::from_utf8_lossy(raw))?,
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

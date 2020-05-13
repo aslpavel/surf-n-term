@@ -170,6 +170,10 @@ pub struct Cell {
 }
 
 impl Cell {
+    pub fn new(face: Face, glyph: Option<char>) -> Self {
+        Self { face, glyph }
+    }
+
     pub fn with_face(self, face: Face) -> Self {
         Self { face, ..self }
     }
