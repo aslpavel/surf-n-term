@@ -103,6 +103,36 @@ impl<'a, Item> Iterator for ViewIter<'a, Item> {
     }
 }
 
+impl<'a, T> View for &'a T
+where
+    T: View,
+{
+    type Item = T::Item;
+
+    fn shape(&self) -> Shape {
+        T::shape(&self)
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        T::data(&self)
+    }
+}
+
+impl<'a, T> View for &'a mut T
+where
+    T: View,
+{
+    type Item = T::Item;
+
+    fn shape(&self) -> Shape {
+        T::shape(self)
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        T::data(self)
+    }
+}
+
 pub trait ViewMut: View {
     /// Mutable slice containing all the items
     ///
@@ -211,6 +241,15 @@ impl<'a, Item: 'a> Iterator for ViewMutIter<'a, Item> {
             self.data = data;
         }
         result
+    }
+}
+
+impl<'a, T> ViewMut for &'a mut T
+where
+    T: ViewMut,
+{
+    fn data_mut(&mut self) -> &mut [Self::Item] {
+        T::data_mut(self)
     }
 }
 
@@ -468,10 +507,22 @@ mod tests {
 
     #[test]
     fn test_view_dyn() {
-        let mut surf: Surface<usize> = Surface::new(1,1);
-        // make sure that View is object-safe
-        let _: &dyn View<Item = usize> = &surf.view(.., ..);
-        // make sure that ViewMut is object-safe
-        let _: &mut dyn ViewMut<Item = usize> = &mut surf.view_mut(.., ..);
+        let mut surf: Surface<usize> = Surface::new(1, 1);
+
+        fn is_view_dyn(_: &dyn View<Item = usize>) {}
+        is_view_dyn(&surf);
+        is_view_dyn(&surf.view(.., ..));
+
+        fn is_view_mut_dyn(_: &mut dyn ViewMut<Item = usize>) {}
+        is_view_mut_dyn(&mut surf);
+        is_view_mut_dyn(&mut surf.view_mut(.., ..));
+
+        fn is_view<V: View>(_: V) {}
+        is_view(surf.clone());
+        is_view(&surf);
+
+        fn is_view_mut<V: ViewMut>(_: V) {}
+        is_view_mut(surf.clone());
+        is_view_mut(&mut surf);
     }
 }
