@@ -90,6 +90,11 @@ where
         renderer.front.clear();
 
         event = term.poll(timeout)?;
+        if let Some(TerminalEvent::Resize(size)) = event {
+            renderer = TerminalRenderer::new(size.height, size.width);
+            term.execute(TerminalCommand::Face(Default::default()))?;
+            term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
+        }
     }
 }
 
