@@ -1,9 +1,9 @@
+use std::io::Write;
 use surf_n_term::render::{run, RenderAction};
 use surf_n_term::{
     error::Error, Cell, DecMode, Face, Key, KeyName, Position, SystemTerminal, Terminal,
     TerminalCommand, TerminalEvent, TerminalView,
 };
-use std::io::Write;
 
 fn main() -> Result<(), Error> {
     let mut term = SystemTerminal::new()?;

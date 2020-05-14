@@ -1,4 +1,4 @@
-use crate::{Position, ViewMutExt, decoder::Decoder};
+use crate::{decoder::Decoder, Position, ViewMutExt};
 use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

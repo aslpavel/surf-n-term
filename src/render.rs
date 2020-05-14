@@ -97,11 +97,11 @@ where
 mod tests {
     use super::*;
     use crate::{TerminalCommand, TerminalView, View, ViewMutExt};
+    use std::io::Write;
 
     #[allow(unused)]
     fn debug<V: View<Item = Cell>>(view: V) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
         use crate::encoder::{Encoder, TTYEncoder};
-        use std::io::Write;
 
         let mut encoder = TTYEncoder::new();
         let stdout_locked = std::io::stdout();
@@ -152,10 +152,9 @@ mod tests {
         render.front.fill(Cell::new(bg, None));
         render.back.fill(Cell::new(bg, None));
 
-        render
-            .front
-            .view_mut(.., 1..)
-            .draw_text(Position::new(0, 4), purple, "TEST");
+        let mut view = render.front.view_mut(.., 1..);
+        let mut writer = view.writer(Position::new(0, 4), purple);
+        write!(&mut writer, "TEST")?;
         // debug(&render.front)?;
 
         for cmd in render.render() {

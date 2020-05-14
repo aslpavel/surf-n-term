@@ -44,21 +44,9 @@ impl Utf8Decoder {
     }
 
     fn consume(&mut self) -> char {
-        let buffer = &self.buffer[..self.offset];
-        let first = buffer[0] as u32;
-        let mut code: u32 = match buffer.len() {
-            1 => first & 127,
-            2 => first & 31,
-            3 => first & 15,
-            4 => first & 7,
-            _ => unreachable!(),
-        };
-        for byte in buffer[1..].iter() {
-            code <<= 6;
-            code |= (*byte as u32) & 63;
-        }
+        let result = utf8_decode(&self.buffer[..self.offset]);
         self.reset();
-        unsafe { std::char::from_u32_unchecked(code) }
+        result
     }
 
     fn push(&mut self, byte: u8) {
@@ -383,11 +371,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
     use TTYTag::*;
     let event = match tag {
         Event(event) => event.clone(),
-        Char => {
-            let string = std::str::from_utf8(data).expect("[TTYDecoder] utf8 expected");
-            let code = string.chars().next()?;
-            TerminalEvent::Key(KeyName::Char(code).into())
-        }
+        Char => TerminalEvent::Key(KeyName::Char(utf8_decode(data)).into()),
         DecMode => {
             // "\x1b[?{mode};{status}$y"
             let mut nums = tty_numbers(&data[3..data.len() - 2]);
@@ -487,6 +471,26 @@ fn tty_numbers(data: &[u8]) -> impl Iterator<Item = usize> + '_ {
         }
         result
     })
+}
+
+// Convert slice to a character
+//
+// NOTE: this function must only be used on a validated buffer
+// containing single UTF8 character.
+fn utf8_decode(buffer: &[u8]) -> char {
+    let first = buffer[0] as u32;
+    let mut code: u32 = match buffer.len() {
+        1 => first & 127,
+        2 => first & 31,
+        3 => first & 15,
+        4 => first & 7,
+        _ => unreachable!(),
+    };
+    for byte in buffer[1..].iter() {
+        code <<= 6;
+        code |= (*byte as u32) & 63;
+    }
+    unsafe { std::char::from_u32_unchecked(code) }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -751,7 +755,7 @@ mod tests {
         assert_eq!(decoder.decode(&mut cursor)?, Some('𐍈'));
 
         // partial
-        let c = b"\xd1\x8f";  // я
+        let c = b"\xd1\x8f"; // я
         cursor.get_mut().write(&c[..1])?;
         assert_eq!(decoder.decode(&mut cursor)?, None);
         cursor.get_mut().write(&c[1..])?;
