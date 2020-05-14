@@ -6,12 +6,12 @@ mod common;
 pub mod decoder;
 pub mod encoder;
 pub mod error;
-// pub mod render;
+pub mod render;
 mod surface;
 pub mod terminal;
 mod unix;
 
-pub use cell::{Cell, Color, Face, FaceAttrs};
+pub use cell::{Cell, Color, Face, FaceAttrs, TerminalView};
 pub use surface::{Surface, View, ViewExt, ViewMut, ViewMutExt};
 pub use terminal::{
     DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Renderer, Terminal, TerminalCommand,
