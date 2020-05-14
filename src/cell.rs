@@ -1,4 +1,4 @@
-use crate::{Position, ViewMutExt};
+use crate::{Position, ViewMutExt, decoder::Decoder};
 use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -190,18 +190,6 @@ impl Default for Cell {
 }
 
 pub trait TerminalView: ViewMutExt<Item = Cell> {
-    fn draw_text(&mut self, pos: Position, face: Option<Face>, text: &str) {
-        let face = face.unwrap_or_default();
-        let cells = text.chars().map(move |c| {
-            let glyph = match c {
-                ' ' => None,
-                _ => Some(c),
-            };
-            Cell::new(face, glyph)
-        });
-        self.insert(pos.row, pos.col, cells);
-    }
-
     fn draw_box(&mut self, face: Option<Face>) {
         let shape = self.shape();
         if shape.width < 2 || shape.height < 2 {
@@ -221,9 +209,46 @@ pub trait TerminalView: ViewMutExt<Item = Cell> {
         self.view_mut(-1.., -1..).fill(Cell::new(face, Some('┘')));
         self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
     }
+
+    fn writer(&mut self, pos: Position, face: Option<Face>) -> TerminalViewWriter<'_> {
+        let offset = self.shape().width * pos.row + pos.col;
+        let mut iter = self.iter_mut();
+        if offset > 0 {
+            iter.nth(offset - 1);
+        }
+        TerminalViewWriter {
+            face: face.unwrap_or_default(),
+            iter,
+            decoder: crate::decoder::Utf8Decoder::new(),
+        }
+    }
 }
 
 impl<T: ViewMutExt<Item = Cell> + ?Sized> TerminalView for T {}
+
+pub struct TerminalViewWriter<'a> {
+    face: Face,
+    iter: crate::surface::ViewMutIter<'a, Cell>,
+    decoder: crate::decoder::Utf8Decoder,
+}
+
+impl<'a> std::io::Write for TerminalViewWriter<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut cur = std::io::Cursor::new(buf);
+        while let Some(glyph) = self.decoder.decode(&mut cur)? {
+            let glyph = if glyph == ' ' { None } else { Some(glyph) };
+            match self.iter.next() {
+                Some(cell) => *cell = Cell::new(self.face, glyph),
+                None => return Ok(buf.len()),
+            }
+        }
+        Ok(cur.position() as usize)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {

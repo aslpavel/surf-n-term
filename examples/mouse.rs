@@ -3,6 +3,7 @@ use surf_n_term::{
     error::Error, Cell, DecMode, Face, Key, KeyName, Position, SystemTerminal, Terminal,
     TerminalCommand, TerminalEvent, TerminalView,
 };
+use std::io::Write;
 
 fn main() -> Result<(), Error> {
     let mut term = SystemTerminal::new()?;
@@ -40,8 +41,8 @@ fn main() -> Result<(), Error> {
             Some(event) => event,
         };
 
-        let label = format!("┤ Event: {:?} ├", event);
-        view.draw_text(Position::new(0, 3), None, &label);
+        let mut writer = view.writer(Position::new(0, 3), None);
+        write!(&mut writer, "┤ Event: {:?} ├", event)?;
         match event {
             TerminalEvent::Mouse(mouse) if mouse.name == KeyName::MouseMove => {
                 if let Some(cell) = view.get_mut(mouse.row, mouse.col) {
