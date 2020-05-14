@@ -1,9 +1,10 @@
 use crate::common::IOQueue;
-use crate::decoder::{Decoder, TTYDecoder};
-use crate::encoder::{Encoder, TTYEncoder};
-use crate::error::Error;
-use crate::terminal::{Position, Renderer, Terminal, TerminalCommand, TerminalEvent, TerminalSize};
-use crate::{Cell, Face, Surface, View};
+use crate::{
+    decoder::{Decoder, TTYDecoder},
+    encoder::{Encoder, TTYEncoder},
+    error::Error,
+    terminal::{Terminal, TerminalCommand, TerminalEvent, TerminalSize},
+};
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
@@ -202,32 +203,6 @@ impl Terminal for UnixTerminal {
                 width_pixels: winsize.ws_xpixel as usize,
             })
         }
-    }
-}
-
-impl Renderer for UnixTerminal {
-    fn render(&mut self, surface: &Surface<Cell>) -> Result<(), Error> {
-        let mut cur_face = Face::default();
-        let shape = surface.shape();
-        let data = surface.data();
-        self.execute(TerminalCommand::CursorSave)?;
-        for row in 0..shape.height {
-            self.execute(TerminalCommand::CursorTo(Position::new(row, 0)))?;
-            for col in 0..shape.width {
-                let cell = &data[shape.offset(row, col)];
-                if cur_face != cell.face {
-                    self.execute(TerminalCommand::Face(cell.face))?;
-                    cur_face = cell.face;
-                }
-                match cell.glyph {
-                    Some(glyph) => write!(self, "{}", glyph)?,
-                    None => self.write_all(&[b' '])?,
-                };
-            }
-        }
-        self.execute(TerminalCommand::CursorRestore)?;
-        self.flush()?;
-        Ok(())
     }
 }
 

@@ -14,7 +14,7 @@ mod unix;
 pub use cell::{Cell, Color, Face, FaceAttrs, TerminalView};
 pub use surface::{Surface, View, ViewExt, ViewMut, ViewMutExt};
 pub use terminal::{
-    DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Renderer, Terminal, TerminalCommand,
+    DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Terminal, TerminalCommand,
     TerminalEvent,
 };
 

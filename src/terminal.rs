@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::{Cell, Face, Surface};
+use crate::Face;
 use std::{fmt, io::Write, time::Duration};
 
 /// Main trait to interact with a Terminal
@@ -17,10 +17,6 @@ pub trait Terminal: Write {
 
     /// Get terminal size
     fn size(&self) -> Result<TerminalSize, Error>;
-}
-
-pub trait Renderer {
-    fn render(&mut self, surface: &Surface<Cell>) -> Result<(), Error>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
