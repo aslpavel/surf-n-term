@@ -1,3 +1,4 @@
+use crate::{Position, ViewMutExt};
 use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -187,6 +188,42 @@ impl Default for Cell {
         }
     }
 }
+
+pub trait TerminalView: ViewMutExt<Item = Cell> {
+    fn draw_text(&mut self, pos: Position, face: Option<Face>, text: &str) {
+        let face = face.unwrap_or_default();
+        let cells = text.chars().map(move |c| {
+            let glyph = match c {
+                ' ' => None,
+                _ => Some(c),
+            };
+            Cell::new(face, glyph)
+        });
+        self.insert(pos.row, pos.col, cells);
+    }
+
+    fn draw_box(&mut self, face: Option<Face>) {
+        let shape = self.shape();
+        if shape.width < 2 || shape.height < 2 {
+            return;
+        }
+        let face = face.unwrap_or_default();
+
+        let h = Cell::new(face, Some('─'));
+        let v = Cell::new(face, Some('│'));
+        self.view_mut(..1, 1..-1).fill(h.clone());
+        self.view_mut(-1.., 1..-1).fill(h.clone());
+        self.view_mut(1..-1, ..1).fill(v.clone());
+        self.view_mut(1..-1, -1..).fill(v.clone());
+
+        self.view_mut(..1, ..1).fill(Cell::new(face, Some('┌')));
+        self.view_mut(..1, -1..).fill(Cell::new(face, Some('┐')));
+        self.view_mut(-1.., -1..).fill(Cell::new(face, Some('┘')));
+        self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
+    }
+}
+
+impl<T: ViewMutExt<Item = Cell> + ?Sized> TerminalView for T {}
 
 #[cfg(test)]
 mod tests {
