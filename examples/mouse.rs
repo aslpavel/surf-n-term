@@ -54,7 +54,7 @@ fn main() -> Result<(), Error> {
         Ok(RenderAction::Continue)
     })?;
 
-    // disable mouse
+    // switch off alt screen
     term.execute(TerminalCommand::DecModeSet {
         enable: false,
         mode: DecMode::AltScreen,

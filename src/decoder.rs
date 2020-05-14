@@ -1,13 +1,106 @@
 use crate::automata::{DFAState, DFA, NFA};
 use crate::error::Error;
 use crate::terminal::{DecModeStatus, Key, KeyMod, KeyName, Mouse, TerminalEvent, TerminalSize};
+use lazy_static::lazy_static;
 use std::{fmt, io::BufRead};
 
 pub trait Decoder {
     type Item;
     type Error;
 
-    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, Self::Error>;
+    fn decode<B: BufRead>(&mut self, buf: B) -> Result<Option<Self::Item>, Self::Error>;
+}
+
+lazy_static! {
+    static ref UTF8DFA: DFA<()> = {
+        let printable = NFA::predicate(|b| b >> 7 == 0b0);
+        let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
+        let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
+        let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
+        let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
+        NFA::choice(vec![
+            printable,
+            utf8_two + utf8_tail.clone(),
+            utf8_three + utf8_tail.clone() + utf8_tail.clone(),
+            utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
+        ])
+        .compile()
+    };
+}
+
+pub struct Utf8Decoder {
+    state: DFAState,
+    offset: usize,
+    buffer: [u8; 4],
+}
+
+impl Utf8Decoder {
+    pub fn new() -> Self {
+        Self {
+            state: UTF8DFA.start(),
+            offset: 0,
+            buffer: [0; 4],
+        }
+    }
+
+    fn consume(&mut self) -> char {
+        let buffer = &self.buffer[..self.offset];
+        let first = buffer[0] as u32;
+        let mut code: u32 = match buffer.len() {
+            1 => first & 127,
+            2 => first & 31,
+            3 => first & 15,
+            4 => first & 7,
+            _ => unreachable!(),
+        };
+        for byte in buffer[1..].iter() {
+            code <<= 6;
+            code |= (*byte as u32) & 63;
+        }
+        self.reset();
+        unsafe { std::char::from_u32_unchecked(code) }
+    }
+
+    fn push(&mut self, byte: u8) {
+        self.buffer[self.offset] = byte;
+        self.offset += 1;
+    }
+
+    fn reset(&mut self) {
+        self.state = UTF8DFA.start();
+        self.offset = 0;
+    }
+}
+
+impl Decoder for Utf8Decoder {
+    type Item = char;
+    type Error = std::io::Error;
+
+    fn decode<B: BufRead>(&mut self, mut buf: B) -> Result<Option<Self::Item>, Self::Error> {
+        let mut consume = 0;
+        for byte in buf.fill_buf()?.iter() {
+            consume += 1;
+            match UTF8DFA.transition(self.state, *byte) {
+                None => {
+                    self.reset();
+                    buf.consume(consume);
+                    use std::io::{Error, ErrorKind};
+                    return Err(Error::new(ErrorKind::InvalidInput, "utf8 decoder failed"));
+                }
+                Some(state) if UTF8DFA.info(state).accepting => {
+                    self.push(*byte);
+                    buf.consume(consume);
+                    return Ok(Some(self.consume()));
+                }
+                Some(state) => {
+                    self.push(*byte);
+                    self.state = state;
+                }
+            }
+        }
+        buf.consume(consume);
+        Ok(None)
+    }
 }
 
 #[derive(Debug)]
@@ -28,7 +121,7 @@ impl Decoder for TTYDecoder {
     type Item = TerminalEvent;
     type Error = Error;
 
-    fn decode(&mut self, input: &mut dyn BufRead) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode<B: BufRead>(&mut self, mut input: B) -> Result<Option<Self::Item>, Self::Error> {
         // process rescheduled data first
         while let Some(byte) = self.rescheduled.pop() {
             let event = self.decode_byte(byte);
@@ -631,6 +724,49 @@ mod tests {
                 status: DecModeStatus::NotRecognized,
             }),
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_utf8_decoder() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = Utf8Decoder::new();
+        assert_eq!(decoder.decode(&mut cursor)?, None);
+
+        // one byte char
+        write!(cursor.get_mut(), "!")?;
+        assert_eq!(decoder.decode(&mut cursor)?, Some('!'));
+
+        // two byte char
+        write!(cursor.get_mut(), "¢")?;
+        assert_eq!(decoder.decode(&mut cursor)?, Some('¢'));
+
+        // three byte char
+        write!(cursor.get_mut(), "€")?;
+        assert_eq!(decoder.decode(&mut cursor)?, Some('€'));
+
+        // four byte char
+        write!(cursor.get_mut(), "𐍈")?;
+        assert_eq!(decoder.decode(&mut cursor)?, Some('𐍈'));
+
+        // partial
+        let c = b"\xd1\x8f";  // я
+        cursor.get_mut().write(&c[..1])?;
+        assert_eq!(decoder.decode(&mut cursor)?, None);
+        cursor.get_mut().write(&c[1..])?;
+        assert_eq!(decoder.decode(&mut cursor)?, Some('я'));
+
+        // invalid
+        cursor.get_mut().write(&c[..1])?;
+        assert_eq!(decoder.decode(&mut cursor)?, None);
+        cursor.get_mut().write(&c[..1])?;
+        assert!(decoder.decode(&mut cursor).is_err());
+
+        // valid after invalid
+        write!(cursor.get_mut(), "𐍈€")?;
+        assert_eq!(decoder.decode(&mut cursor)?, Some('𐍈'));
+        assert_eq!(decoder.decode(&mut cursor)?, Some('€'));
 
         Ok(())
     }

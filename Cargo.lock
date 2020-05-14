@@ -484,6 +484,7 @@ name = "surf_n_term"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "lazy_static",
  "libc",
  "nix",
  "signal-hook",

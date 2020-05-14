@@ -4,6 +4,7 @@
 //! in more complicated one with Thompson's construction and complied to DFA (Deterministic
 //! finaite automaton).
 use std::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     fmt,
     iter::once,
@@ -352,12 +353,12 @@ impl<T> NFA<T> {
                 assert_eq!(index, state.0);
                 (0..=Symbol::max_value()).map(move |symbol| edges.get(&symbol).copied())
             })
-            .collect();
+            .collect::<Vec<Option<DFAState>>>();
 
         DFA {
             start: dfa_start_id,
-            states,
-            infos,
+            states: states.into_boxed_slice(),
+            infos: infos.into_boxed_slice(),
             lang_size,
         }
     }
@@ -487,8 +488,8 @@ pub struct DFAStateInfo<T> {
 
 pub struct DFA<T> {
     start: DFAState,
-    states: Vec<Option<DFAState>>,
-    infos: Vec<DFAStateInfo<T>>,
+    states: Box<[Option<DFAState>]>,
+    infos: Box<[DFAStateInfo<T>]>,
     lang_size: usize,
 }
 

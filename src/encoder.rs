@@ -5,7 +5,7 @@ pub trait Encoder {
     type Item;
     type Error;
 
-    fn encode(&mut self, out: &mut dyn Write, item: Self::Item) -> Result<(), Self::Error>;
+    fn encode<W: Write>(&mut self, out: W, item: Self::Item) -> Result<(), Self::Error>;
 }
 
 #[derive(Debug)]
@@ -27,7 +27,7 @@ impl Encoder for TTYEncoder {
     type Item = TerminalCommand;
     type Error = Error;
 
-    fn encode(&mut self, out: &mut dyn Write, cmd: Self::Item) -> Result<(), Self::Error> {
+    fn encode<W: Write>(&mut self, mut out: W, cmd: Self::Item) -> Result<(), Self::Error> {
         use TerminalCommand::*;
 
         match cmd {
