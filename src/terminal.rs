@@ -19,7 +19,7 @@ pub trait Terminal: Write {
     fn size(&self) -> Result<TerminalSize, Error>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalCommand {
     /// Control specified DEC mode (DECSET|DECRST)
     DecModeSet { enable: bool, mode: DecMode },

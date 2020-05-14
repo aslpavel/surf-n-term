@@ -20,6 +20,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     term.execute(DecModeReport(DecMode::KittyKeyboard))?;
     term.execute(CursorReport)?;
 
+    // enable mouse
+    term.execute(TerminalCommand::DecModeSet {
+        enable: true,
+        mode: DecMode::MouseReport,
+    })?;
+    term.execute(TerminalCommand::DecModeSet {
+        enable: true,
+        mode: DecMode::MouseMotions,
+    })?;
+    term.execute(TerminalCommand::DecModeSet {
+        enable: true,
+        mode: DecMode::MouseSGR,
+    })?;
+
     use std::io::Write;
     // term.write_all(b"\x1bP+q62656c\x1b\\")?;
     term.write_all(b"\x1b[14t")?;

@@ -56,24 +56,8 @@ fn main() -> Result<(), Error> {
 
     // disable mouse
     term.execute(TerminalCommand::DecModeSet {
-        enable: true,
-        mode: DecMode::VisibleCursor,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
         enable: false,
         mode: DecMode::AltScreen,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::MouseSGR,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::MouseMotions,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::MouseReport,
     })?;
     term.poll(Some(std::time::Duration::new(0, 0)))?;
 
