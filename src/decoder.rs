@@ -417,16 +417,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             let col = nums.next()? - 1;
             let row = nums.next()? - 1;
 
-            let mut mode = KeyMod::EMPTY;
-            if event & 4 != 0 {
-                mode = mode | KeyMod::SHIFT;
-            }
-            if event & 8 != 0 {
-                mode = mode | KeyMod::ALT;
-            }
-            if event & 16 != 0 {
-                mode = mode | KeyMod::CTRL;
-            }
+            let mut mode = KeyMod::from_bits(((event >> 2) & 7) as u8);
             if data[data.len() - 1] == b'M' {
                 mode = mode | KeyMod::PRESS;
             }
