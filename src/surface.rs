@@ -15,6 +15,7 @@ impl Shape {
         row * self.row_stride + col * self.col_stride
     }
 
+    /// Givern row and column move `nth` steps in row major order
     pub fn nth(&self, row: usize, col: usize, nth: usize) -> (usize, usize) {
         let index = row * self.width + col + nth;
         let row = index / self.width;
@@ -84,7 +85,7 @@ pub trait ViewExt: View {
     }
 }
 
-impl<V: View> ViewExt for V {}
+impl<V: View + ?Sized> ViewExt for V {}
 
 pub struct ViewIter<'a, Item> {
     row: usize,
@@ -198,6 +199,7 @@ pub trait ViewMutExt: ViewMut {
         }
     }
 
+    /// Fill view with provided item.
     fn fill(&mut self, item: Self::Item)
     where
         Self::Item: Clone,
@@ -211,6 +213,7 @@ pub trait ViewMutExt: ViewMut {
         }
     }
 
+    /// Insert items in in row major order starting at specified row and column.
     fn insert<IS>(&mut self, row: usize, col: usize, items: IS)
     where
         IS: IntoIterator<Item = Self::Item>,
@@ -225,6 +228,7 @@ pub trait ViewMutExt: ViewMut {
         }
     }
 
+    /// Clear view by replacing all items with default value.
     fn clear(&mut self)
     where
         Self::Item: Default,
@@ -239,7 +243,7 @@ pub trait ViewMutExt: ViewMut {
     }
 }
 
-impl<V: ViewMut> ViewMutExt for V {}
+impl<V: ViewMut + ?Sized> ViewMutExt for V {}
 
 pub struct ViewMutIter<'a, Item: 'a> {
     row: usize,
@@ -563,7 +567,7 @@ mod tests {
         is_view_dyn(&surf);
         is_view_dyn(&surf.view(.., ..));
 
-        fn is_view_mut_dyn(mut view: &mut dyn ViewMut<Item = usize>) {
+        fn is_view_mut_dyn(view: &mut dyn ViewMut<Item = usize>) {
             let _ = view.view_mut(.., ..);
         }
         is_view_mut_dyn(&mut surf);
