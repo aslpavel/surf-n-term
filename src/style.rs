@@ -1,4 +1,3 @@
-use crate::{decoder::Decoder, Position, ViewMutExt};
 use std::{fmt, str::FromStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -126,92 +125,6 @@ impl Default for Face {
             bg: None,
             attrs: FaceAttrs::EMPTY,
         }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Cell {
-    pub face: Face,
-    pub glyph: Option<char>,
-}
-
-impl Cell {
-    pub fn new(face: Face, glyph: Option<char>) -> Self {
-        Self { face, glyph }
-    }
-
-    pub fn with_face(self, face: Face) -> Self {
-        Self { face, ..self }
-    }
-}
-
-impl Default for Cell {
-    fn default() -> Self {
-        Self {
-            face: Default::default(),
-            glyph: None,
-        }
-    }
-}
-
-pub trait TerminalView: ViewMutExt<Item = Cell> {
-    fn draw_box(&mut self, face: Option<Face>) {
-        let shape = self.shape();
-        if shape.width < 2 || shape.height < 2 {
-            return;
-        }
-        let face = face.unwrap_or_default();
-
-        let h = Cell::new(face, Some('─'));
-        let v = Cell::new(face, Some('│'));
-        self.view_mut(..1, 1..-1).fill(h.clone());
-        self.view_mut(-1.., 1..-1).fill(h.clone());
-        self.view_mut(1..-1, ..1).fill(v.clone());
-        self.view_mut(1..-1, -1..).fill(v.clone());
-
-        self.view_mut(..1, ..1).fill(Cell::new(face, Some('┌')));
-        self.view_mut(..1, -1..).fill(Cell::new(face, Some('┐')));
-        self.view_mut(-1.., -1..).fill(Cell::new(face, Some('┘')));
-        self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
-    }
-
-    fn writer(&mut self, pos: Position, face: Option<Face>) -> TerminalViewWriter<'_> {
-        let offset = self.shape().width * pos.row + pos.col;
-        let mut iter = self.iter_mut();
-        if offset > 0 {
-            iter.nth(offset - 1);
-        }
-        TerminalViewWriter {
-            face: face.unwrap_or_default(),
-            iter,
-            decoder: crate::decoder::Utf8Decoder::new(),
-        }
-    }
-}
-
-impl<T: ViewMutExt<Item = Cell> + ?Sized> TerminalView for T {}
-
-pub struct TerminalViewWriter<'a> {
-    face: Face,
-    iter: crate::surface::ViewMutIter<'a, Cell>,
-    decoder: crate::decoder::Utf8Decoder,
-}
-
-impl<'a> std::io::Write for TerminalViewWriter<'a> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut cur = std::io::Cursor::new(buf);
-        while let Some(glyph) = self.decoder.decode(&mut cur)? {
-            let glyph = if glyph == ' ' { None } else { Some(glyph) };
-            match self.iter.next() {
-                Some(cell) => *cell = Cell::new(self.face, glyph),
-                None => return Ok(buf.len()),
-            }
-        }
-        Ok(cur.position() as usize)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
 
