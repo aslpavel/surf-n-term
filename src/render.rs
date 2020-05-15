@@ -1,21 +1,30 @@
 use crate::{
-    decoder::Decoder, error::Error, Face, Position, Surface, Terminal, TerminalCommand,
-    TerminalEvent, ViewExt, ViewMut, ViewMutExt,
+    decoder::Decoder, error::Error, Face, Position, Surface, Terminal, TerminalCommand, ViewExt,
+    ViewMut, ViewMutExt,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cell {
-    pub face: Face,
-    pub glyph: Option<char>,
+    face: Face,
+    glyph: Option<char>,
+    damaged: bool,
 }
 
 impl Cell {
     pub fn new(face: Face, glyph: Option<char>) -> Self {
-        Self { face, glyph }
+        Self {
+            face,
+            glyph,
+            damaged: false,
+        }
     }
 
-    pub fn with_face(self, face: Face) -> Self {
-        Self { face, ..self }
+    fn new_damnaged() -> Self {
+        Self {
+            face: Default::default(),
+            glyph: None,
+            damaged: true,
+        }
     }
 }
 
@@ -24,11 +33,80 @@ impl Default for Cell {
         Self {
             face: Default::default(),
             glyph: None,
+            damaged: false,
         }
     }
 }
 
-pub trait TerminalView: ViewMutExt<Item = Cell> {
+pub struct TerminalRenderer {
+    face: Face,
+    cursor: Position,
+    front: Surface<Cell>,
+    back: Surface<Cell>,
+}
+
+impl TerminalRenderer {
+    pub fn new<T: Terminal + ?Sized>(term: &mut T, clear: bool) -> Result<Self, Error> {
+        let size = term.size()?;
+        term.execute(TerminalCommand::Face(Default::default()))?;
+        term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
+        let mut back = Surface::new(size.height, size.width);
+        if clear {
+            back.fill(Cell::new_damnaged());
+        }
+        Ok(Self {
+            face: Default::default(),
+            cursor: Position::new(0, 0),
+            front: Surface::new(size.height, size.width),
+            back,
+        })
+    }
+
+    pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+        for row in 0..self.back.height() {
+            for col in 0..self.back.width() {
+                let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
+                    (Some(src), Some(dst)) => (src, dst),
+                    _ => break,
+                };
+                if src == dst {
+                    continue;
+                }
+                // update face
+                if src.face != self.face {
+                    term.execute(TerminalCommand::Face(src.face))?;
+                    self.face = src.face;
+                }
+                // update position
+                if self.cursor.row != row || self.cursor.col != col {
+                    self.cursor.row = row;
+                    self.cursor.col = col;
+                    term.execute(TerminalCommand::CursorTo(self.cursor))?;
+                }
+                // TOOD: use `TerminalErase` command to clean consequent spaces
+                // render glyph
+                let glyph = match src.glyph {
+                    None => ' ',
+                    Some(glyph) => glyph,
+                };
+                term.execute(TerminalCommand::Char(glyph))?;
+                self.cursor.col += 1;
+            }
+        }
+        // swap buffers
+        std::mem::swap(&mut self.front, &mut self.back);
+        self.front.clear();
+        Ok(())
+    }
+
+    pub fn view(&mut self) -> TerminalView {
+        &mut self.front
+    }
+}
+
+pub type TerminalView<'a> = &'a mut dyn ViewMut<Item = Cell>;
+
+pub trait TerminalViewExt: ViewMutExt<Item = Cell> {
     fn draw_box(&mut self, face: Option<Face>) {
         let shape = self.shape();
         if shape.width < 2 || shape.height < 2 {
@@ -63,7 +141,7 @@ pub trait TerminalView: ViewMutExt<Item = Cell> {
     }
 }
 
-impl<T: ViewMutExt<Item = Cell> + ?Sized> TerminalView for T {}
+impl<T: ViewMutExt<Item = Cell> + ?Sized> TerminalViewExt for T {}
 
 pub struct TerminalViewWriter<'a> {
     face: Face,
@@ -88,106 +166,11 @@ impl<'a> std::io::Write for TerminalViewWriter<'a> {
         Ok(())
     }
 }
-struct TerminalRenderer {
-    face: Face,
-    cursor: Position,
-    front: Surface<Cell>,
-    back: Surface<Cell>,
-    height: usize,
-    width: usize,
-}
-
-impl TerminalRenderer {
-    fn new(height: usize, width: usize) -> Self {
-        Self {
-            face: Default::default(),
-            cursor: Position::new(0, 0),
-            front: Surface::new(height, width),
-            back: Surface::new(height, width),
-            height,
-            width,
-        }
-    }
-
-    pub fn render(&mut self) -> Vec<TerminalCommand> {
-        let mut cmds = Vec::new();
-        for row in 0..self.height {
-            for col in 0..self.width {
-                let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
-                    (Some(src), Some(dst)) => (src, dst),
-                    _ => break,
-                };
-                if src == dst {
-                    continue;
-                }
-                // update face
-                if src.face != self.face {
-                    cmds.push(TerminalCommand::Face(src.face));
-                    self.face = src.face;
-                }
-                // update position
-                if self.cursor.row != row || self.cursor.col != col {
-                    self.cursor.row = row;
-                    self.cursor.col = col;
-                    cmds.push(TerminalCommand::CursorTo(self.cursor));
-                }
-                // TOOD: use `TerminalErase` command to clean consequent spaces
-                // render glyph
-                let glyph = match src.glyph {
-                    None => ' ',
-                    Some(glyph) => glyph,
-                };
-                cmds.push(TerminalCommand::Char(glyph));
-                self.cursor.col += 1;
-            }
-        }
-        cmds
-    }
-}
-
-pub enum RenderAction {
-    Quit,
-    Continue,
-    Sleep(std::time::Duration),
-}
-
-pub fn run<T, R, E>(term: &mut T, mut render: R) -> Result<(), E>
-where
-    T: Terminal,
-    R: FnMut(Option<TerminalEvent>, &mut dyn ViewMut<Item = Cell>) -> Result<RenderAction, E>,
-    E: From<Error>,
-{
-    let size = term.size()?;
-    term.execute(TerminalCommand::Face(Default::default()))?;
-    term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
-    let mut renderer = TerminalRenderer::new(size.height, size.width);
-    let mut event = None;
-    loop {
-        let timeout = match render(event, &mut renderer.front)? {
-            RenderAction::Quit => return Ok(()),
-            RenderAction::Sleep(timeout) => Some(timeout),
-            RenderAction::Continue => None,
-        };
-
-        for cmd in renderer.render() {
-            term.execute(cmd)?;
-        }
-        std::mem::swap(&mut renderer.front, &mut renderer.back);
-        renderer.front.clear();
-
-        event = term.poll(timeout)?;
-        if let Some(TerminalEvent::Resize(size)) = event {
-            renderer = TerminalRenderer::new(size.height, size.width);
-            term.execute(TerminalCommand::Face(Default::default()))?;
-            term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TerminalCommand, TerminalView, View, ViewMutExt};
+    use crate::{TerminalCommand, View};
     use std::io::Write;
 
     #[allow(unused)]
@@ -221,26 +204,6 @@ mod tests {
         }
         writeln!(&mut stdout, "┘")?;
         stdout.flush()?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_diff() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        let bg = "bg=#3c3836".parse()?;
-        let purple: Face = "fg=#3c3836,bg=#d3869b".parse()?;
-        let mut render = TerminalRenderer::new(3, 7);
-        render.front.fill(Cell::new(bg, None));
-        render.back.fill(Cell::new(bg, None));
-
-        let mut view = render.front.view_mut(.., 1..);
-        let mut writer = view.writer(Position::new(0, 4), Some(purple));
-        write!(&mut writer, "TEST")?;
-        // debug(&render.front)?;
-
-        for cmd in render.render() {
-            println!("{:?}", cmd);
-        }
-
         Ok(())
     }
 }

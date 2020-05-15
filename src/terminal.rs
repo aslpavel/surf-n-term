@@ -1,5 +1,8 @@
-use crate::error::Error;
-use crate::Face;
+use crate::{
+    error::Error,
+    render::{TerminalRenderer, TerminalView},
+    Face,
+};
 use std::{fmt, io::Write, time::Duration};
 
 /// Main trait to interact with a Terminal
@@ -17,6 +20,50 @@ pub trait Terminal: Write {
 
     /// Get terminal size
     fn size(&self) -> Result<TerminalSize, Error>;
+
+    /// Run terminal with event handler
+    fn run<H, E>(&mut self, mut handler: H) -> Result<(), E>
+    where
+        H: FnMut(&mut Self, Option<TerminalEvent>) -> Result<TerminalAction, E>,
+        E: From<Error>,
+    {
+        let mut timeout = None;
+        loop {
+            let event = self.poll(timeout)?;
+            timeout = match handler(self, event)? {
+                TerminalAction::Quit => return Ok(()),
+                TerminalAction::Wait => None,
+                TerminalAction::Sleep(timeout) => Some(timeout),
+            };
+        }
+    }
+
+    /// Run terminal with render event handler
+    fn run_render<H, E>(&mut self, mut handler: H) -> Result<(), E>
+    where
+        H: for<'a> FnMut(
+            &'a mut Self,
+            Option<TerminalEvent>,
+            TerminalView<'a>,
+        ) -> Result<TerminalAction, E>,
+        E: From<Error>,
+    {
+        let mut renderer = TerminalRenderer::new(self, false)?;
+        self.run(move |term, event| {
+            if let Some(TerminalEvent::Resize(_)) = event {
+                renderer = TerminalRenderer::new(term, true)?;
+            }
+            let result = handler(term, event, renderer.view())?;
+            renderer.frame(term)?;
+            Ok(result)
+        })
+    }
+}
+
+pub enum TerminalAction {
+    Quit,
+    Wait,
+    Sleep(Duration),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
