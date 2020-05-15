@@ -1,8 +1,7 @@
 use std::io::Write;
-use surf_n_term::render::{run, RenderAction};
 use surf_n_term::{
-    error::Error, Cell, DecMode, Key, KeyName, Position, SystemTerminal, Terminal, TerminalCommand,
-    TerminalEvent, TerminalView,
+    error::Error, Cell, DecMode, Key, KeyName, Position, SystemTerminal, Terminal, TerminalAction,
+    TerminalCommand, TerminalEvent, ViewMut,
 };
 
 fn main() -> Result<(), Error> {
@@ -32,17 +31,25 @@ fn main() -> Result<(), Error> {
 
     let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
     let red = "bg=#fb4935".parse()?;
-    run(&mut term, |event, view| -> Result<_, Error> {
+    let mut count = 0;
+    term.run_render(|_term, event, mut view| -> Result<_, Error> {
+        count += 1;
+
+        // render box
         view.draw_box(None);
 
+        // quit
         let event = match event {
-            None => return Ok(RenderAction::Continue),
-            Some(event) if &event == &q => return Ok(RenderAction::Quit),
+            None => return Ok(TerminalAction::Wait),
+            Some(event) if &event == &q => return Ok(TerminalAction::Quit),
             Some(event) => event,
         };
 
+        // render label with event
         let mut writer = view.writer(Position::new(0, 3), None);
-        write!(&mut writer, "┤ Event: {:?} ├", event)?;
+        write!(&mut writer, "┤ Count: {} Event: {:?} ├", count, event)?;
+
+        // render mouse cursor
         match event {
             TerminalEvent::Mouse(mouse) if mouse.name == KeyName::MouseMove => {
                 if let Some(cell) = view.get_mut(mouse.row, mouse.col) {
@@ -52,7 +59,7 @@ fn main() -> Result<(), Error> {
             _ => (),
         }
 
-        Ok(RenderAction::Continue)
+        Ok(TerminalAction::Wait)
     })?;
 
     // switch off alt screen

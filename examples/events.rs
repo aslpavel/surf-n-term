@@ -42,12 +42,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let timeout = Duration::from_secs(10);
     println!("Program will exit after {:?} of idling ...", timeout);
     let q = Key::from(KeyName::Char('q'));
-    while let Some(event) = term.poll(Some(timeout))? {
+
+    // run programm
+    term.run(|_term, event| -> Result<_, Box<dyn Error>> {
+        use surf_n_term::terminal::TerminalAction::*;
         match event {
-            TerminalEvent::Key(key) if key == q => break,
-            _ => println!("{:?}", event),
+            None => Ok(Quit),
+            Some(TerminalEvent::Key(key)) if key == q => Ok(Quit),
+            Some(event) => {
+                println!("{:?}", event);
+                Ok(Sleep(timeout))
+            }
         }
-    }
+    })?;
 
     Ok(())
 }

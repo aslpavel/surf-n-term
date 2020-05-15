@@ -11,9 +11,9 @@ mod surface;
 pub mod terminal;
 mod unix;
 
-pub use render::{Cell, TerminalView, TerminalViewExt};
+pub use render::{Cell, TerminalView};
 pub use style::{Color, Face, FaceAttrs};
-pub use surface::{Surface, View, ViewExt, ViewMut, ViewMutExt};
+pub use surface::{Shape, Surface, View, ViewExt, ViewMut, ViewMutExt};
 pub use terminal::{
     DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Terminal, TerminalAction,
     TerminalCommand, TerminalEvent,

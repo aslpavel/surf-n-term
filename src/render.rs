@@ -1,6 +1,6 @@
 use crate::{
-    decoder::Decoder, error::Error, Face, Position, Surface, Terminal, TerminalCommand, ViewExt,
-    ViewMut, ViewMutExt,
+    decoder::Decoder, error::Error, Face, Position, Shape, Surface, Terminal, TerminalCommand,
+    View, ViewExt, ViewMut, ViewMutExt,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -62,6 +62,7 @@ impl TerminalRenderer {
         })
     }
 
+    // Render the current frame
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         for row in 0..self.back.height() {
             for col in 0..self.back.width() {
@@ -99,15 +100,38 @@ impl TerminalRenderer {
         Ok(())
     }
 
-    pub fn view(&mut self) -> TerminalView {
-        &mut self.front
+    // View associated with the current frame
+    pub fn view(&mut self) -> TerminalView<'_> {
+        TerminalView {
+            surf: self.front.view_mut(.., ..),
+        }
     }
 }
 
-pub type TerminalView<'a> = &'a mut dyn ViewMut<Item = Cell>;
+pub struct TerminalView<'a> {
+    surf: crate::surface::SurfaceViewMut<'a, Cell>,
+}
 
-pub trait TerminalViewExt: ViewMutExt<Item = Cell> {
-    fn draw_box(&mut self, face: Option<Face>) {
+impl<'a> View for TerminalView<'a> {
+    type Item = Cell;
+
+    fn shape(&self) -> Shape {
+        self.surf.shape()
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        self.surf.data()
+    }
+}
+
+impl<'a> ViewMut for TerminalView<'a> {
+    fn data_mut(&mut self) -> &mut [Cell] {
+        self.surf.data_mut()
+    }
+}
+
+impl<'a> TerminalView<'a> {
+    pub fn draw_box(&mut self, face: Option<Face>) {
         let shape = self.shape();
         if shape.width < 2 || shape.height < 2 {
             return;
@@ -127,7 +151,7 @@ pub trait TerminalViewExt: ViewMutExt<Item = Cell> {
         self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
     }
 
-    fn writer(&mut self, pos: Position, face: Option<Face>) -> TerminalViewWriter<'_> {
+    pub fn writer(&mut self, pos: Position, face: Option<Face>) -> TerminalViewWriter<'_> {
         let offset = self.shape().width * pos.row + pos.col;
         let mut iter = self.iter_mut();
         if offset > 0 {
@@ -140,8 +164,6 @@ pub trait TerminalViewExt: ViewMutExt<Item = Cell> {
         }
     }
 }
-
-impl<T: ViewMutExt<Item = Cell> + ?Sized> TerminalViewExt for T {}
 
 pub struct TerminalViewWriter<'a> {
     face: Face,

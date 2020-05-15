@@ -49,6 +49,10 @@ pub trait Terminal: Write {
         E: From<Error>,
     {
         let mut renderer = TerminalRenderer::new(self, false)?;
+        // run handler once without event to render first frame
+        handler(self, None, renderer.view())?;
+        renderer.frame(self)?;
+        // run with render event handler
         self.run(move |term, event| {
             if let Some(TerminalEvent::Resize(_)) = event {
                 renderer = TerminalRenderer::new(term, true)?;
