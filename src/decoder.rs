@@ -344,26 +344,25 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         .tag(TTYTag::MouseSGR),
     );
 
-    // character event
-    cmds.push(tty_decoder_char().tag(TTYTag::Char));
+    // character event (mostly utf8 but one-byte codes are restricted to the printable set)
+    let char_nfa = {
+        let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
+        let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
+        let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
+        let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
+        let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
+        NFA::choice(vec![
+            printable,
+            utf8_two + utf8_tail.clone(),
+            utf8_three + utf8_tail.clone() + utf8_tail.clone(),
+            utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
+        ])
+        .tag(TTYTag::Char)
+    };
+    cmds.push(char_nfa);
+    // cmds.push(tty_decoder_char().tag(TTYTag::Char));
 
     NFA::choice(cmds).compile()
-}
-
-/// Mostly UTF-8 matcher but for one-byte codes only restricted to
-// pritable subset.
-fn tty_decoder_char() -> NFA<TTYTag> {
-    let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
-    let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
-    let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
-    let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
-    let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-    NFA::choice(vec![
-        printable,
-        utf8_two + utf8_tail.clone(),
-        utf8_three + utf8_tail.clone() + utf8_tail.clone(),
-        utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
-    ])
 }
 
 /// Convert tag plus current match to a TerminalEvent
@@ -374,7 +373,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         Char => TerminalEvent::Key(KeyName::Char(utf8_decode(data)).into()),
         DecMode => {
             // "\x1b[?{mode};{status}$y"
-            let mut nums = tty_numbers(&data[3..data.len() - 2]);
+            let mut nums = numbers_decode(&data[3..data.len() - 2]);
             TerminalEvent::DecMode {
                 mode: crate::terminal::DecMode::from_usize(nums.next()?)?,
                 status: DecModeStatus::from_usize(nums.next()?)?,
@@ -382,7 +381,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         }
         CursorPosition => {
             // "\x1b[{row};{col}R"
-            let mut nums = tty_numbers(&data[2..data.len() - 1]);
+            let mut nums = numbers_decode(&data[2..data.len() - 1]);
             TerminalEvent::CursorPosition {
                 row: nums.next()?,
                 col: nums.next()?,
@@ -390,7 +389,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         }
         TerminalSizeCells | TerminalSizePixels => {
             // "\x1b[(4|8);{height};{width}t"
-            let mut nums = tty_numbers(&data[4..data.len() - 1]);
+            let mut nums = numbers_decode(&data[4..data.len() - 1]);
             let height = nums.next()?;
             let width = nums.next()?;
             if tag == &TerminalSizeCells {
@@ -412,7 +411,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         MouseSGR => {
             // "\x1b[<{event};{row};{col}(m|M)"
             // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
-            let mut nums = tty_numbers(&data[3..data.len() - 1]);
+            let mut nums = numbers_decode(&data[3..data.len() - 1]);
             let event = nums.next()?;
             let col = nums.next()? - 1;
             let row = nums.next()? - 1;
@@ -452,7 +451,8 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
     Some(event)
 }
 
-fn tty_numbers(data: &[u8]) -> impl Iterator<Item = usize> + '_ {
+/// Semi-colon separated positve numers
+fn numbers_decode(data: &[u8]) -> impl Iterator<Item = usize> + '_ {
     data.split(|b| *b == b';').map(|num| {
         let mut result = 0usize;
         let mut mult = 1usize;

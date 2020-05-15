@@ -1,29 +1,24 @@
 use crate::{decoder::Decoder, Position, ViewMutExt};
 use std::{fmt, str::FromStr};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Color {
-    pub red: u8,
-    pub green: u8,
-    pub blue: u8,
-    pub alpha: u8,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Color {
+    RGBA(u8, u8, u8, u8),
 }
 
 impl Color {
-    pub fn new(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
-        Self {
-            red,
-            green,
-            blue,
-            alpha,
+    pub fn rgb_u8(self) -> (u8, u8, u8) {
+        let (r, g, b, _) = self.rgba_u8();
+        (r, g, b)
+    }
+
+    pub fn rgba_u8(self) -> (u8, u8, u8, u8) {
+        match self {
+            Self::RGBA(r, g, b, a) => (r, g, b, a),
         }
     }
 
-    pub fn rgb_u8(self) -> (u8, u8, u8) {
-        (self.red, self.green, self.blue)
-    }
-
-    pub fn from_str(rgba: &str) -> Option<Color> {
+    pub fn from_str(rgba: &str) -> Option<Self> {
         if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
             return None;
         }
@@ -32,22 +27,7 @@ impl Color {
         let green = hex.next()?;
         let blue = hex.next()?;
         let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
-        Some(Color {
-            red,
-            green,
-            blue,
-            alpha,
-        })
-    }
-}
-
-impl fmt::Debug for Color {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "#{:02x}{:02x}{:02x}", self.red, self.green, self.blue)?;
-        if self.alpha != 255 {
-            write!(f, "{:02x}", self.alpha)?;
-        }
-        Ok(())
+        Some(Self::RGBA(red, green, blue, alpha))
     }
 }
 
@@ -55,10 +35,7 @@ impl FromStr for Color {
     type Err = crate::error::Error;
 
     fn from_str(color: &str) -> Result<Color, Self::Err> {
-        match Self::from_str(color) {
-            Some(color) => Ok(color),
-            None => Err(crate::error::Error::InvalidColor),
-        }
+        Self::from_str(color).ok_or(crate::error::Error::InvalidColor)
     }
 }
 
@@ -244,8 +221,11 @@ mod tests {
 
     #[test]
     fn test_parse_color() -> Result<(), crate::error::Error> {
-        assert_eq!("#d3869b".parse::<Color>()?, Color::new(211, 134, 155, 255));
-        assert_eq!("#b8bb2680".parse::<Color>()?, Color::new(184, 187, 38, 128));
+        assert_eq!("#d3869b".parse::<Color>()?, Color::RGBA(211, 134, 155, 255));
+        assert_eq!(
+            "#b8bb2680".parse::<Color>()?,
+            Color::RGBA(184, 187, 38, 128)
+        );
         Ok(())
     }
 }

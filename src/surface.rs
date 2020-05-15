@@ -558,27 +558,31 @@ mod tests {
     }
 
     #[test]
-    fn test_view_dyn() {
+    fn test_view_impl() {
         let mut surf: Surface<usize> = Surface::new(1, 1);
 
+        // View as dynamic reference with access to ViewExt
         fn is_view_dyn(view: &dyn View<Item = usize>) {
             let _ = view.view(.., ..);
         }
         is_view_dyn(&surf);
         is_view_dyn(&surf.view(.., ..));
 
+        // ViewMut as dynamic reference with access to ViewMutExt
         fn is_view_mut_dyn(view: &mut dyn ViewMut<Item = usize>) {
             let _ = view.view_mut(.., ..);
         }
         is_view_mut_dyn(&mut surf);
         is_view_mut_dyn(&mut surf.view_mut(.., ..));
 
+        // View as generic parameter by (value|refrence) with access to ViewExt
         fn is_view<V: View>(view: V) {
             let _ = view.view(.., ..);
         }
         is_view(surf.clone());
         is_view(&surf);
 
+        // ViewMut as generic parameter by (value|reference) with access to ViewMutExt
         fn is_view_mut<V: ViewMut>(mut view: V) {
             let _ = view.view_mut(.., ..);
         }
