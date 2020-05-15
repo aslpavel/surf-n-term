@@ -118,6 +118,10 @@ impl std::ops::Drop for UnixTerminal {
                 enable: false,
                 mode: DecMode::MouseReport,
             },
+            TerminalCommand::DecModeSet {
+                enable: true,
+                mode: DecMode::AutoWrap,
+            },
         ];
         let mut buffer = Vec::new();
         for cmd in epilogue.iter() {

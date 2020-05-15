@@ -468,20 +468,34 @@ fn tty_numbers(data: &[u8]) -> impl Iterator<Item = usize> + '_ {
 //
 // NOTE: this function must only be used on a validated buffer
 // containing single UTF8 character.
-fn utf8_decode(buffer: &[u8]) -> char {
-    let first = buffer[0] as u32;
-    let mut code: u32 = match buffer.len() {
+fn utf8_decode(slice: &[u8]) -> char {
+    let first = slice[0] as u32;
+    let mut code: u32 = match slice.len() {
         1 => first & 127,
         2 => first & 31,
         3 => first & 15,
         4 => first & 7,
-        _ => unreachable!(),
+        _ => panic!("[utf8_deocde] invalid code point slice"),
     };
-    for byte in buffer[1..].iter() {
+    for byte in slice[1..].iter() {
         code <<= 6;
         code |= (*byte as u32) & 63;
     }
     unsafe { std::char::from_u32_unchecked(code) }
+}
+
+pub fn hex_decode(slice: &[u8]) -> impl Iterator<Item = u8> + '_ {
+    let value = |byte| match byte {
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'0'..=b'9' => Some(byte - b'0'),
+        _ => None,
+    };
+    slice
+        .chunks(2)
+        .map(move |pair| Some(value(pair[0])? << 4 | value(pair[1])?))
+        .take_while(|value| value.is_some())
+        .flatten()
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -764,5 +778,14 @@ mod tests {
         assert_eq!(decoder.decode(&mut cursor)?, Some('€'));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_hex_decode() {
+        let mut iter = hex_decode(b"d3869B");
+        assert_eq!(iter.next(), Some(211));
+        assert_eq!(iter.next(), Some(134));
+        assert_eq!(iter.next(), Some(155));
+        assert_eq!(iter.next(), None);
     }
 }

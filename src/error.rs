@@ -4,8 +4,8 @@ use std::fmt;
 pub enum Error {
     IOError(std::io::Error),
     NixError(nix::Error),
-    Closed,
     NotATTY,
+    InvalidColor,
 }
 
 impl fmt::Display for Error {

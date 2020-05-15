@@ -22,6 +22,23 @@ impl Color {
     pub fn rgb_u8(self) -> (u8, u8, u8) {
         (self.red, self.green, self.blue)
     }
+
+    pub fn from_str(rgba: &str) -> Option<Color> {
+        if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
+            return None;
+        }
+        let mut hex = crate::decoder::hex_decode(rgba[1..].as_bytes());
+        let red = hex.next()?;
+        let green = hex.next()?;
+        let blue = hex.next()?;
+        let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
+        Some(Color {
+            red,
+            green,
+            blue,
+            alpha,
+        })
+    }
 }
 
 impl fmt::Debug for Color {
@@ -34,44 +51,14 @@ impl fmt::Debug for Color {
     }
 }
 
-#[derive(Debug)]
-pub struct ColorError(String);
-
-impl fmt::Display for ColorError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for ColorError {}
-
 impl FromStr for Color {
-    type Err = ColorError;
+    type Err = crate::error::Error;
 
-    fn from_str(rgba: &str) -> Result<Color, Self::Err> {
-        // FIXME: support different color notations
-        if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
-            return Err(ColorError(format!("invalid color `{}`", rgba)));
+    fn from_str(color: &str) -> Result<Color, Self::Err> {
+        match Self::from_str(color) {
+            Some(color) => Ok(color),
+            None => Err(crate::error::Error::InvalidColor),
         }
-        let red = u8::from_str_radix(rgba.get(1..3).unwrap(), 16)
-            .map_err(|err| ColorError(format!("invalid red component `{}`: {}", rgba, err)))?;
-        let green = u8::from_str_radix(rgba.get(3..5).unwrap(), 16)
-            .map_err(|err| ColorError(format!("invalid green component `{}`: {}", rgba, err)))?;
-        let blue = u8::from_str_radix(rgba.get(5..7).unwrap(), 16)
-            .map_err(|err| ColorError(format!("invalid blue component `{}`: {}", rgba, err)))?;
-        let alpha = match rgba.get(7..9) {
-            None => 255,
-            Some(alpha) => u8::from_str_radix(alpha, 16).map_err(|err| {
-                ColorError(format!("invalid alpha component `{}`: {}", rgba, err))
-            })?,
-        };
-
-        Ok(Color {
-            red,
-            green,
-            blue,
-            alpha,
-        })
     }
 }
 
@@ -145,6 +132,7 @@ impl Face {
     pub fn new(fg: Option<Color>, bg: Option<Color>, attrs: FaceAttrs) -> Self {
         Self { fg, bg, attrs }
     }
+
     pub fn with_bg(&self, bg: Option<Color>) -> Self {
         Face { bg, ..*self }
     }
@@ -252,10 +240,10 @@ impl<'a> std::io::Write for TerminalViewWriter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Color, ColorError};
+    use super::*;
 
     #[test]
-    fn test_parse_color() -> Result<(), ColorError> {
+    fn test_parse_color() -> Result<(), crate::error::Error> {
         assert_eq!("#d3869b".parse::<Color>()?, Color::new(211, 134, 155, 255));
         assert_eq!("#b8bb2680".parse::<Color>()?, Color::new(184, 187, 38, 128));
         Ok(())
