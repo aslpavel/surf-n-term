@@ -226,25 +226,14 @@ mod tests {
 
     #[test]
     fn test_diff() -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        let dark = Some("#3c3836".parse()?);
-        let bg = Face::default().with_bg(dark);
-        let _green = Some(
-            Face::default()
-                .with_fg(dark)
-                .with_bg(Some("#b8bb26".parse()?)),
-        );
-        let purple = Some(
-            Face::default()
-                .with_fg(dark)
-                .with_bg(Some("#d3869b".parse()?)),
-        );
-
+        let bg = "bg=#3c3836".parse()?;
+        let purple: Face = "fg=#3c3836,bg=#d3869b".parse()?;
         let mut render = TerminalRenderer::new(3, 7);
         render.front.fill(Cell::new(bg, None));
         render.back.fill(Cell::new(bg, None));
 
         let mut view = render.front.view_mut(.., 1..);
-        let mut writer = view.writer(Position::new(0, 4), purple);
+        let mut writer = view.writer(Position::new(0, 4), Some(purple));
         write!(&mut writer, "TEST")?;
         // debug(&render.front)?;
 

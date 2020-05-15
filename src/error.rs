@@ -5,7 +5,8 @@ pub enum Error {
     IOError(std::io::Error),
     NixError(nix::Error),
     NotATTY,
-    InvalidColor,
+    ParseColorError,
+    ParseFaceError,
 }
 
 impl fmt::Display for Error {

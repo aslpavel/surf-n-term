@@ -1,8 +1,9 @@
+use crate::error::Error;
 use std::{fmt, str::FromStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Color {
-    RGBA(u8, u8, u8, u8),
+    RGBA([u8; 4]),
 }
 
 impl Color {
@@ -13,7 +14,7 @@ impl Color {
 
     pub fn rgba_u8(self) -> (u8, u8, u8, u8) {
         match self {
-            Self::RGBA(r, g, b, a) => (r, g, b, a),
+            Self::RGBA([r, g, b, a]) => (r, g, b, a),
         }
     }
 
@@ -26,15 +27,15 @@ impl Color {
         let green = hex.next()?;
         let blue = hex.next()?;
         let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
-        Some(Self::RGBA(red, green, blue, alpha))
+        Some(Self::RGBA([red, green, blue, alpha]))
     }
 }
 
 impl FromStr for Color {
-    type Err = crate::error::Error;
+    type Err = Error;
 
-    fn from_str(color: &str) -> Result<Color, Self::Err> {
-        Self::from_str(color).ok_or(crate::error::Error::InvalidColor)
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        Self::from_str(string).ok_or(Error::ParseColorError)
     }
 }
 
@@ -128,16 +129,57 @@ impl Default for Face {
     }
 }
 
+impl FromStr for Face {
+    type Err = Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        string
+            .split(',')
+            .try_fold(Face::default(), |mut face, attrs| {
+                let mut iter = attrs.splitn(2, '=');
+                let key = iter.next().unwrap_or_default().trim().to_lowercase();
+                let value = iter.next().unwrap_or_default().trim();
+                match key.as_str() {
+                    "fg" => face.fg = Some(value.parse()?),
+                    "bg" => face.bg = Some(value.parse()?),
+                    "bold" => face.attrs = face.attrs | FaceAttrs::BOLD,
+                    "italic" => face.attrs = face.attrs | FaceAttrs::ITALIC,
+                    "underline" => face.attrs = face.attrs | FaceAttrs::UNDERLINE,
+                    "blink" => face.attrs = face.attrs | FaceAttrs::BLINK,
+                    "reverse" => face.attrs = face.attrs | FaceAttrs::REVERSE,
+                    _ => return Err(Error::ParseFaceError),
+                }
+                Ok(face)
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_color() -> Result<(), crate::error::Error> {
-        assert_eq!("#d3869b".parse::<Color>()?, Color::RGBA(211, 134, 155, 255));
+    fn test_parse_color() -> Result<(), Error> {
+        assert_eq!(
+            "#d3869b".parse::<Color>()?,
+            Color::RGBA([211, 134, 155, 255])
+        );
         assert_eq!(
             "#b8bb2680".parse::<Color>()?,
-            Color::RGBA(184, 187, 38, 128)
+            Color::RGBA([184, 187, 38, 128])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_face() -> Result<(), Error> {
+        assert_eq!(
+            "fg=#98971a, bg=#bdae93, bold ,underline".parse::<Face>()?,
+            Face {
+                fg: Some(Color::RGBA([152, 151, 26, 255])),
+                bg: Some(Color::RGBA([189, 174, 147, 255])),
+                attrs: FaceAttrs::BOLD | FaceAttrs::UNDERLINE,
+            }
         );
         Ok(())
     }

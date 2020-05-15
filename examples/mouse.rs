@@ -1,8 +1,8 @@
 use std::io::Write;
 use surf_n_term::render::{run, RenderAction};
 use surf_n_term::{
-    error::Error, Cell, DecMode, Face, Key, KeyName, Position, SystemTerminal, Terminal,
-    TerminalCommand, TerminalEvent, TerminalView,
+    error::Error, Cell, DecMode, Key, KeyName, Position, SystemTerminal, Terminal, TerminalCommand,
+    TerminalEvent, TerminalView,
 };
 
 fn main() -> Result<(), Error> {
@@ -31,7 +31,7 @@ fn main() -> Result<(), Error> {
     })?;
 
     let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
-    let red = Face::default().with_bg(Some("#fb4934".parse().unwrap()));
+    let red = "bg=#fb4935".parse()?;
     run(&mut term, |event, view| -> Result<_, Error> {
         view.draw_box(None);
 
