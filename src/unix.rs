@@ -4,7 +4,7 @@ use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    terminal::{Terminal, TerminalCommand, TerminalEvent, TerminalSize},
+    terminal::{Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats},
     DecMode,
 };
 use std::os::unix::io::AsRawFd;
@@ -41,6 +41,7 @@ pub struct UnixTerminal {
     termios_saved: nix::Termios,
     sigwinch_read: nix::UnixStream,
     sigwinch_id: signal_hook::SigId,
+    stats: TerminalStats,
 }
 
 impl UnixTerminal {
@@ -85,12 +86,17 @@ impl UnixTerminal {
             termios_saved,
             sigwinch_read,
             sigwinch_id,
+            stats: TerminalStats::new(),
         })
     }
 
     pub fn new() -> Result<Self, Error> {
         let tty = nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty())?;
         Self::new_from_fd(tty, tty)
+    }
+
+    pub fn stats(&self) -> &TerminalStats {
+        &self.stats
     }
 }
 
@@ -202,8 +208,10 @@ impl Terminal for UnixTerminal {
             // process pending output
             if write_set.contains(write_fd) {
                 let write_handle = &mut self.write_handle;
-                self.write_queue
+                let send = self
+                    .write_queue
                     .consume_with(|slice| guard_io(write_handle.write(slice), 0))?;
+                self.stats.send += send;
             }
             // process SIGWINCH
             if read_set.contains(sigwinch_fd) {
@@ -216,10 +224,11 @@ impl Terminal for UnixTerminal {
             // process pending input
             if read_set.contains(read_fd) {
                 let mut buf = [0u8; 1024];
-                let size = guard_io(self.read_handle.read(&mut buf), 0)?;
+                let recv = guard_io(self.read_handle.read(&mut buf), 0)?;
+                self.stats.recv += recv;
 
                 // parse events
-                let mut read_queue = Cursor::new(&buf[..size]);
+                let mut read_queue = Cursor::new(&buf[..recv]);
                 while let Some(event) = self.decoder.decode(&mut read_queue)? {
                     self.events_queue.push_back(event)
                 }

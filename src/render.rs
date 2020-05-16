@@ -151,8 +151,8 @@ impl<'a> TerminalView<'a> {
         self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
     }
 
-    pub fn writer(&mut self, pos: Position, face: Option<Face>) -> TerminalViewWriter<'_> {
-        let offset = self.shape().width * pos.row + pos.col;
+    pub fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalViewWriter<'_> {
+        let offset = self.shape().width * row + col;
         let mut iter = self.iter_mut();
         if offset > 0 {
             iter.nth(offset - 1);
@@ -192,40 +192,111 @@ impl<'a> std::io::Write for TerminalViewWriter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TerminalCommand, View};
+    use crate::{
+        encoder::{Encoder, TTYEncoder},
+        terminal::{TerminalEvent, TerminalSize},
+    };
     use std::io::Write;
 
-    #[allow(unused)]
-    fn debug<V: View<Item = Cell>>(view: V) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        use crate::encoder::{Encoder, TTYEncoder};
-
+    fn debug<V: View<Item = Cell>>(view: V) -> Result<String, Error> {
         let mut encoder = TTYEncoder::new();
-        let stdout_locked = std::io::stdout();
-        let mut stdout = stdout_locked.lock();
-        write!(&mut stdout, "\n┌")?;
+        let mut out = Vec::new();
+        write!(&mut out, "\n┌")?;
         for _ in 0..view.width() {
-            write!(&mut stdout, "─")?;
+            write!(&mut out, "─")?;
         }
-        writeln!(&mut stdout, "┐")?;
+        writeln!(&mut out, "┐")?;
         for row in 0..view.height() {
-            write!(&mut stdout, "│")?;
+            write!(&mut out, "│")?;
             for col in 0..view.width() {
                 match view.get(row, col) {
                     None => break,
                     Some(cell) => {
-                        encoder.encode(&mut stdout, TerminalCommand::Face(cell.face))?;
-                        write!(&mut stdout, "{}", cell.glyph.unwrap_or(' '))?;
+                        encoder.encode(&mut out, TerminalCommand::Face(cell.face))?;
+                        write!(&mut out, "{}", cell.glyph.unwrap_or(' '))?;
                     }
                 }
             }
-            writeln!(&mut stdout, "\x1b[m│")?;
+            writeln!(&mut out, "\x1b[m│")?;
         }
-        write!(&mut stdout, "└")?;
+        write!(&mut out, "└")?;
         for _ in 0..view.width() {
-            write!(&mut stdout, "─")?;
+            write!(&mut out, "─")?;
         }
-        writeln!(&mut stdout, "┘")?;
-        stdout.flush()?;
+        write!(&mut out, "┘")?;
+        Ok(String::from_utf8_lossy(&out).to_string())
+    }
+
+    struct DummyTerminal {
+        size: TerminalSize,
+        cmds: Vec<TerminalCommand>,
+        buffer: Vec<u8>,
+    }
+
+    impl DummyTerminal {
+        fn new(height: usize, width: usize) -> Self {
+            Self {
+                size: TerminalSize {
+                    height,
+                    width,
+                    height_pixels: 0,
+                    width_pixels: 0,
+                },
+                cmds: Default::default(),
+                buffer: Default::default(),
+            }
+        }
+
+        fn clear(&mut self) {
+            self.cmds.clear();
+            self.buffer.clear();
+        }
+    }
+
+    impl Write for DummyTerminal {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.buffer.write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Terminal for DummyTerminal {
+        fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
+            self.cmds.push(cmd);
+            Ok(())
+        }
+
+        fn poll(
+            &mut self,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<Option<TerminalEvent>, Error> {
+            Ok(None)
+        }
+
+        fn size(&self) -> Result<TerminalSize, Error> {
+            Ok(self.size)
+        }
+    }
+
+    #[test]
+    fn test_render() -> Result<(), Error> {
+        let mut term = DummyTerminal::new(3, 7);
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+
+        let purple = "bg=#d3869b".parse::<Face>()?;
+        let mut view = render.view();
+        let mut writer = view.writer(0, 4, Some(purple));
+        write!(writer, "TEST")?;
+
+        println!("{}", debug(view)?);
+        render.frame(&mut term)?;
+        println!("{:?}", term.cmds);
+
+        term.clear();
+        assert!(false);
         Ok(())
     }
 }

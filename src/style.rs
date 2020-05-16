@@ -1,7 +1,7 @@
 use crate::error::Error;
 use std::{fmt, str::FromStr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Color {
     RGBA([u8; 4]),
 }
@@ -39,6 +39,20 @@ impl FromStr for Color {
     }
 }
 
+impl fmt::Debug for Color {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Color::RGBA([r, g, b, a]) => {
+                write!(f, "#{:02x}{:02x}{:02x}", r, g, b)?;
+                if *a != 255 {
+                    write!(f, "{:02x}", a)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceAttrs {
     bits: u16,
@@ -59,6 +73,28 @@ impl FaceAttrs {
     pub fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
     }
+
+    pub fn names(&self) -> impl Iterator<Item = &'static str> {
+        let names = [
+            (Self::BOLD, "bold"),
+            (Self::ITALIC, "italic"),
+            (Self::UNDERLINE, "underline"),
+            (Self::BLINK, "blink"),
+            (Self::REVERSE, "reverse"),
+        ];
+        let mut index = 0;
+        let flags = *self;
+        std::iter::from_fn(move || {
+            while index < names.len() {
+                let (flag, name) = names[index];
+                if flags.contains(flag) {
+                    return Some(name);
+                }
+                index += 1;
+            }
+            None
+        })
+    }
 }
 
 impl std::ops::BitOr for FaceAttrs {
@@ -73,32 +109,12 @@ impl std::ops::BitOr for FaceAttrs {
 
 impl fmt::Debug for FaceAttrs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_empty() {
-            write!(f, "Empty")?;
-        } else {
-            let mut first = true;
-            for (flag, name) in &[
-                (Self::BOLD, "Bold"),
-                (Self::ITALIC, "Italic"),
-                (Self::UNDERLINE, "Underline"),
-                (Self::BLINK, "Blink"),
-                (Self::REVERSE, "Reverse"),
-            ] {
-                if self.contains(*flag) {
-                    if first {
-                        first = false;
-                        write!(f, "{}", name)?;
-                    } else {
-                        write!(f, " | {}", name)?;
-                    }
-                }
-            }
-        }
-        Ok(())
+        let names: Vec<_> = self.names().collect();
+        write!(f, "FaceAttrs({})", names.join(","))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Face {
     pub fg: Option<Color>,
     pub bg: Option<Color>,
@@ -151,6 +167,20 @@ impl FromStr for Face {
                 }
                 Ok(face)
             })
+    }
+}
+
+impl fmt::Debug for Face {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut result = Vec::new();
+        if let Some(fg) = self.fg {
+            result.push(format!("fg={:?}", fg));
+        }
+        if let Some(bg) = self.bg {
+            result.push(format!("bg={:?}", bg));
+        }
+        result.extend(self.attrs.names().map(String::from));
+        write!(f, "Face({})", result.join(" "))
     }
 }
 

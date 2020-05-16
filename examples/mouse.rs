@@ -1,6 +1,6 @@
 use std::io::Write;
 use surf_n_term::{
-    error::Error, Cell, DecMode, Key, KeyName, Position, SystemTerminal, Terminal, TerminalAction,
+    error::Error, Cell, DecMode, Key, KeyName, SystemTerminal, Terminal, TerminalAction,
     TerminalCommand, TerminalEvent, ViewMut,
 };
 
@@ -32,7 +32,7 @@ fn main() -> Result<(), Error> {
     let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
     let red = "bg=#fb4935".parse()?;
     let mut count = 0;
-    term.run_render(|_term, event, mut view| -> Result<_, Error> {
+    term.run_render(|term, event, mut view| -> Result<_, Error> {
         count += 1;
 
         // render box
@@ -46,8 +46,14 @@ fn main() -> Result<(), Error> {
         };
 
         // render label with event
-        let mut writer = view.writer(Position::new(0, 3), None);
-        write!(&mut writer, "┤ Count: {} Event: {:?} ├", count, event)?;
+        let mut writer = view.writer(0, 3, None);
+        write!(
+            &mut writer,
+            "┤ Stats: {:?} Count: {} Event: {:?} ├",
+            term.stats(),
+            count,
+            event
+        )?;
 
         // render mouse cursor
         match event {

@@ -213,6 +213,18 @@ pub struct TerminalSize {
     pub height_pixels: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct TerminalStats {
+    pub send: usize,
+    pub recv: usize,
+}
+
+impl TerminalStats {
+    pub fn new() -> Self {
+        Self { send: 0, recv: 0 }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Mouse {
     pub name: KeyName,
