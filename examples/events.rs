@@ -11,14 +11,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // query DEC modes
     use TerminalCommand::*;
-    term.execute(DecModeReport(DecMode::VisibleCursor))?;
-    term.execute(DecModeReport(DecMode::AutoWrap))?;
-    term.execute(DecModeReport(DecMode::MouseReport))?;
-    term.execute(DecModeReport(DecMode::MouseSGR))?;
-    term.execute(DecModeReport(DecMode::MouseMotions))?;
-    term.execute(DecModeReport(DecMode::AltScreen))?;
-    term.execute(DecModeReport(DecMode::KittyKeyboard))?;
-    term.execute(CursorReport)?;
+    term.execute(DecModeGet(DecMode::VisibleCursor))?;
+    term.execute(DecModeGet(DecMode::AutoWrap))?;
+    term.execute(DecModeGet(DecMode::MouseReport))?;
+    term.execute(DecModeGet(DecMode::MouseSGR))?;
+    term.execute(DecModeGet(DecMode::MouseMotions))?;
+    term.execute(DecModeGet(DecMode::AltScreen))?;
+    term.execute(DecModeGet(DecMode::KittyKeyboard))?;
+    term.execute(CursorGet)?;
 
     // enable mouse
     term.execute(TerminalCommand::DecModeSet {

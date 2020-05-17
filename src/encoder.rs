@@ -35,11 +35,11 @@ impl Encoder for TTYEncoder {
                 let flag = if enable { "h" } else { "l" };
                 write!(out, "\x1b[?{}{}", mode as usize, flag)?;
             }
-            DecModeReport(mode) => {
+            DecModeGet(mode) => {
                 write!(out, "\x1b[?{}$p", mode as usize)?;
             }
             CursorTo(pos) => write!(out, "\x1b[{};{}H", pos.row + 1, pos.col + 1)?,
-            CursorReport => out.write_all(b"\x1b[6n")?,
+            CursorGet => out.write_all(b"\x1b[6n")?,
             CursorSave => out.write_all(b"\x1b[s")?,
             CursorRestore => out.write_all(b"\x1b[u")?,
             EraseLineRight => out.write_all(b"\x1b[K")?,

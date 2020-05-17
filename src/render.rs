@@ -62,15 +62,17 @@ impl TerminalRenderer {
         })
     }
 
-    // Render the current frame
+    /// Render the current frame
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         for row in 0..self.back.height() {
-            for col in 0..self.back.width() {
+            let mut col = 0;
+            while col < self.back.width() {
                 let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
                     (Some(src), Some(dst)) => (src, dst),
                     _ => break,
                 };
                 if src == dst {
+                    col += 1;
                     continue;
                 }
                 // update face
@@ -84,14 +86,24 @@ impl TerminalRenderer {
                     self.cursor.col = col;
                     term.execute(TerminalCommand::CursorTo(self.cursor))?;
                 }
-                // TOOD: use `TerminalErase` command to clean consequent spaces
-                // render glyph
+                // identify glyph
                 let glyph = match src.glyph {
                     None => ' ',
                     Some(glyph) => glyph,
                 };
+                // find if it is possible to erase instead of using ' '
+                if glyph == ' ' {
+                    let repeats = self.find_repeats(row, col);
+                    // only use erase command when it is more efficient
+                    if repeats > 4 {
+                        term.execute(TerminalCommand::EraseChars(repeats))?;
+                        col += repeats;
+                        continue;
+                    }
+                }
                 term.execute(TerminalCommand::Char(glyph))?;
                 self.cursor.col += 1;
+                col += 1;
             }
         }
         // swap buffers
@@ -100,11 +112,23 @@ impl TerminalRenderer {
         Ok(())
     }
 
-    // View associated with the current frame
+    /// View associated with the current frame
     pub fn view(&mut self) -> TerminalView<'_> {
         TerminalView {
             surf: self.front.view_mut(.., ..),
         }
+    }
+
+    fn find_repeats(&self, row: usize, col: usize) -> usize {
+        let cell = self.front.get(row, col);
+        if cell.is_none() {
+            return 0;
+        }
+        let mut repeats = 1;
+        while cell == self.front.get(row, col + repeats) {
+            repeats += 1;
+        }
+        repeats
     }
 }
 
@@ -283,20 +307,37 @@ mod tests {
 
     #[test]
     fn test_render() -> Result<(), Error> {
+        use TerminalCommand::*;
+
+        let purple = "bg=#d3869b".parse()?;
+        // let red = "bg=#fb4934".parse()?;
+
         let mut term = DummyTerminal::new(3, 7);
         let mut render = TerminalRenderer::new(&mut term, false)?;
 
-        let purple = "bg=#d3869b".parse::<Face>()?;
         let mut view = render.view();
         let mut writer = view.writer(0, 4, Some(purple));
         write!(writer, "TEST")?;
 
         println!("{}", debug(view)?);
         render.frame(&mut term)?;
-        println!("{:?}", term.cmds);
 
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(Default::default()),
+                CursorTo(Position::new(0, 0)),
+                Face(purple),
+                CursorTo(Position::new(0, 4)),
+                Char('T'),
+                Char('E'),
+                Char('S'),
+                CursorTo(Position::new(1, 0)),
+                Char('T'),
+            ]
+        );
         term.clear();
-        assert!(false);
+
         Ok(())
     }
 }

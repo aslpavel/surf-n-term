@@ -7,7 +7,7 @@ use std::{fmt, io::Write, time::Duration};
 
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
-    /// Schedue TerminalComman for execution
+    /// Schedue command for execution
     ///
     /// Command will be submitted on the next call to poll `Terminal::poll`
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error>;
@@ -72,12 +72,16 @@ pub enum TerminalAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalCommand {
+    /// Put character
+    Char(char),
+    /// Set current face (foreground/background colors and text attributes)
+    Face(Face),
     /// Control specified DEC mode (DECSET|DECRST)
     DecModeSet { enable: bool, mode: DecMode },
     /// Report specified DEC mode (DECRQM)
-    DecModeReport(DecMode),
+    DecModeGet(DecMode),
     /// Request current cursor postion
-    CursorReport,
+    CursorGet,
     /// Move cursor to specified row and column
     CursorTo(Position),
     /// Save current cursor position
@@ -90,14 +94,10 @@ pub enum TerminalCommand {
     EraseLineRight,
     /// Erase line using current background color
     EraseLine,
-    /// Set current face (foreground/background colors and text attributes)
-    Face(Face),
     /// Erase specified ammount of characters to the right from current cursor position
     EraseChars(usize),
     /// Full reset of the terminal
     Reset,
-    /// Put character
-    Char(char),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -211,6 +211,15 @@ pub struct TerminalSize {
     pub height: usize,
     pub width_pixels: usize,
     pub height_pixels: usize,
+}
+
+impl TerminalSize {
+    pub fn cell_size(&self) -> (usize, usize) {
+        (
+            self.height_pixels / self.height,
+            self.width_pixels / self.width,
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
