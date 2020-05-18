@@ -22,7 +22,7 @@ mod nix {
         sys::{
             select::{select, FdSet},
             stat::Mode,
-            termios::{tcgetattr, tcsetattr, InputFlags, LocalFlags, OutputFlags, SetArg, Termios},
+            termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
             time::TimeVal,
         },
         unistd::{isatty, read, write},
@@ -54,15 +54,7 @@ impl UnixTerminal {
         // [Entering Raw Mode](https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html)
         let termios_saved = nix::tcgetattr(write_fd)?;
         let mut termios = termios_saved.clone();
-        // local flags
-        termios.local_flags.remove(nix::LocalFlags::ICANON); // turn off `canonical mode`
-        termios.local_flags.remove(nix::LocalFlags::ECHO); // do not echo back typed input
-        termios.local_flags.remove(nix::LocalFlags::ISIG); // do not send signals on `ctrl-{c|z}`
-        termios.local_flags.remove(nix::LocalFlags::IEXTEN); // disable literal mode `ctrl-v`
-        termios.input_flags.remove(nix::InputFlags::IXON); // disable control flow `ctrl-{s|q}`
-        termios.input_flags.remove(nix::InputFlags::ICRNL); // correctly handle ctrl-m
-
-        // termios.output_flags.remove(nix::OutputFlags::OPOST); // do not post process `\n` input `\r\n`
+        nix::cfmakeraw(&mut termios);
         nix::tcsetattr(write_fd, nix::SetArg::TCSAFLUSH, &termios)?;
 
         // self-pipe trick to handle SIGWINCH (window resize) signal

@@ -7,7 +7,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut term = SystemTerminal::new()?;
 
     // get size
-    println!("{:?}", term.size()?);
+    let size = term.size()?;
+    write!(&mut term, "{:?}\r\n", size)?;
 
     // query DEC modes
     use TerminalCommand::*;
@@ -40,17 +41,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // read terminal events
     let timeout = Duration::from_secs(10);
-    println!("Program will exit after {:?} of idling ...", timeout);
+    write!(
+        &mut term,
+        "Program will exit after {:?} of idling ...\r\n",
+        timeout
+    )?;
     let q = Key::from(KeyName::Char('q'));
 
     // run programm
-    term.run(|_term, event| -> Result<_, Box<dyn Error>> {
+    term.run(|mut term, event| -> Result<_, Box<dyn Error>> {
         use surf_n_term::terminal::TerminalAction::*;
         match event {
             None => Ok(Quit),
             Some(TerminalEvent::Key(key)) if key == q => Ok(Quit),
             Some(event) => {
-                println!("{:?}", event);
+                write!(&mut term, "{:?}\r\n", event)?;
                 Ok(Sleep(timeout))
             }
         }
