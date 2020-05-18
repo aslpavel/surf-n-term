@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    render::{TerminalRenderer, TerminalView},
+    render::{TerminalRenderer, TerminalSurface},
     Face,
 };
 use std::{fmt, io::Write, time::Duration};
@@ -44,7 +44,7 @@ pub trait Terminal: Write {
         H: for<'a> FnMut(
             &'a mut Self,
             Option<TerminalEvent>,
-            TerminalView<'a>,
+            TerminalSurface<'a>,
         ) -> Result<TerminalAction, E>,
         E: From<Error>,
     {

@@ -1,6 +1,8 @@
 use crate::{
-    decoder::Decoder, error::Error, Face, Position, Shape, Surface, Terminal, TerminalCommand,
-    View, ViewExt, ViewMut, ViewMutExt,
+    decoder::Decoder,
+    error::Error,
+    surface::{Owned, StorageMut},
+    Face, Position, Surface, Terminal, TerminalCommand,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,11 +40,13 @@ impl Default for Cell {
     }
 }
 
+pub type TerminalSurface<'a> = Surface<&'a mut dyn StorageMut<Item = Cell>>;
+
 pub struct TerminalRenderer {
     face: Face,
     cursor: Position,
-    front: Surface<Cell>,
-    back: Surface<Cell>,
+    front: Surface<Owned<Cell>>,
+    back: Surface<Owned<Cell>>,
 }
 
 impl TerminalRenderer {
@@ -113,10 +117,8 @@ impl TerminalRenderer {
     }
 
     /// View associated with the current frame
-    pub fn view(&mut self) -> TerminalView<'_> {
-        TerminalView {
-            surf: self.front.view_mut(.., ..),
-        }
+    pub fn view(&mut self) -> TerminalSurface<'_> {
+        self.front.by_ref_mut_dyn()
     }
 
     fn find_repeats(&self, row: usize, col: usize) -> usize {
@@ -132,56 +134,49 @@ impl TerminalRenderer {
     }
 }
 
-pub struct TerminalView<'a> {
-    surf: crate::surface::SurfaceViewMut<'a, Cell>,
+pub trait TerminalSurfaceExt {
+    fn draw_box(&mut self, face: Option<Face>);
+    fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_>;
 }
 
-impl<'a> View for TerminalView<'a> {
-    type Item = Cell;
-
-    fn shape(&self) -> Shape {
-        self.surf.shape()
-    }
-
-    fn data(&self) -> &[Self::Item] {
-        self.surf.data()
-    }
-}
-
-impl<'a> ViewMut for TerminalView<'a> {
-    fn data_mut(&mut self) -> &mut [Cell] {
-        self.surf.data_mut()
-    }
-}
-
-impl<'a> TerminalView<'a> {
-    pub fn draw_box(&mut self, face: Option<Face>) {
-        let shape = self.shape();
-        if shape.width < 2 || shape.height < 2 {
+impl<S> TerminalSurfaceExt for Surface<S>
+where
+    S: StorageMut<Item = Cell>,
+{
+    fn draw_box(&mut self, face: Option<Face>) {
+        if self.width() < 2 || self.height() < 2 {
             return;
         }
         let face = face.unwrap_or_default();
 
         let h = Cell::new(face, Some('─'));
         let v = Cell::new(face, Some('│'));
-        self.view_mut(..1, 1..-1).fill(h.clone());
-        self.view_mut(-1.., 1..-1).fill(h.clone());
-        self.view_mut(1..-1, ..1).fill(v.clone());
-        self.view_mut(1..-1, -1..).fill(v.clone());
+        self.by_ref_mut().view(..1, 1..-1).fill(h.clone());
+        self.by_ref_mut().view(-1.., 1..-1).fill(h.clone());
+        self.by_ref_mut().view(1..-1, ..1).fill(v.clone());
+        self.by_ref_mut().view(1..-1, -1..).fill(v.clone());
 
-        self.view_mut(..1, ..1).fill(Cell::new(face, Some('┌')));
-        self.view_mut(..1, -1..).fill(Cell::new(face, Some('┐')));
-        self.view_mut(-1.., -1..).fill(Cell::new(face, Some('┘')));
-        self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
+        self.by_ref_mut()
+            .view(..1, ..1)
+            .fill(Cell::new(face, Some('┌')));
+        self.by_ref_mut()
+            .view(..1, -1..)
+            .fill(Cell::new(face, Some('┐')));
+        self.by_ref_mut()
+            .view(-1.., -1..)
+            .fill(Cell::new(face, Some('┘')));
+        self.by_ref_mut()
+            .view(-1.., ..1)
+            .fill(Cell::new(face, Some('└')));
     }
 
-    pub fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalViewWriter<'_> {
-        let offset = self.shape().width * row + col;
+    fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_> {
+        let offset = self.width() * row + col;
         let mut iter = self.iter_mut();
         if offset > 0 {
             iter.nth(offset - 1);
         }
-        TerminalViewWriter {
+        TerminalWriter {
             face: face.unwrap_or_default(),
             iter,
             decoder: crate::decoder::Utf8Decoder::new(),
@@ -189,13 +184,13 @@ impl<'a> TerminalView<'a> {
     }
 }
 
-pub struct TerminalViewWriter<'a> {
+pub struct TerminalWriter<'a> {
     face: Face,
-    iter: crate::surface::ViewMutIter<'a, Cell>,
+    iter: crate::surface::SurfaceIterMut<'a, Cell>,
     decoder: crate::decoder::Utf8Decoder,
 }
 
-impl<'a> std::io::Write for TerminalViewWriter<'a> {
+impl<'a> std::io::Write for TerminalWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut cur = std::io::Cursor::new(buf);
         while let Some(glyph) = self.decoder.decode(&mut cur)? {
@@ -218,11 +213,12 @@ mod tests {
     use super::*;
     use crate::{
         encoder::{Encoder, TTYEncoder},
+        surface::Storage,
         terminal::{TerminalEvent, TerminalSize},
     };
     use std::io::Write;
 
-    fn debug<V: View<Item = Cell>>(view: V) -> Result<String, Error> {
+    fn debug<S: Storage<Item = Cell>>(view: Surface<S>) -> Result<String, Error> {
         let mut encoder = TTYEncoder::new();
         let mut out = Vec::new();
         write!(&mut out, "\n┌")?;
@@ -310,30 +306,47 @@ mod tests {
         use TerminalCommand::*;
 
         let purple = "bg=#d3869b".parse()?;
-        // let red = "bg=#fb4934".parse()?;
+        let red = "bg=#fb4934".parse()?;
 
         let mut term = DummyTerminal::new(3, 7);
         let mut render = TerminalRenderer::new(&mut term, false)?;
 
-        let mut view = render.view();
+        let mut view = render.view().view(.., 1..);
         let mut writer = view.writer(0, 4, Some(purple));
         write!(writer, "TEST")?;
-
-        println!("{}", debug(view)?);
+        println!("{}", debug(render.view())?);
         render.frame(&mut term)?;
-
         assert_eq!(
             term.cmds,
             vec![
                 Face(Default::default()),
                 CursorTo(Position::new(0, 0)),
                 Face(purple),
-                CursorTo(Position::new(0, 4)),
+                CursorTo(Position::new(0, 5)),
                 Char('T'),
                 Char('E'),
+                CursorTo(Position::new(1, 1)),
                 Char('S'),
-                CursorTo(Position::new(1, 0)),
                 Char('T'),
+            ]
+        );
+        term.clear();
+
+        render.view().view(1..2, ..-1).fill(Cell::new(red, None));
+        println!("{}", debug(render.view())?);
+        render.frame(&mut term)?;
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(Default::default()),
+                // erase is not used as we only need to remove two spaces
+                CursorTo(Position { row: 0, col: 5 }),
+                Char(' '),
+                Char(' '),
+                // erase is used
+                Face(red),
+                CursorTo(Position { row: 1, col: 0 }),
+                EraseChars(6)
             ]
         );
         term.clear();
