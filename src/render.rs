@@ -98,16 +98,24 @@ impl TerminalRenderer {
                 // find if it is possible to erase instead of using ' '
                 if glyph == ' ' {
                     let repeats = self.find_repeats(row, col);
-                    // only use erase command when it is more efficient
+                    col += repeats;
                     if repeats > 4 {
+                        // NOTE:
+                        //   - only use erase command when it is more efficient
+                        //     this value choosed arbirtraraly
+                        //   - erase is not moving cursor
                         term.execute(TerminalCommand::EraseChars(repeats))?;
-                        col += repeats;
-                        continue;
+                    } else {
+                        self.cursor.col += repeats;
+                        for _ in 0..repeats {
+                            term.execute(TerminalCommand::Char(glyph))?;
+                        }
                     }
+                } else {
+                    term.execute(TerminalCommand::Char(glyph))?;
+                    self.cursor.col += 1;
+                    col += 1;
                 }
-                term.execute(TerminalCommand::Char(glyph))?;
-                self.cursor.col += 1;
-                col += 1;
             }
         }
         // swap buffers
