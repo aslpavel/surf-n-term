@@ -94,10 +94,7 @@ impl UnixTerminal {
 
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {
-        self.write_handle.set_blocking(true).unwrap_or(());
-        self.read_handle.set_blocking(true).unwrap_or(());
-
-        // restore settings
+        // try to flush queue and restore settings
         let epilogue = [
             TerminalCommand::Face(Default::default()),
             TerminalCommand::DecModeSet {
@@ -121,13 +118,15 @@ impl std::ops::Drop for UnixTerminal {
                 mode: DecMode::AutoWrap,
             },
         ];
-        let mut buffer = Vec::new();
-        for cmd in epilogue.iter() {
-            self.encoder
-                .encode(&mut buffer, *cmd)
-                .expect("in-memory write failed");
-        }
-        self.write_handle.write_all(&buffer).unwrap_or(());
+        epilogue
+            .iter()
+            .try_fold((), |_, cmd| self.execute(*cmd))
+            .and_then(|_| self.poll(Some(Duration::new(0, 0))).map(|_| ()))
+            .unwrap_or(());
+
+        // revert descriptors to blocking mode
+        self.write_handle.set_blocking(true).unwrap_or(());
+        self.read_handle.set_blocking(true).unwrap_or(());
 
         // disable SIGIWNCH handler
         signal_hook::unregister(self.sigwinch_id);

@@ -1,41 +1,33 @@
-use std::{boxed::Box, error::Error, io::Write, time::Duration};
-use surf_n_term::{Face, Position, SystemTerminal, Terminal, TerminalCommand};
+use surf_n_term::{
+    DecMode, Error, Key, KeyName, SystemTerminal, Terminal, TerminalAction, TerminalCommand,
+    TerminalEvent,
+};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // let bg = Face::default().with_bg(Some("#3c3836".parse()?));
-    let purple = Face::default().with_bg(Some("#d3869b".parse()?));
-    let green = Face::default().with_bg(Some("#b8bb26".parse()?));
-    let red = Face::default().with_bg(Some("#fb4934".parse()?));
-
+fn main() -> Result<(), Error> {
+    let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
     let mut term = SystemTerminal::new()?;
-    {
-        use TerminalCommand::*;
-        term.execute(CursorSave)?;
 
-        term.execute(CursorTo(Position::new(20, 0)))?;
-        term.execute(Face(purple))?;
-        write!(&mut term, "\x1b[1J")?;
+    // init
+    term.execute(TerminalCommand::CursorSave)?;
+    term.execute(TerminalCommand::DecModeSet {
+        enable: false,
+        mode: DecMode::VisibleCursor,
+    })?;
 
-        term.execute(CursorTo(Position::new(0, 0)))?;
-        write!(&mut term, "Erase chars")?;
-        term.execute(CursorTo(Position::new(1, 20)))?;
-        term.execute(Face(green))?;
-        term.execute(EraseChars(10))?;
+    // loop
+    term.run_render(|_term, event, mut _view| -> Result<_, Error> {
+        // quit
+        let _event = match event {
+            None => return Ok(TerminalAction::Wait),
+            Some(event) if &event == &q => return Ok(TerminalAction::Quit),
+            Some(event) => event,
+        };
 
-        term.execute(CursorTo(Position::new(3, 0)))?;
-        write!(&mut term, "Erase right")?;
-        term.execute(CursorTo(Position::new(4, 10)))?;
-        term.execute(Face(green))?;
-        term.execute(EraseLineRight)?;
+        Ok(TerminalAction::Wait)
+    })?;
 
-        // Erase rect area
-        term.execute(Face(red))?;
-        write!(&mut term, "\x1b[5;5;10;10$z")?;
-
-        term.execute(CursorRestore)?;
-    }
-
-    term.poll(Some(Duration::from_secs(0)))?;
+    // clean up
+    term.execute(TerminalCommand::CursorRestore)?;
 
     Ok(())
 }
