@@ -1,4 +1,7 @@
-use std::ops::{Bound, RangeBounds};
+use std::{
+    iter::IntoIterator,
+    ops::{Bound, RangeBounds},
+};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
@@ -358,6 +361,18 @@ impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
     }
 }
 
+impl<'a, S> IntoIterator for &'a Surface<S>
+where
+    S: Storage,
+{
+    type IntoIter = SurfaceIter<'a, S::Item>;
+    type Item = &'a S::Item;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 pub struct SurfaceIterMut<'a, T> {
     index: usize,
     shape: Shape,
@@ -385,6 +400,18 @@ impl<'a, T: 'a> Iterator for SurfaceIterMut<'a, T> {
             let item = unsafe { &mut *ptr.offset(offset as isize) };
             Some(item)
         }
+    }
+}
+
+impl<'a, S> IntoIterator for &'a mut Surface<S>
+where
+    S: StorageMut,
+{
+    type IntoIter = SurfaceIterMut<'a, S::Item>;
+    type Item = &'a mut S::Item;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
