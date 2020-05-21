@@ -23,12 +23,19 @@ impl Shape {
         self.start + row * self.row_stride + col * self.col_stride
     }
 
-    /// Givern row and column move `nth` steps in row major order
-    pub fn nth(&self, row: usize, col: usize, nth: usize) -> (usize, usize) {
-        let index = row * self.width + col + nth;
-        let row = index / self.width;
-        let col = index - row * self.width;
-        (row, col)
+    /// Get row and column corresonding to nth element in row-major order
+    #[inline]
+    pub fn nth(&self, n: usize) -> Option<(usize, usize)> {
+        if self.width == 0 || self.height == 0 {
+            return None;
+        }
+        let row = n / self.width;
+        let col = n - row * self.width;
+        if row >= self.height || col >= self.width {
+            None
+        } else {
+            Some((row, col))
+        }
     }
 }
 
@@ -210,8 +217,7 @@ where
     /// Iterator over all elements of the surface in the row-major order.
     pub fn iter(&self) -> SurfaceIter<'_, S::Item> {
         SurfaceIter {
-            row: 0,
-            col: 0,
+            index: 0,
             shape: self.storage.shape(),
             data: self.storage.data(),
         }
@@ -262,13 +268,10 @@ where
 
     /// Mutable iterator over all elements of the surface in the row-major order.
     pub fn iter_mut(&mut self) -> SurfaceIterMut<'_, S::Item> {
-        let shape = self.storage.shape();
-        let data = &mut self.storage.data_mut()[shape.start..];
         SurfaceIterMut {
-            row: 0,
-            col: 0,
-            shape,
-            data,
+            index: 0,
+            shape: self.storage.shape(),
+            data: self.storage.data_mut(),
         }
     }
 
@@ -336,8 +339,7 @@ where
 }
 
 pub struct SurfaceIter<'a, T> {
-    row: usize,
-    col: usize,
+    index: usize,
     shape: Shape,
     data: &'a [T],
 }
@@ -346,23 +348,18 @@ impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row >= self.shape.height || self.col >= self.shape.width {
-            None
-        } else {
-            let offset = self.shape.offset(self.row, self.col);
-            self.col += 1;
-            if self.col >= self.shape.width {
-                self.col = 0;
-                self.row += 1;
-            }
-            self.data.get(offset)
-        }
+        self.nth(0)
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.index += n + 1;
+        let (row, col) = self.shape.nth(self.index - 1)?;
+        self.data.get(self.shape.offset(row, col))
     }
 }
 
-pub struct SurfaceIterMut<'a, T: 'a> {
-    row: usize,
-    col: usize,
+pub struct SurfaceIterMut<'a, T> {
+    index: usize,
     shape: Shape,
     data: &'a mut [T],
 }
@@ -375,32 +372,19 @@ impl<'a, T: 'a> Iterator for SurfaceIterMut<'a, T> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        // TODO:
-        //  - This will probably not work if we transpose surface.
-        if self.data.is_empty() {
-            return None;
-        }
+        self.index += n + 1;
+        let (row, col) = self.shape.nth(self.index - 1)?;
+        let offset = self.shape.offset(row, col);
 
-        let offset = self.shape.offset(self.row, self.col);
-        let (r_cut, c_cut) = self.shape.nth(self.row, self.col, n + 1);
-        let o_cut = self.shape.offset(r_cut, c_cut) - offset;
-        let o_val = if n == 0 {
-            0
+        if offset >= self.data.len() {
+            None
         } else {
-            let (r_val, c_val) = self.shape.nth(self.row, self.col, n);
-            self.shape.offset(r_val, c_val) - offset
-        };
-
-        let data = std::mem::replace(&mut self.data, &mut []);
-        let (head, data) = data.split_at_mut(std::cmp::min(data.len(), o_cut));
-        let result = head.get_mut(o_val);
-
-        self.row = r_cut;
-        self.col = c_cut;
-        if !result.is_none() {
-            self.data = data;
+            // this is safe, iterator is always progressing and never
+            // returns a mutable reference to the same location.
+            let ptr = self.data.as_mut_ptr();
+            let item = unsafe { &mut *ptr.offset(offset as isize) };
+            Some(item)
         }
-        result
     }
 }
 
@@ -607,5 +591,12 @@ mod tests {
                 end: 89,
             }
         )
+    }
+
+    #[test]
+    fn test_empty_surface() {
+        let mut surf: Surface<Owned<()>> = Surface::new(0, 0);
+        assert!(surf.iter().next().is_none());
+        assert!(surf.iter_mut().next().is_none());
     }
 }
