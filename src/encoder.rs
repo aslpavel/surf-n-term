@@ -49,11 +49,11 @@ impl Encoder for TTYEncoder {
             Face(face) => {
                 out.write_all(b"\x1b[00")?;
                 if let Some(fg) = face.fg {
-                    let (r, g, b) = fg.rgb_u8();
+                    let [r, g, b] = fg.rgb_u8();
                     write!(out, ";38;2;{};{};{}", r, g, b)?;
                 }
                 if let Some(bg) = face.bg {
-                    let (r, g, b) = bg.rgb_u8();
+                    let [r, g, b] = bg.rgb_u8();
                     write!(out, ";48;2;{};{};{}", r, g, b)?;
                 }
                 if !face.attrs.is_empty() {

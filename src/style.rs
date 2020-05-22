@@ -3,18 +3,21 @@ use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Color {
+    /// SRGB with not premultiplied alpha
     RGBA([u8; 4]),
+    // Linear RGB with premultiplied alpha
+    // Linear([f32; 4]),
 }
 
 impl Color {
-    pub fn rgb_u8(self) -> (u8, u8, u8) {
-        let (r, g, b, _) = self.rgba_u8();
-        (r, g, b)
+    pub fn rgb_u8(self) -> [u8; 3] {
+        let [r, g, b, _] = self.rgba_u8();
+        [r, g, b]
     }
 
-    pub fn rgba_u8(self) -> (u8, u8, u8, u8) {
+    pub fn rgba_u8(self) -> [u8; 4] {
         match self {
-            Self::RGBA([r, g, b, a]) => (r, g, b, a),
+            Self::RGBA([r, g, b, a]) => [r, g, b, a],
         }
     }
 

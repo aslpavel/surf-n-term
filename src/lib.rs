@@ -14,7 +14,7 @@ mod unix;
 pub use error::Error;
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt};
 pub use style::{Color, Face, FaceAttrs};
-pub use surface::{Shape, Surface, SurfaceOwned};
+pub use surface::{Shape, Storage, StorageMut, Surface, SurfaceOwned};
 pub use terminal::{
     DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Terminal, TerminalAction,
     TerminalCommand, TerminalEvent,

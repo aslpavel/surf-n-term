@@ -1,8 +1,8 @@
 use crate::{
     decoder::Decoder,
     error::Error,
-    surface::{Owned, StorageMut},
-    Face, Position, Surface, Terminal, TerminalCommand,
+    surface::{Owned, Storage, StorageMut},
+    Color, Face, FaceAttrs, Position, Surface, Terminal, TerminalCommand,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -144,6 +144,7 @@ impl TerminalRenderer {
 
 pub trait TerminalSurfaceExt {
     fn draw_box(&mut self, face: Option<Face>);
+    fn draw_image_ascii<T: Storage<Item = Color>>(&mut self, img: &Surface<T>);
     fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_>;
 }
 
@@ -176,6 +177,23 @@ where
         self.by_ref_mut()
             .view(-1.., ..1)
             .fill(Cell::new(face, Some('└')));
+    }
+
+    // draw image using unicode uppper half block symbol \u{2580}
+    fn draw_image_ascii<T>(&mut self, img: &Surface<T>)
+    where
+        T: Storage<Item = Color>,
+    {
+        let height = (img.height() / 2 + img.height() % 2) as i32;
+        let width = img.width() as i32;
+        self.by_ref_mut()
+            .view(..height, ..width)
+            .fill_with(|row, col, _| {
+                let fg = img.get(row * 2, col).copied();
+                let bg = img.get(row * 2 + 1, col).copied();
+                let face = Face::new(fg, bg, FaceAttrs::EMPTY);
+                Cell::new(face, Some('\u{2580}'))
+            });
     }
 
     fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_> {
