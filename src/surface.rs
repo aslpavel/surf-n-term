@@ -1,7 +1,4 @@
-use std::{
-    iter::IntoIterator,
-    ops::{Bound, RangeBounds},
-};
+use std::ops::{Bound, RangeBounds};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
@@ -9,9 +6,9 @@ pub struct Shape {
     pub start: usize,
     /// Offset of the last + 1 element.
     pub end: usize,
-    /// Width of the storage
+    /// Width of the surface
     pub width: usize,
-    /// Height of the storage
+    /// Height of the surface
     pub height: usize,
     /// How many elements we need to skip to get to the next row.
     pub row_stride: usize,
@@ -42,7 +39,7 @@ impl Shape {
     }
 }
 
-pub trait Storage {
+pub trait Surface {
     type Item;
 
     /// Shape describes data layout inside `Self::data()` slice.
@@ -53,238 +50,114 @@ pub trait Storage {
     /// **Note:** This slice contains all elements backed by parent object
     /// and elements should accesed using offeset calculcated by `Shape::offset`
     fn data(&self) -> &[Self::Item];
-}
 
-pub trait StorageMut: Storage {
-    /// Mutable slice containing all the items
-    fn data_mut(&mut self) -> &mut [Self::Item];
-}
-
-impl<'a, S> Storage for &'a S
-where
-    S: Storage + ?Sized,
-{
-    type Item = S::Item;
-
-    fn shape(&self) -> Shape {
-        (*self).shape()
-    }
-
-    fn data(&self) -> &[Self::Item] {
-        (*self).data()
-    }
-}
-
-impl<'a, S> Storage for &'a mut S
-where
-    S: Storage + ?Sized,
-{
-    type Item = S::Item;
-
-    fn shape(&self) -> Shape {
-        (**self).shape()
-    }
-
-    fn data(&self) -> &[Self::Item] {
-        (**self).data()
-    }
-}
-
-impl<'a, S> StorageMut for &'a mut S
-where
-    S: StorageMut + ?Sized,
-{
-    fn data_mut(&mut self) -> &mut [Self::Item] {
-        (**self).data_mut()
-    }
-}
-
-pub struct Owned<T> {
-    shape: Shape,
-    data: Vec<T>,
-}
-
-pub struct Shared<S> {
-    shape: Shape,
-    inner: S,
-}
-
-impl<T> Storage for Owned<T> {
-    type Item = T;
-
-    fn shape(&self) -> Shape {
-        self.shape
-    }
-
-    fn data(&self) -> &[Self::Item] {
-        &self.data
-    }
-}
-
-impl<T> StorageMut for Owned<T> {
-    fn data_mut(&mut self) -> &mut [Self::Item] {
-        &mut self.data
-    }
-}
-
-impl<S> Storage for Shared<S>
-where
-    S: Storage,
-{
-    type Item = S::Item;
-
-    fn shape(&self) -> Shape {
-        self.shape
-    }
-
-    fn data(&self) -> &[Self::Item] {
-        self.inner.data()
-    }
-}
-
-impl<S> StorageMut for Shared<S>
-where
-    S: StorageMut,
-{
-    fn data_mut(&mut self) -> &mut [Self::Item] {
-        self.inner.data_mut()
-    }
-}
-
-pub struct Surface<S> {
-    storage: S,
-}
-
-pub type SurfaceOwned<T> = Surface<Owned<T>>;
-
-impl<T> Surface<Owned<T>>
-where
-    T: Default,
-{
-    pub fn new(height: usize, width: usize) -> Self {
-        let mut data = Vec::new();
-        data.resize_with(height * width, Default::default);
-        let shape = Shape {
-            row_stride: width,
-            col_stride: 1,
-            height,
-            width,
-            start: 0,
-            end: data.len(),
-        };
-        Self {
-            storage: Owned { shape, data },
-        }
-    }
-}
-
-impl<S> Surface<S>
-where
-    S: Storage,
-{
-    pub fn is_empty(&self) -> bool {
-        let shape = self.storage.shape();
+    /// Check if surface is empty
+    fn is_empty(&self) -> bool {
+        let shape = self.shape();
         shape.start >= shape.end
     }
 
-    pub fn height(&self) -> usize {
-        self.storage.shape().height
+    /// Height of the surface
+    fn height(&self) -> usize {
+        self.shape().height
     }
 
-    pub fn width(&self) -> usize {
-        self.storage.shape().width
+    /// Width of the surface
+    fn width(&self) -> usize {
+        self.shape().width
     }
 
-    pub fn get(&self, row: usize, col: usize) -> Option<&S::Item> {
-        let shape = self.storage.shape();
+    /// Get immutable reference to the elemetn specified by row and column
+    fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
+        let shape = self.shape();
         if row >= shape.height || col >= shape.width {
             None
         } else {
-            let data = self.storage.data();
+            let data = self.data();
             data.get(shape.offset(row, col))
         }
     }
 
-    pub fn by_ref(&self) -> Surface<&S> {
-        Surface {
-            storage: &self.storage,
-        }
-    }
-
-    pub fn by_ref_dyn(&self) -> Surface<&dyn Storage<Item = S::Item>> {
-        Surface {
-            storage: &self.storage,
-        }
-    }
-
-    /// Iterator over all elements of the surface in the row-major order.
-    pub fn iter(&self) -> SurfaceIter<'_, S::Item> {
+    /// Iterator over immutable references to the items of the view in the row-major order
+    fn iter(&self) -> SurfaceIter<'_, Self::Item> {
         SurfaceIter {
             index: 0,
-            shape: self.storage.shape(),
-            data: self.storage.data(),
+            shape: self.shape(),
+            data: self.data(),
         }
     }
 
-    /// Create a sub-surface restricted by `rows` and `cols` bounds.
-    ///
-    /// This method consumes current surface. But it also possible to use
-    /// surface multiple times if by using `Suface::by_ref*` methods.
-    pub fn view<RS, CS>(self, rows: RS, cols: CS) -> Surface<Shared<S>>
+    /// Create an immutable sub-surface restricted by `rows` and `cols` bounds.
+    fn view<RS, CS>(&self, rows: RS, cols: CS) -> SurfaceView<'_, Self::Item>
     where
         RS: RangeBounds<i32>,
         CS: RangeBounds<i32>,
+        Self: Sized,
     {
-        let storage = Shared {
-            shape: view_shape(self.storage.shape(), rows, cols),
-            inner: self.storage,
-        };
-        Surface { storage }
+        SurfaceView {
+            shape: view_shape(self.shape(), rows, cols),
+            data: self.data(),
+        }
+    }
+
+    /// Create owned sub-surface restricted by `rows` and `cols` bounds.
+    fn view_owned<RS, CS>(self, rows: RS, cols: CS) -> SurfaceOwnedView<Self>
+    where
+        RS: RangeBounds<i32>,
+        CS: RangeBounds<i32>,
+        Self: Sized,
+    {
+        SurfaceOwnedView {
+            shape: view_shape(self.shape(), rows, cols),
+            inner: self,
+        }
     }
 }
 
-impl<S> Surface<S>
-where
-    S: StorageMut,
-{
-    pub fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut S::Item> {
-        let shape = self.storage.shape();
+pub trait SurfaceMut: Surface {
+    /// Mutable slice containing all the items
+    fn data_mut(&mut self) -> &mut [Self::Item];
+
+    /// Get mutable reference to the elemetn specified by row and column
+    fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut Self::Item> {
+        let shape = self.shape();
         if row >= shape.height || col >= shape.width {
             None
         } else {
-            let data = self.storage.data_mut();
+            let data = self.data_mut();
             data.get_mut(shape.offset(row, col))
         }
     }
 
-    pub fn by_ref_mut(&mut self) -> Surface<&mut S> {
-        Surface {
-            storage: &mut self.storage,
-        }
-    }
-
-    pub fn by_ref_mut_dyn(&mut self) -> Surface<&mut dyn StorageMut<Item = S::Item>> {
-        Surface {
-            storage: &mut self.storage,
-        }
-    }
-
-    /// Mutable iterator over all elements of the surface in the row-major order.
-    pub fn iter_mut(&mut self) -> SurfaceIterMut<'_, S::Item> {
-        SurfaceIterMut {
+    /// Iterator over mutable references to the items of the view in the row-major order
+    fn iter_mut(&mut self) -> SurfaceMutIter<'_, Self::Item> {
+        SurfaceMutIter {
             index: 0,
-            shape: self.storage.shape(),
-            data: self.storage.data_mut(),
+            shape: self.shape(),
+            data: self.data_mut(),
+        }
+    }
+
+    /// Create a mutable sub-surface restricted by `rows` and `cols` bounds.
+    fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceMutView<'_, Self::Item>
+    where
+        RS: RangeBounds<i32>,
+        CS: RangeBounds<i32>,
+        Self: Sized,
+    {
+        SurfaceMutView {
+            shape: view_shape(self.shape(), rows, cols),
+            data: self.data_mut(),
         }
     }
 
     /// Fill all elements of the surface with the copy of provided item.
-    pub fn fill(&mut self, item: S::Item)
+    fn fill(&mut self, item: Self::Item)
     where
-        S::Item: Clone,
+        Self::Item: Clone,
     {
-        let shape = self.storage.shape();
-        let data = self.storage.data_mut();
+        let shape = self.shape();
+        let data = self.data_mut();
         for row in 0..shape.height {
             for col in 0..shape.width {
                 data[shape.offset(row, col)] = item.clone();
@@ -295,14 +168,15 @@ where
     /// Fill all the elments of the surface by colling af function.
     ///
     /// Function is called it row, column and the current item value as its arguments.
-    pub fn fill_with<F>(&mut self, mut fill: F)
+    fn fill_with<F>(&mut self, mut fill: F)
     where
-        F: FnMut(usize, usize, S::Item) -> S::Item,
-        S::Item: Default,
+        F: FnMut(usize, usize, Self::Item) -> Self::Item,
+        Self::Item: Default,
+        Self: Sized,
     {
-        let shape = self.storage.shape();
-        let data = self.storage.data_mut();
-        let mut tmp = S::Item::default();
+        let shape = self.shape();
+        let data = self.data_mut();
+        let mut tmp = Self::Item::default();
         for row in 0..shape.height {
             for col in 0..shape.width {
                 let offset = shape.offset(row, col);
@@ -313,12 +187,12 @@ where
     }
 
     /// Fill all the element of the surface with default value.
-    pub fn clear(&mut self)
+    fn clear(&mut self)
     where
-        S::Item: Default,
+        Self::Item: Default,
     {
-        let shape = self.storage.shape();
-        let data = self.storage.data_mut();
+        let shape = self.shape();
+        let data = self.data_mut();
         for row in 0..shape.height {
             for col in 0..shape.width {
                 data[shape.offset(row, col)] = Default::default();
@@ -326,9 +200,11 @@ where
         }
     }
 
-    pub fn insert<IS>(&mut self, row: usize, col: usize, items: IS)
+    /// Insert items starting with the specified row and column.
+    fn insert<IS>(&mut self, row: usize, col: usize, items: IS)
     where
-        IS: IntoIterator<Item = S::Item>,
+        IS: IntoIterator<Item = Self::Item>,
+        Self: Sized,
     {
         let index = row * self.width() + col;
         let mut iter = self.iter_mut();
@@ -361,25 +237,13 @@ impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
     }
 }
 
-impl<'a, S> IntoIterator for &'a Surface<S>
-where
-    S: Storage,
-{
-    type IntoIter = SurfaceIter<'a, S::Item>;
-    type Item = &'a S::Item;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-pub struct SurfaceIterMut<'a, T> {
+pub struct SurfaceMutIter<'a, T> {
     index: usize,
     shape: Shape,
     data: &'a mut [T],
 }
 
-impl<'a, T: 'a> Iterator for SurfaceIterMut<'a, T> {
+impl<'a, T: 'a> Iterator for SurfaceMutIter<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -403,15 +267,156 @@ impl<'a, T: 'a> Iterator for SurfaceIterMut<'a, T> {
     }
 }
 
-impl<'a, S> IntoIterator for &'a mut Surface<S>
+impl<'a, S> Surface for &'a S
 where
-    S: StorageMut,
+    S: Surface + ?Sized,
 {
-    type IntoIter = SurfaceIterMut<'a, S::Item>;
-    type Item = &'a mut S::Item;
+    type Item = S::Item;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter_mut()
+    fn shape(&self) -> Shape {
+        (*self).shape()
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        (*self).data()
+    }
+}
+
+impl<'a, S> Surface for &'a mut S
+where
+    S: Surface + ?Sized,
+{
+    type Item = S::Item;
+
+    fn shape(&self) -> Shape {
+        (**self).shape()
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        (**self).data()
+    }
+}
+
+impl<'a, S> SurfaceMut for &'a mut S
+where
+    S: SurfaceMut + ?Sized,
+{
+    fn data_mut(&mut self) -> &mut [Self::Item] {
+        (**self).data_mut()
+    }
+}
+
+#[derive(Clone)]
+pub struct SurfaceOwned<T> {
+    shape: Shape,
+    data: Vec<T>,
+}
+
+#[derive(Clone)]
+pub struct SurfaceOwnedView<S> {
+    shape: Shape,
+    inner: S,
+}
+
+#[derive(Clone)]
+pub struct SurfaceView<'a, T> {
+    shape: Shape,
+    data: &'a [T],
+}
+
+pub struct SurfaceMutView<'a, T> {
+    shape: Shape,
+    data: &'a mut [T],
+}
+
+impl<T> SurfaceOwned<T> {
+    pub fn new(height: usize, width: usize) -> Self
+    where
+        T: Default,
+    {
+        let mut data = Vec::new();
+        data.resize_with(height * width, Default::default);
+        let shape = Shape {
+            row_stride: width,
+            col_stride: 1,
+            height,
+            width,
+            start: 0,
+            end: data.len(),
+        };
+        Self { shape, data }
+    }
+}
+
+impl<T> Surface for SurfaceOwned<T> {
+    type Item = T;
+
+    fn shape(&self) -> Shape {
+        self.shape
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        &self.data
+    }
+}
+
+impl<T> SurfaceMut for SurfaceOwned<T> {
+    fn data_mut(&mut self) -> &mut [Self::Item] {
+        &mut self.data
+    }
+}
+
+impl<S> Surface for SurfaceOwnedView<S>
+where
+    S: Surface,
+{
+    type Item = S::Item;
+
+    fn shape(&self) -> Shape {
+        self.shape
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        self.inner.data()
+    }
+}
+
+impl<S> SurfaceMut for SurfaceOwnedView<S>
+where
+    S: SurfaceMut,
+{
+    fn data_mut(&mut self) -> &mut [Self::Item] {
+        self.inner.data_mut()
+    }
+}
+
+impl<'a, T: 'a> Surface for SurfaceView<'a, T> {
+    type Item = T;
+
+    fn shape(&self) -> Shape {
+        self.shape
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        self.data
+    }
+}
+
+impl<'a, T: 'a> Surface for SurfaceMutView<'a, T> {
+    type Item = T;
+
+    fn shape(&self) -> Shape {
+        self.shape
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        self.data
+    }
+}
+
+impl<'a, T: 'a> SurfaceMut for SurfaceMutView<'a, T> {
+    fn data_mut(&mut self) -> &mut [Self::Item] {
+        self.data
     }
 }
 
@@ -512,14 +517,14 @@ mod tests {
 
     #[test]
     fn test_surface() {
-        let mut surf = Surface::new(3, 4);
+        let mut surf = SurfaceOwned::new(3, 4);
         assert!(!surf.is_empty());
         assert_eq!(surf.get(2, 3), Some(&0u8));
         assert_eq!(surf.get(2, 4), None);
 
-        surf.by_ref_mut().view(.., ..1).fill(1);
-        surf.by_ref_mut().view(1..2, ..).fill(2);
-        surf.by_ref_mut().view(.., -1..).fill(3);
+        surf.view_mut(.., ..1).fill(1);
+        surf.view_mut(1..2, ..).fill(2);
+        surf.view_mut(.., -1..).fill(3);
         let reference: Vec<u8> = vec![
             1, 0, 0, 3, // 0
             2, 2, 2, 3, // 1
@@ -527,15 +532,15 @@ mod tests {
         ];
         assert_eq!(surf.iter().copied().collect::<Vec<_>>(), reference);
 
-        let view = surf.by_ref().view(..2, ..2);
+        let view = surf.view(..2, ..2);
         assert!(view.get(0, 3).is_none());
         assert!(view.get(2, 0).is_none());
 
-        let mut view = surf.by_ref_mut().view(..2, ..2);
+        let mut view = surf.view_mut(..2, ..2);
         assert!(view.get_mut(0, 3).is_none());
         assert!(view.get_mut(2, 0).is_none());
 
-        let view = surf.by_ref().view(3..3, ..);
+        let view = surf.view(3..3, ..);
         assert!(view.is_empty());
         assert_eq!(view.get(0, 0), None);
 
@@ -551,21 +556,19 @@ mod tests {
     fn test_view_mut_iter() {
         let mut data: Vec<usize> = Vec::new();
         data.resize_with(18, || 0);
-        let mut surf = Surface {
-            storage: Owned {
-                shape: Shape {
-                    row_stride: 6,
-                    col_stride: 2,
-                    width: 3,
-                    height: 3,
-                    start: 0,
-                    end: data.len(),
-                },
-                data,
+        let mut surf = SurfaceOwned {
+            shape: Shape {
+                row_stride: 6,
+                col_stride: 2,
+                width: 3,
+                height: 3,
+                start: 0,
+                end: data.len(),
             },
+            data,
         };
 
-        let mut view = surf.by_ref_mut().view(.., 1..);
+        let mut view = surf.view_mut(.., 1..);
         assert_eq!(view.iter().count(), 6);
         assert_eq!(view.iter_mut().count(), 6);
 
@@ -577,14 +580,14 @@ mod tests {
             0, 0, 3, 0, 4, 0, // 1
             0, 0, 5, 0, 6, 0, // 2
         ];
-        assert_eq!(surf.storage.data, reference);
+        assert_eq!(surf.data, reference);
 
-        let mut surf = Surface::new(3, 7);
+        let mut surf = SurfaceOwned::new(3, 7);
         surf.fill_with(|row, col, _| (row * 7 + col) % 10);
         // 0 1 | 2 3 4 5 | 6
         // 7 8 | 9 0 1 2 | 3
         // 4 5 | 6 7 8 9 | 1
-        let mut view = surf.by_ref_mut().view(.., 2..-1);
+        let mut view = surf.view_mut(.., 2..-1);
         let mut iter = view.iter_mut();
         assert_eq!(iter.next().cloned(), Some(2));
         assert_eq!(iter.nth(1).cloned(), Some(4));
@@ -595,20 +598,21 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut surf = Surface::new(2, 2);
+        let mut surf = SurfaceOwned::new(2, 2);
         surf.fill_with(|r, c, _| r * 2 + c + 1);
-        assert_eq!(surf.storage.data(), &[1, 2, 3, 4]);
-        surf.by_ref_mut().view(.., 1..).clear();
-        assert_eq!(surf.storage.data(), &[1, 0, 3, 0]);
+        assert_eq!(surf.data(), &[1, 2, 3, 4]);
+        surf.view_mut(.., 1..).clear();
+        assert_eq!(surf.data(), &[1, 0, 3, 0]);
     }
 
     #[test]
     fn test_chains() {
-        let surf: Surface<Owned<()>> = Surface::new(10, 10);
-        let mut view = surf.view(.., ..).view(1..-1, ..).view(.., 1..-1);
+        let surf: SurfaceOwned<()> = SurfaceOwned::new(10, 10);
+        let mut view = surf.view_owned(.., ..).view_owned(1..-1, ..);
+        let mut view = view.view_mut(.., 1..-1);
         view.get_mut(1, 1);
         assert_eq!(
-            view.storage.shape(),
+            view.shape(),
             Shape {
                 col_stride: 1,
                 row_stride: 10,
@@ -622,8 +626,37 @@ mod tests {
 
     #[test]
     fn test_empty_surface() {
-        let mut surf: Surface<Owned<()>> = Surface::new(0, 0);
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(0, 0);
         assert!(surf.iter().next().is_none());
         assert!(surf.iter_mut().next().is_none());
+    }
+
+    #[test]
+    fn test_references() {
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(3, 3);
+
+        fn view<S: Surface>(s: S) {
+            let _ = s.view(.., ..);
+        }
+        view(surf.clone());
+        view(&surf);
+
+        fn view_mut<S: SurfaceMut>(mut s: S) {
+            let _ = s.view(.., ..);
+            let _ = s.view_mut(.., ..);
+        }
+        view_mut(surf.clone());
+        view(&mut surf);
+
+        fn view_dyn(s: &dyn Surface<Item = ()>) {
+            let _ = (&s).view(.., ..);
+        }
+        view_dyn(&surf);
+
+        fn view_dyn_mut(mut s: &mut dyn SurfaceMut<Item = ()>) {
+            let _ = (&s).view(.., ..);
+            let _ = (&mut s).view_mut(.., ..);
+        }
+        view_dyn_mut(&mut surf);
     }
 }

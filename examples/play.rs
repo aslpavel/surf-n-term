@@ -1,7 +1,7 @@
 use std::ops::Range;
 use surf_n_term::{
-    Color, DecMode, Error, Key, KeyName, StorageMut, Surface, SystemTerminal, Terminal,
-    TerminalAction, TerminalCommand, TerminalEvent,
+    Color, DecMode, Error, Key, KeyName, Surface, SystemTerminal, Terminal, TerminalAction,
+    TerminalCommand, TerminalEvent,
 };
 
 fn mandelbrot_at(x0: f64, y0: f64, count: usize) -> usize {
@@ -17,10 +17,12 @@ fn mandelbrot_at(x0: f64, y0: f64, count: usize) -> usize {
         .unwrap_or(count)
 }
 
-fn mandelbrot<S>(xs: Range<f64>, ys: Range<f64>, colors: Range<Color>, img: &mut Surface<S>)
-where
-    S: StorageMut<Item = Color>,
-{
+fn mandelbrot<S>(
+    xs: Range<f64>,
+    ys: Range<f64>,
+    colors: Range<Color>,
+    img: impl Surface<Item = Color>,
+) {
     todo!()
 }
 

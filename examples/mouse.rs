@@ -1,7 +1,7 @@
 use std::io::Write;
 use surf_n_term::{
-    error::Error, Cell, DecMode, Key, KeyName, SystemTerminal, Terminal, TerminalAction,
-    TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    error::Error, Cell, DecMode, Key, KeyName, SurfaceMut, SystemTerminal, Terminal,
+    TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
 fn main() -> Result<(), Error> {

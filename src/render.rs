@@ -1,8 +1,6 @@
 use crate::{
-    decoder::Decoder,
-    error::Error,
-    surface::{Owned, Storage, StorageMut},
-    Color, Face, FaceAttrs, Position, Surface, Terminal, TerminalCommand,
+    decoder::Decoder, error::Error, Color, Face, FaceAttrs, Position, Surface, SurfaceMut,
+    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,13 +38,13 @@ impl Default for Cell {
     }
 }
 
-pub type TerminalSurface<'a> = Surface<&'a mut dyn StorageMut<Item = Cell>>;
+pub type TerminalSurface<'a> = SurfaceMutView<'a, Cell>;
 
 pub struct TerminalRenderer {
     face: Face,
     cursor: Position,
-    front: Surface<Owned<Cell>>,
-    back: Surface<Owned<Cell>>,
+    front: SurfaceOwned<Cell>,
+    back: SurfaceOwned<Cell>,
 }
 
 impl TerminalRenderer {
@@ -54,14 +52,14 @@ impl TerminalRenderer {
         let size = term.size()?;
         term.execute(TerminalCommand::Face(Default::default()))?;
         term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
-        let mut back = Surface::new(size.height, size.width);
+        let mut back = SurfaceOwned::new(size.height, size.width);
         if clear {
             back.fill(Cell::new_damnaged());
         }
         Ok(Self {
             face: Default::default(),
             cursor: Position::new(0, 0),
-            front: Surface::new(size.height, size.width),
+            front: SurfaceOwned::new(size.height, size.width),
             back,
         })
     }
@@ -126,7 +124,7 @@ impl TerminalRenderer {
 
     /// View associated with the current frame
     pub fn view(&mut self) -> TerminalSurface<'_> {
-        self.front.by_ref_mut_dyn()
+        self.front.view_mut(.., ..)
     }
 
     fn find_repeats(&self, row: usize, col: usize) -> usize {
@@ -144,13 +142,13 @@ impl TerminalRenderer {
 
 pub trait TerminalSurfaceExt {
     fn draw_box(&mut self, face: Option<Face>);
-    fn draw_image_ascii<T: Storage<Item = Color>>(&mut self, img: &Surface<T>);
+    fn draw_image_ascii(&mut self, img: impl Surface<Item = Color>);
     fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_>;
 }
 
-impl<S> TerminalSurfaceExt for Surface<S>
+impl<S> TerminalSurfaceExt for S
 where
-    S: StorageMut<Item = Cell>,
+    S: SurfaceMut<Item = Cell>,
 {
     fn draw_box(&mut self, face: Option<Face>) {
         if self.width() < 2 || self.height() < 2 {
@@ -160,40 +158,27 @@ where
 
         let h = Cell::new(face, Some('─'));
         let v = Cell::new(face, Some('│'));
-        self.by_ref_mut().view(..1, 1..-1).fill(h.clone());
-        self.by_ref_mut().view(-1.., 1..-1).fill(h.clone());
-        self.by_ref_mut().view(1..-1, ..1).fill(v.clone());
-        self.by_ref_mut().view(1..-1, -1..).fill(v.clone());
+        self.view_mut(..1, 1..-1).fill(h.clone());
+        self.view_mut(-1.., 1..-1).fill(h.clone());
+        self.view_mut(1..-1, ..1).fill(v.clone());
+        self.view_mut(1..-1, -1..).fill(v.clone());
 
-        self.by_ref_mut()
-            .view(..1, ..1)
-            .fill(Cell::new(face, Some('┌')));
-        self.by_ref_mut()
-            .view(..1, -1..)
-            .fill(Cell::new(face, Some('┐')));
-        self.by_ref_mut()
-            .view(-1.., -1..)
-            .fill(Cell::new(face, Some('┘')));
-        self.by_ref_mut()
-            .view(-1.., ..1)
-            .fill(Cell::new(face, Some('└')));
+        self.view_mut(..1, ..1).fill(Cell::new(face, Some('┌')));
+        self.view_mut(..1, -1..).fill(Cell::new(face, Some('┐')));
+        self.view_mut(-1.., -1..).fill(Cell::new(face, Some('┘')));
+        self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
     }
 
     // draw image using unicode uppper half block symbol \u{2580}
-    fn draw_image_ascii<T>(&mut self, img: &Surface<T>)
-    where
-        T: Storage<Item = Color>,
-    {
+    fn draw_image_ascii(&mut self, img: impl Surface<Item = Color>) {
         let height = (img.height() / 2 + img.height() % 2) as i32;
         let width = img.width() as i32;
-        self.by_ref_mut()
-            .view(..height, ..width)
-            .fill_with(|row, col, _| {
-                let fg = img.get(row * 2, col).copied();
-                let bg = img.get(row * 2 + 1, col).copied();
-                let face = Face::new(fg, bg, FaceAttrs::EMPTY);
-                Cell::new(face, Some('\u{2580}'))
-            });
+        self.view_mut(..height, ..width).fill_with(|row, col, _| {
+            let fg = img.get(row * 2, col).copied();
+            let bg = img.get(row * 2 + 1, col).copied();
+            let face = Face::new(fg, bg, FaceAttrs::EMPTY);
+            Cell::new(face, Some('\u{2580}'))
+        });
     }
 
     fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_> {
@@ -212,7 +197,7 @@ where
 
 pub struct TerminalWriter<'a> {
     face: Face,
-    iter: crate::surface::SurfaceIterMut<'a, Cell>,
+    iter: SurfaceMutIter<'a, Cell>,
     decoder: crate::decoder::Utf8Decoder,
 }
 
@@ -239,12 +224,11 @@ mod tests {
     use super::*;
     use crate::{
         encoder::{Encoder, TTYEncoder},
-        surface::Storage,
         terminal::{TerminalEvent, TerminalSize},
     };
     use std::io::Write;
 
-    fn debug<S: Storage<Item = Cell>>(view: Surface<S>) -> Result<String, Error> {
+    fn debug(view: impl Surface<Item = Cell>) -> Result<String, Error> {
         let mut encoder = TTYEncoder::new();
         let mut out = Vec::new();
         write!(&mut out, "\n┌")?;
@@ -337,7 +321,7 @@ mod tests {
         let mut term = DummyTerminal::new(3, 7);
         let mut render = TerminalRenderer::new(&mut term, false)?;
 
-        let mut view = render.view().view(.., 1..);
+        let mut view = render.view().view_owned(.., 1..);
         let mut writer = view.writer(0, 4, Some(purple));
         write!(writer, "TEST")?;
         println!("{}", debug(render.view())?);
@@ -358,7 +342,10 @@ mod tests {
         );
         term.clear();
 
-        render.view().view(1..2, ..-1).fill(Cell::new(red, None));
+        render
+            .view()
+            .view_owned(1..2, ..-1)
+            .fill(Cell::new(red, None));
         println!("{}", debug(render.view())?);
         render.frame(&mut term)?;
         assert_eq!(
