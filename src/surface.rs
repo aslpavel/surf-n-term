@@ -1,3 +1,4 @@
+use crate::common::clamp;
 use std::ops::{Bound, RangeBounds};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -420,20 +421,6 @@ impl<'a, T: 'a> SurfaceMut for SurfaceMutView<'a, T> {
     }
 }
 
-#[inline]
-fn clamp<T>(val: T, min: T, max: T) -> T
-where
-    T: PartialOrd,
-{
-    if val < min {
-        min
-    } else if val > max {
-        max
-    } else {
-        val
-    }
-}
-
 /// Resolve bounds the same way python or numpy does for ranges when indexing arrays
 pub fn view_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usize)> {
     //  (index + size) % size - almost works
@@ -477,8 +464,8 @@ where
         (Some((col_start, col_end)), Some((row_start, row_end))) => {
             let width = col_end - col_start;
             let height = row_end - row_start;
-            let start = col_start * shape.col_stride + row_start * shape.row_stride;
-            let end = start + shape.offset(height - 1, width);
+            let start = shape.offset(row_start, col_start);
+            let end = shape.offset(row_end - 1, col_end);
             let shape = Shape {
                 width,
                 height,
@@ -607,8 +594,8 @@ mod tests {
 
     #[test]
     fn test_chains() {
-        let surf: SurfaceOwned<()> = SurfaceOwned::new(10, 10);
-        let mut view = surf.view_owned(.., ..).view_owned(1..-1, ..);
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(10, 10);
+        let mut view = (&mut surf).view_owned(.., ..).view_owned(1..-1, ..);
         let mut view = view.view_mut(.., 1..-1);
         view.get_mut(1, 1);
         assert_eq!(
@@ -618,10 +605,15 @@ mod tests {
                 row_stride: 10,
                 width: 8,
                 height: 8,
-                start: 1,
+                start: 11,
                 end: 89,
             }
-        )
+        );
+
+        assert_eq!(
+            (&surf).view(3.., 1..).view(..2, ..3).shape(),
+            (&surf).view(3..5, 1..4).shape(),
+        );
     }
 
     #[test]

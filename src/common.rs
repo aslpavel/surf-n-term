@@ -3,6 +3,20 @@ use std::{
     io::{BufRead, Read, Write},
 };
 
+#[inline]
+pub fn clamp<T>(val: T, min: T, max: T) -> T
+where
+    T: PartialOrd,
+{
+    if val < min {
+        min
+    } else if val > max {
+        max
+    } else {
+        val
+    }
+}
+
 pub struct IOQueue {
     chunks: VecDeque<Vec<u8>>,
     offset: usize,

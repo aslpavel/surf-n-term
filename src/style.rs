@@ -1,12 +1,80 @@
+use crate::common::clamp;
 use crate::error::Error;
-use std::{fmt, str::FromStr};
+use std::{
+    fmt,
+    ops::{Add, Mul},
+    str::FromStr,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Color {
-    /// SRGB with not premultiplied alpha
     RGBA([u8; 4]),
-    // Linear RGB with premultiplied alpha
-    // Linear([f32; 4]),
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::RGBA([0, 0, 0, 0])
+    }
+}
+
+/// Color in linear RGB color space with premultiplied alpha
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub struct ColorLinear([f32; 4]);
+
+impl Mul<f32> for ColorLinear {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, v: f32) -> Self::Output {
+        let Self([r, g, b, a]) = self;
+        Self([r * v, g * v, b * v, a * v])
+    }
+}
+
+impl Add<Self> for ColorLinear {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: Self) -> Self::Output {
+        let Self([r0, g0, b0, a0]) = self;
+        let Self([r1, g1, b1, a1]) = other;
+        Self([r0 + r1, g0 + g1, b0 + b1, a0 + a1])
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Compose {
+    Over,
+    Out,
+    In,
+    Atop,
+    Xor,
+}
+
+impl<C: From<ColorLinear> + Into<ColorLinear>> ColorExt for C {}
+
+pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
+    fn compose(self, other: impl Into<ColorLinear>, method: Compose) -> Self {
+        let dst = self.into();
+        let dst_a = dst.0[3];
+        let src = other.into();
+        let src_a = src.0[3];
+        let color = match method {
+            Compose::Over => src + dst * (1.0 - src_a),
+            Compose::Out => src * (1.0 - dst_a),
+            Compose::In => src * dst_a,
+            Compose::Atop => src * dst_a + dst * (1.0 - src_a),
+            Compose::Xor => src * (1.0 - dst_a) + dst * (1.0 - src_a),
+        };
+        color.into()
+    }
+
+    fn lerp(self, other: impl Into<ColorLinear>, t: f32) -> Self {
+        let start = self.into();
+        let end = other.into();
+        let color = start * (1.0 - t) + end * t;
+        color.into()
+    }
 }
 
 impl Color {
@@ -31,6 +99,33 @@ impl Color {
         let blue = hex.next()?;
         let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
         Some(Self::RGBA([red, green, blue, alpha]))
+    }
+}
+
+impl From<Color> for ColorLinear {
+    // TODO: convert color space
+    fn from(color: Color) -> Self {
+        let [r, g, b, a] = color.rgba_u8();
+        let a = (a as f32) / 255.0;
+        let r = (r as f32) / 255.0 * a;
+        let g = (g as f32) / 255.0 * a;
+        let b = (b as f32) / 255.0 * a;
+        ColorLinear([r, g, b, a])
+    }
+}
+
+impl From<ColorLinear> for Color {
+    fn from(color: ColorLinear) -> Self {
+        let ColorLinear([r, g, b, a]) = color;
+        if a < std::f32::EPSILON {
+            Color::RGBA([0, 0, 0, 0])
+        } else {
+            let r = clamp(r * 255.0 / a, 0.0, 255.0) as u8;
+            let g = clamp(g * 255.0 / a, 0.0, 255.0) as u8;
+            let b = clamp(b * 255.0 / a, 0.0, 255.0) as u8;
+            let a = clamp(a * 255.0, 0.0, 255.0) as u8;
+            Color::RGBA([r, g, b, a])
+        }
     }
 }
 

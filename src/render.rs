@@ -324,7 +324,7 @@ mod tests {
         let mut view = render.view().view_owned(.., 1..);
         let mut writer = view.writer(0, 4, Some(purple));
         write!(writer, "TEST")?;
-        println!("{}", debug(render.view())?);
+        println!("writer with offset: {}", debug(render.view())?);
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -344,9 +344,9 @@ mod tests {
 
         render
             .view()
-            .view_owned(1..2, ..-1)
+            .view_owned(1..2, 1..-1)
             .fill(Cell::new(red, None));
-        println!("{}", debug(render.view())?);
+        println!("erase:{}", debug(render.view())?);
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -358,8 +358,40 @@ mod tests {
                 Char(' '),
                 // erase is used
                 Face(red),
-                CursorTo(Position { row: 1, col: 0 }),
-                EraseChars(6)
+                CursorTo(Position { row: 1, col: 1 }),
+                EraseChars(5)
+            ]
+        );
+        term.clear();
+
+        let mut img = SurfaceOwned::new(3, 3);
+        let purple = "#d3869b".parse()?;
+        let green = "#b8bb26".parse()?;
+        img.fill_with(|r, c, _| if (r + c) % 2 == 0 { purple } else { green });
+        render.view().view_mut(1.., 2..).draw_image_ascii(&img);
+        println!("ascii image: {}", debug(render.view())?);
+        render.frame(&mut term)?;
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(Default::default()),
+                Char(' '),
+                Face("fg=#d3869b, bg=#b8bb26".parse()?),
+                Char('▀'),
+                Face("fg=#b8bb26, bg=#d3869b".parse()?),
+                Char('▀'),
+                Face("fg=#d3869b, bg=#b8bb26".parse()?),
+                Char('▀'),
+                Face(Default::default()),
+                Char(' '),
+                Char(' '),
+                Face("fg=#d3869b".parse()?),
+                CursorTo(Position { row: 2, col: 2 }),
+                Char('▀'),
+                Face("fg=#b8bb26".parse()?),
+                Char('▀'),
+                Face("fg=#d3869b".parse()?),
+                Char('▀')
             ]
         );
         term.clear();
