@@ -94,7 +94,7 @@ impl UnixTerminal {
 
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {
-        // try to flush queue and restore settings
+        // flush currently queued output and write the epilogue
         let epilogue = [
             TerminalCommand::Face(Default::default()),
             TerminalCommand::DecModeSet {
@@ -121,7 +121,12 @@ impl std::ops::Drop for UnixTerminal {
         epilogue
             .iter()
             .try_fold((), |_, cmd| self.execute(*cmd))
-            .and_then(|_| self.poll(Some(Duration::new(0, 0))).map(|_| ()))
+            .and_then(|_| {
+                while !self.write_queue.is_empty() {
+                    self.poll(Some(Duration::new(0, 0)))?;
+                }
+                Ok(())
+            })
             .unwrap_or(());
 
         // revert descriptors to blocking mode

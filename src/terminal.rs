@@ -27,7 +27,7 @@ pub trait Terminal: Write {
         H: FnMut(&mut Self, Option<TerminalEvent>) -> Result<TerminalAction, E>,
         E: From<Error>,
     {
-        let mut timeout = None;
+        let mut timeout = Some(Duration::new(0, 0));
         loop {
             let event = self.poll(timeout)?;
             timeout = match handler(self, event)? {
