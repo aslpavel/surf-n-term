@@ -55,6 +55,9 @@ impl<C: From<ColorLinear> + Into<ColorLinear>> ColorExt for C {}
 
 pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
     fn compose(self, other: impl Into<ColorLinear>, method: Compose) -> Self {
+        // Reference:
+        // https://ciechanow.ski/alpha-compositing/
+        // http://ssp.impulsetrain.com/porterduff.html
         let dst = self.into();
         let dst_a = dst.0[3];
         let src = other.into();
