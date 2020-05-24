@@ -113,6 +113,21 @@ pub trait Surface {
             inner: self,
         }
     }
+
+    fn transpose(self) -> SurfaceOwnedView<Self>
+    where
+        Self: Sized,
+    {
+        let shape = self.shape();
+        let shape = Shape {
+            width: shape.height,
+            height: shape.width,
+            col_stride: shape.row_stride,
+            row_stride: shape.col_stride,
+            ..shape
+        };
+        SurfaceOwnedView { shape, inner: self }
+    }
 }
 
 pub trait SurfaceMut: Surface {
@@ -540,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn test_view_mut_iter() {
+    fn test_iter() {
         let mut data: Vec<usize> = Vec::new();
         data.resize_with(18, || 0);
         let mut surf = SurfaceOwned {
@@ -581,6 +596,12 @@ mod tests {
         assert_eq!(iter.nth(6).cloned(), Some(7));
         assert_eq!(iter.nth(1).cloned(), Some(9));
         assert_eq!(iter.next(), None);
+
+        let view = surf.view(1..2, 2..4);
+        let mut iter = view.iter();
+        assert_eq!(iter.next().cloned(), Some(9));
+        assert_eq!(iter.next().cloned(), Some(0));
+        assert_eq!(iter.next().cloned(), None);
     }
 
     #[test]
