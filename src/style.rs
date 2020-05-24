@@ -82,8 +82,14 @@ pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
 
 impl Color {
     pub fn rgb_u8(self) -> [u8; 3] {
-        let [r, g, b, _] = self.rgba_u8();
-        [r, g, b]
+        let [r, g, b, a] = self.rgba_u8();
+        if a == 255 {
+            [r, g, b]
+        } else {
+            let alpha = a as f32 / 255.0;
+            let [r, g, b, _] = Color::RGBA([0, 0, 0, 255]).lerp(self, alpha).rgba_u8();
+            [r, g, b]
+        }
     }
 
     pub fn rgba_u8(self) -> [u8; 4] {
