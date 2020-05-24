@@ -78,3 +78,57 @@ impl Encoder for TTYEncoder {
         Ok(())
     }
 }
+
+const BASE64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Encode input as base64
+pub fn base64_encode(
+    mut out: impl Write,
+    input: impl IntoIterator<Item = u8>,
+) -> Result<(), std::io::Error> {
+    let mut iter = input.into_iter();
+    loop {
+        let mut dst = [b'='; 4];
+        if let Some(s0) = iter.next() {
+            dst[0] = BASE64[(s0 >> 2) as usize];
+            if let Some(s1) = iter.next() {
+                dst[1] = BASE64[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
+                if let Some(s2) = iter.next() {
+                    dst[2] = BASE64[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
+                    dst[3] = BASE64[(s2 & 0x3f) as usize];
+                } else {
+                    dst[2] = BASE64[((s1 << 2) & 0x3f) as usize];
+                }
+            } else {
+                dst[1] = BASE64[((s0 << 4) & 0x3f) as usize];
+            }
+            out.write_all(&dst)?;
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64() -> Result<(), Error> {
+        let mut base64 = Vec::new();
+
+        base64_encode(&mut base64, b"term".iter().copied())?;
+        assert_eq!(base64, b"dGVybQ==");
+
+        base64.clear();
+        base64_encode(&mut base64, b"ter".iter().copied())?;
+        assert_eq!(base64, b"dGVy");
+
+        base64.clear();
+        base64_encode(&mut base64, b"ab".iter().copied())?;
+        assert_eq!(base64, b"YWI=");
+
+        Ok(())
+    }
+}
