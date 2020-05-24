@@ -10,7 +10,9 @@ use crate::{
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
-    io::{Cursor, Read, Write},
+    fs::File,
+    io::{BufWriter, Cursor, Read, Write},
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -42,9 +44,17 @@ pub struct UnixTerminal {
     sigwinch_read: nix::UnixStream,
     sigwinch_id: signal_hook::SigId,
     stats: TerminalStats,
+    tee: Option<BufWriter<File>>,
 }
 
 impl UnixTerminal {
+    /// Create new terminal by opening `/dev/tty` device.
+    pub fn new() -> Result<Self, Error> {
+        let tty = nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty())?;
+        Self::new_from_fd(tty, tty)
+    }
+
+    /// Create new terminal from raw file descriptors.
     pub fn new_from_fd(write_fd: nix::RawFd, read_fd: nix::RawFd) -> Result<Self, Error> {
         if !nix::isatty(write_fd)? || !nix::isatty(read_fd)? {
             return Err(Error::NotATTY);
@@ -79,14 +89,18 @@ impl UnixTerminal {
             sigwinch_read,
             sigwinch_id,
             stats: TerminalStats::new(),
+            tee: None,
         })
     }
 
-    pub fn new() -> Result<Self, Error> {
-        let tty = nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty())?;
-        Self::new_from_fd(tty, tty)
+    /// Duplicate all output to specified tee file. Used for debugging.
+    pub fn duplicate_output(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let file = File::create(path)?;
+        self.tee = Some(BufWriter::new(file));
+        Ok(())
     }
 
+    /// Statistics collected by terminal.
     pub fn stats(&self) -> &TerminalStats {
         &self.stats
     }
@@ -94,7 +108,11 @@ impl UnixTerminal {
 
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {
-        // flush currently queued output and write the epilogue
+        // revert descriptors to blocking mode
+        self.write_handle.set_blocking(true).unwrap_or(());
+        self.read_handle.set_blocking(true).unwrap_or(());
+
+        // flush currently queued output and submit the epilogue
         let epilogue = [
             TerminalCommand::Face(Default::default()),
             TerminalCommand::DecModeSet {
@@ -128,10 +146,6 @@ impl std::ops::Drop for UnixTerminal {
                 Ok(())
             })
             .unwrap_or(());
-
-        // revert descriptors to blocking mode
-        self.write_handle.set_blocking(true).unwrap_or(());
-        self.read_handle.set_blocking(true).unwrap_or(());
 
         // disable SIGIWNCH handler
         signal_hook::unregister(self.sigwinch_id);
@@ -204,9 +218,12 @@ impl Terminal for UnixTerminal {
             // process pending output
             if write_set.contains(write_fd) {
                 let write_handle = &mut self.write_handle;
-                let send = self
-                    .write_queue
-                    .consume_with(|slice| guard_io(write_handle.write(slice), 0))?;
+                let tee = self.tee.as_mut();
+                let send = self.write_queue.consume_with(|slice| {
+                    let size = guard_io(write_handle.write(slice), 0)?;
+                    tee.map(|tee| tee.write(&slice[..size])).transpose()?;
+                    Ok::<_, Error>(size)
+                })?;
                 self.stats.send += send;
             }
             // process SIGWINCH

@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let q = Key::from(KeyName::Char('q'));
 
     // run programm
-    term.run(|mut term, event| -> Result<_, Box<dyn Error>> {
+    term.run(None, |mut term, event| -> Result<_, Box<dyn Error>> {
         use surf_n_term::terminal::TerminalAction::*;
         match event {
             None => Ok(Quit),

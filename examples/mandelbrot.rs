@@ -45,6 +45,7 @@ fn main() -> Result<(), Error> {
     let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
     let ctrl_c = TerminalEvent::Key(Key::new(KeyName::Char('c'), KeyMod::CTRL));
     let mut term = SystemTerminal::new()?;
+    term.duplicate_output("/tmp/surf_n_term.log")?;
 
     // init
     term.execute(TerminalCommand::CursorSave)?;

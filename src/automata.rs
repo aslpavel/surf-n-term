@@ -2,7 +2,7 @@
 //!
 //! This module implements NFA (Nondeterministic finite automaton) which is can be combined
 //! in more complicated one with Thompson's construction and complied to DFA (Deterministic
-//! finaite automaton).
+//! finaite automaton) with power set construction.
 use std::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},

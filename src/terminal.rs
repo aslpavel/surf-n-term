@@ -22,12 +22,11 @@ pub trait Terminal: Write {
     fn size(&self) -> Result<TerminalSize, Error>;
 
     /// Run terminal with event handler
-    fn run<H, E>(&mut self, mut handler: H) -> Result<(), E>
+    fn run<H, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<(), E>
     where
         H: FnMut(&mut Self, Option<TerminalEvent>) -> Result<TerminalAction, E>,
         E: From<Error>,
     {
-        let mut timeout = Some(Duration::new(0, 0));
         loop {
             let event = self.poll(timeout)?;
             timeout = match handler(self, event)? {
@@ -49,11 +48,8 @@ pub trait Terminal: Write {
         E: From<Error>,
     {
         let mut renderer = TerminalRenderer::new(self, false)?;
-        // run handler once without event to render first frame
-        handler(self, None, renderer.view())?;
-        renderer.frame(self)?;
         // run with render event handler
-        self.run(move |term, event| {
+        self.run(Some(Duration::new(0, 0)), move |term, event| {
             if let Some(TerminalEvent::Resize(_)) = event {
                 renderer = TerminalRenderer::new(term, true)?;
             }
