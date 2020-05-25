@@ -197,6 +197,11 @@ pub enum TerminalEvent {
         mode: DecMode,
         status: DecModeStatus,
     },
+    // Kitty image result
+    KittyImage {
+        id: usize,
+        success: bool,
+    },
     // Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
 }

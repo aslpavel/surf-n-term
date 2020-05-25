@@ -1,9 +1,9 @@
-use crate::{error::Error, FaceAttrs, TerminalCommand};
-use std::io::Write;
+use crate::{error::Error, Color, FaceAttrs, Surface, TerminalCommand};
+use std::io::{Cursor, Read, Write};
 
 pub trait Encoder {
     type Item;
-    type Error;
+    type Error: From<std::io::Error>;
 
     fn encode<W: Write>(&mut self, out: W, item: Self::Item) -> Result<(), Self::Error>;
 }
@@ -76,6 +76,87 @@ impl Encoder for TTYEncoder {
         }
 
         Ok(())
+    }
+}
+
+pub trait ImageEncoder {
+    type Error: From<std::io::Error>;
+
+    fn encode(
+        &mut self,
+        out: impl Write,
+        img: impl Surface<Item = Color>,
+    ) -> Result<(), Self::Error>;
+}
+
+pub struct KittyImageEncoder;
+
+impl ImageEncoder for KittyImageEncoder {
+    type Error = Error;
+
+    fn encode(
+        &mut self,
+        mut out: impl Write,
+        img: impl Surface<Item = Color>,
+    ) -> Result<(), Self::Error> {
+        // TODO:
+        //  - support for uploading only
+        //  - compression
+        let mut base64 = Cursor::new(Vec::new());
+        base64_encode(
+            base64.get_mut(),
+            img.iter().flat_map(|color| ColorIter::new(*color)),
+        )?;
+
+        let mut buf = [0u8; 4096];
+        loop {
+            let size = base64.read(&mut buf)?;
+            let more = if base64.position() < base64.get_ref().len() as u64 {
+                1
+            } else {
+                0
+            };
+            // a = t - transfer only
+            // a = T - transfer and show
+            // a = p - present only using `i = id`
+            write!(
+                &mut out,
+                "\x1b_Ga=T,f=32,v={},s={},m={};",
+                img.height(),
+                img.width(),
+                more
+            )?;
+            out.write_all(&buf[..size])?;
+            out.write_all(b"\x1b\\")?;
+            if more == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct ColorIter {
+    color: [u8; 4],
+    index: usize,
+}
+
+impl ColorIter {
+    fn new(color: Color) -> Self {
+        Self {
+            color: color.rgba_u8(),
+            index: 0,
+        }
+    }
+}
+
+impl Iterator for ColorIter {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.color.get(self.index).copied();
+        self.index += 1;
+        result
     }
 }
 
