@@ -857,7 +857,10 @@ mod tests {
         let mut decoder = TTYDecoder::new();
 
         write!(cursor.get_mut(), "\x1b_Gi=127;OK\x1b\\")?;
-        write!(cursor.get_mut(), "\x1b_Gi=31;error message\x1b\\")?;
+        write!(
+            cursor.get_mut(),
+            "\x1b_Gi=31,ignored=attr;error message\x1b\\"
+        )?;
 
         let mut result = Vec::new();
         decoder.decode_into(&mut cursor, &mut result)?;

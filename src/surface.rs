@@ -1,5 +1,10 @@
 use crate::common::clamp;
-use std::ops::{Bound, RangeBounds};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    ops::{Bound, RangeBounds},
+    sync::Arc,
+};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
@@ -66,6 +71,19 @@ pub trait Surface {
     /// Width of the surface
     fn width(&self) -> usize {
         self.shape().width
+    }
+
+    fn hash(&self) -> u64
+    where
+        Self::Item: Hash,
+    {
+        let mut hasher = DefaultHasher::new();
+        hasher.write_usize(self.height());
+        hasher.write_usize(self.width());
+        for item in self.iter() {
+            item.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Get immutable reference to the elemetn specified by row and column
@@ -319,6 +337,18 @@ where
 {
     fn data_mut(&mut self) -> &mut [Self::Item] {
         (**self).data_mut()
+    }
+}
+
+impl<T> Surface for Arc<dyn Surface<Item = T>> {
+    type Item = T;
+
+    fn shape(&self) -> Shape {
+        (**self).shape()
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        (**self).data()
     }
 }
 
