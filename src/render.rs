@@ -100,7 +100,7 @@ impl TerminalRenderer {
                     if repeats > 4 {
                         // NOTE:
                         //   - only use erase command when it is more efficient
-                        //     this value choosed arbirtraraly
+                        //     this value choosen arbirtraraly
                         //   - erase is not moving cursor
                         term.execute(TerminalCommand::EraseChars(repeats))?;
                     } else {

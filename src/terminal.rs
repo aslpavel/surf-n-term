@@ -66,7 +66,7 @@ pub enum TerminalAction {
     Sleep(Duration),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalCommand {
     /// Put character
     Char(char),

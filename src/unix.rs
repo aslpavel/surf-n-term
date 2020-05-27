@@ -138,7 +138,7 @@ impl std::ops::Drop for UnixTerminal {
         ];
         epilogue
             .iter()
-            .try_fold((), |_, cmd| self.execute(*cmd))
+            .try_fold((), |_, cmd| self.execute(cmd.clone()))
             .and_then(|_| {
                 while !self.write_queue.is_empty() {
                     self.poll(Some(Duration::new(0, 0)))?;

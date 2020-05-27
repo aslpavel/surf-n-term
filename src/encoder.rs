@@ -1,8 +1,5 @@
-use crate::{error::Error, Color, FaceAttrs, Surface, TerminalCommand};
-use std::{
-    collections::HashSet,
-    io::{Cursor, Read, Write},
-};
+use crate::{error::Error, FaceAttrs, TerminalCommand};
+use std::io::Write;
 
 pub trait Encoder {
     type Item;
@@ -79,107 +76,6 @@ impl Encoder for TTYEncoder {
         }
 
         Ok(())
-    }
-}
-
-pub trait ImageEncoder {
-    type Error: From<std::io::Error>;
-
-    fn encode(
-        &mut self,
-        out: impl Write,
-        img: impl Surface<Item = Color>,
-    ) -> Result<(), Self::Error>;
-}
-
-pub struct KittyImageEncoder {
-    uploaded: HashSet<u32>,
-}
-
-impl KittyImageEncoder {
-    pub fn new() -> Self {
-        Self {
-            uploaded: Default::default(),
-        }
-    }
-}
-
-impl Default for KittyImageEncoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ImageEncoder for KittyImageEncoder {
-    type Error = Error;
-
-    fn encode(
-        &mut self,
-        mut out: impl Write,
-        img: impl Surface<Item = Color>,
-    ) -> Result<(), Self::Error> {
-        let id = img.hash() as u32;
-        if self.uploaded.contains(&id) {
-            write!(&mut out, "\x1b_Ga=p,i={};\x1b\\", id)?;
-        } else {
-            // TODO: optimize compression (stream?)
-            let raw: Vec<_> = img.iter().flat_map(|c| ColorIter::new(*c)).collect();
-            let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, /* level */ 10);
-            let mut base64 = Cursor::new(Vec::new());
-            base64_encode(base64.get_mut(), compressed.iter().copied())?;
-
-            let mut buf = [0u8; 4096];
-            loop {
-                let size = base64.read(&mut buf)?;
-                let more = if base64.position() < base64.get_ref().len() as u64 {
-                    1
-                } else {
-                    0
-                };
-                // a = t - transfer only
-                // a = T - transfer and show
-                // a = p - present only using `i = id`
-                write!(
-                    &mut out,
-                    "\x1b_Ga=T,f=32,o=z,v={},s={},m={},i={};",
-                    img.height(),
-                    img.width(),
-                    more,
-                    id,
-                )?;
-                out.write_all(&buf[..size])?;
-                out.write_all(b"\x1b\\")?;
-                if more == 0 {
-                    break;
-                }
-            }
-            self.uploaded.insert(id);
-        }
-        Ok(())
-    }
-}
-
-struct ColorIter {
-    color: [u8; 4],
-    index: usize,
-}
-
-impl ColorIter {
-    fn new(color: Color) -> Self {
-        Self {
-            color: color.rgba_u8(),
-            index: 0,
-        }
-    }
-}
-
-impl Iterator for ColorIter {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.color.get(self.index).copied();
-        self.index += 1;
-        result
     }
 }
 

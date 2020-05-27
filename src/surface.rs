@@ -295,7 +295,7 @@ impl<'a, T: 'a> Iterator for SurfaceMutIter<'a, T> {
             // this is safe, iterator is always progressing and never
             // returns a mutable reference to the same location.
             let ptr = self.data.as_mut_ptr();
-            let item = unsafe { &mut *ptr.offset(offset as isize) };
+            let item = unsafe { &mut *ptr.add(offset) };
             Some(item)
         }
     }
