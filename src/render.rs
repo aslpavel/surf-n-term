@@ -79,6 +79,20 @@ impl TerminalRenderer {
 
     /// Render the current frame
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+        // we have to issue erase commands first since images can overlap and
+        // newly rendered image might be erased by erase command.
+        for row in 0..self.back.height() {
+            for col in 0..self.back.width() {
+                let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
+                    (Some(src), Some(dst)) => (src, dst),
+                    _ => break,
+                };
+                if src.image != dst.image {
+                    term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
+                }
+            }
+        }
+
         for row in 0..self.back.height() {
             let mut col = 0;
             while col < self.back.width() {
@@ -103,12 +117,6 @@ impl TerminalRenderer {
                 }
                 // handle image
                 if src.image != dst.image {
-                    if dst.image.is_some() {
-                        // NOTE:
-                        // This will also erase image created in the previous cells
-                        // if this image intersects current cell.
-                        term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
-                    }
                     if let Some(image) = src.image.clone() {
                         term.execute(TerminalCommand::Image(image))?;
                     }
@@ -153,13 +161,19 @@ impl TerminalRenderer {
     }
 
     fn find_repeats(&self, row: usize, col: usize) -> usize {
-        let cell = self.front.get(row, col);
-        if cell.is_none() {
+        let first = self.front.get(row, col);
+        if first.is_none() {
             return 0;
         }
         let mut repeats = 1;
-        while cell == self.front.get(row, col + repeats) {
-            repeats += 1;
+        loop {
+            let src = self.front.get(row, col + repeats);
+            let dst = self.back.get(row, col + repeats);
+            if first == src && src != dst {
+                repeats += 1;
+            } else {
+                break;
+            }
         }
         repeats
     }
@@ -423,7 +437,6 @@ mod tests {
                 Face("fg=#d3869b, bg=#b8bb26".parse()?),
                 Char('▀'),
                 Face(Default::default()),
-                Char(' '),
                 Char(' '),
                 Face("fg=#d3869b".parse()?),
                 CursorTo(Position { row: 2, col: 2 }),
