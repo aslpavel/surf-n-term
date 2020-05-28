@@ -242,11 +242,16 @@ impl Terminal for UnixTerminal {
                 let mut buf = [0u8; 1024];
                 let recv = guard_io(self.read_handle.read(&mut buf), 0)?;
                 self.stats.recv += recv;
-
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
                 while let Some(event) = self.decoder.decode(&mut read_queue)? {
-                    self.events_queue.push_back(event)
+                    if let Some(storage) = self.image_storage.as_mut() {
+                        if !storage.handle(&event)? {
+                            self.events_queue.push_back(event)
+                        }
+                    } else {
+                        self.events_queue.push_back(event)
+                    }
                 }
             }
 

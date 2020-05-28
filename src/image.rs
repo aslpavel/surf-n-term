@@ -28,9 +28,8 @@ pub trait ImageStorage {
 
     /// Handle events frome the terminal
     ///
-    /// None is return if event is consumed by handler and do not need
-    /// to be passed to a user.
-    fn handle(&mut self, event: TerminalEvent) -> Result<Option<TerminalEvent>, Error>;
+    /// True means event has been handled and should not be propagated to a user
+    fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
 /// Image storage for kitty graphic protocol
@@ -107,14 +106,19 @@ impl ImageStorage for KittyImageStorage {
     }
 
     fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error> {
-        write!(out, "\x1b_Ga=d,d=p,x={},y={}\x1b\\", pos.col, pos.row)?;
+        write!(
+            out,
+            "\x1b_Ga=d,d=p,x={},y={}\x1b\\",
+            pos.col + 1,
+            pos.row + 1
+        )?;
         Ok(())
     }
 
-    fn handle(&mut self, event: TerminalEvent) -> Result<Option<TerminalEvent>, Error> {
+    fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
         match event {
-            TerminalEvent::KittyImage { .. } => Ok(None),
-            _ => Ok(Some(event)),
+            TerminalEvent::KittyImage { .. } => Ok(true),
+            _ => Ok(false),
         }
     }
 }

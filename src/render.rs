@@ -1,12 +1,13 @@
 use crate::{
-    decoder::Decoder, error::Error, Color, Face, FaceAttrs, Position, Surface, SurfaceMut,
-    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
+    decoder::Decoder, error::Error, Color, Face, FaceAttrs, ImageHandle, Position, Surface,
+    SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cell {
     face: Face,
     glyph: Option<char>,
+    image: Option<ImageHandle>,
     damaged: bool,
 }
 
@@ -15,6 +16,16 @@ impl Cell {
         Self {
             face,
             glyph,
+            image: None,
+            damaged: false,
+        }
+    }
+
+    pub fn new_image(image: ImageHandle) -> Self {
+        Self {
+            face: Default::default(),
+            glyph: None,
+            image: Some(image),
             damaged: false,
         }
     }
@@ -23,6 +34,7 @@ impl Cell {
         Self {
             face: Default::default(),
             glyph: None,
+            image: None,
             damaged: true,
         }
     }
@@ -33,6 +45,7 @@ impl Default for Cell {
         Self {
             face: Default::default(),
             glyph: None,
+            image: None,
             damaged: false,
         }
     }
@@ -87,6 +100,18 @@ impl TerminalRenderer {
                     self.cursor.row = row;
                     self.cursor.col = col;
                     term.execute(TerminalCommand::CursorTo(self.cursor))?;
+                }
+                // handle image
+                if src.image != dst.image {
+                    if dst.image.is_some() {
+                        // NOTE:
+                        // This will also erase image created in the previous cells
+                        // if this image intersects current cell.
+                        term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
+                    }
+                    if let Some(image) = src.image.clone() {
+                        term.execute(TerminalCommand::Image(image))?;
+                    }
                 }
                 // identify glyph
                 let glyph = match src.glyph {
@@ -143,6 +168,7 @@ impl TerminalRenderer {
 pub trait TerminalSurfaceExt {
     fn draw_box(&mut self, face: Option<Face>);
     fn draw_image_ascii(&mut self, img: impl Surface<Item = Color>);
+    fn draw_image(&mut self, img: ImageHandle);
     fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_>;
 }
 
@@ -179,6 +205,12 @@ where
             let face = Face::new(fg, bg, FaceAttrs::EMPTY);
             Cell::new(face, Some('\u{2580}'))
         });
+    }
+
+    fn draw_image(&mut self, img: ImageHandle) {
+        if let Some(cell) = self.get_mut(0, 0) {
+            std::mem::replace(cell, Cell::new_image(img));
+        }
     }
 
     fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_> {
