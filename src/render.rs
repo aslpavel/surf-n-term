@@ -225,6 +225,7 @@ mod tests {
     use crate::{
         encoder::{Encoder, TTYEncoder},
         terminal::{TerminalEvent, TerminalSize},
+        ImageHandle,
     };
     use std::io::Write;
 
@@ -308,6 +309,13 @@ mod tests {
 
         fn size(&self) -> Result<TerminalSize, Error> {
             Ok(self.size)
+        }
+
+        fn image_register(
+            &mut self,
+            _img: impl Surface<Item = Color>,
+        ) -> Result<ImageHandle, Error> {
+            unimplemented!()
         }
     }
 

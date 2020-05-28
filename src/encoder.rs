@@ -73,6 +73,9 @@ impl Encoder for TTYEncoder {
             }
             Reset => out.write_all(b"\x1bc")?,
             Char(c) => write!(out, "{}", c)?,
+            Image(_) | ImageErase(_) => {
+                // image is ignored and must be handled by image storage
+            }
         }
 
         Ok(())

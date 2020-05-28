@@ -7,6 +7,7 @@ pub enum Error {
     NotATTY,
     ParseColorError,
     ParseFaceError,
+    FeatureNotSupported,
 }
 
 impl fmt::Display for Error {

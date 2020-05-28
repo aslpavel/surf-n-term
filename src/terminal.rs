@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     render::{TerminalRenderer, TerminalSurface},
-    Face,
+    Color, Face, ImageHandle, Surface,
 };
 use std::{fmt, io::Write, time::Duration};
 
@@ -20,6 +20,9 @@ pub trait Terminal: Write {
 
     /// Get terminal size
     fn size(&self) -> Result<TerminalSize, Error>;
+
+    /// Register image
+    fn image_register(&mut self, img: impl Surface<Item = Color>) -> Result<ImageHandle, Error>;
 
     /// Run terminal with event handler
     fn run<H, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<(), E>
@@ -94,6 +97,10 @@ pub enum TerminalCommand {
     EraseChars(usize),
     /// Full reset of the terminal
     Reset,
+    /// Draw image
+    Image(ImageHandle),
+    /// Erase image
+    ImageErase(Position),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

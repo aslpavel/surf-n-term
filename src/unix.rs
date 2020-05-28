@@ -5,7 +5,7 @@ use crate::{
     encoder::{Encoder, TTYEncoder},
     error::Error,
     terminal::{Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats},
-    DecMode,
+    Color, DecMode, ImageHandle, ImageStorage, KittyImageStorage, Surface,
 };
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -45,6 +45,7 @@ pub struct UnixTerminal {
     sigwinch_id: signal_hook::SigId,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
+    image_storage: Option<Box<dyn ImageStorage>>,
 }
 
 impl UnixTerminal {
@@ -90,6 +91,8 @@ impl UnixTerminal {
             sigwinch_id,
             stats: TerminalStats::new(),
             tee: None,
+            // TODO: detec image storage
+            image_storage: Some(Box::new(KittyImageStorage::new())),
         })
     }
 
@@ -254,7 +257,21 @@ impl Terminal for UnixTerminal {
     }
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
-        self.encoder.encode(&mut self.write_queue, cmd)
+        match cmd {
+            TerminalCommand::Image(handle) => {
+                if let Some(storage) = self.image_storage.as_mut() {
+                    storage.draw(handle, &mut self.write_queue)?;
+                }
+                Ok(())
+            }
+            TerminalCommand::ImageErase(pos) => {
+                if let Some(storage) = self.image_storage.as_mut() {
+                    storage.erase(pos, &mut self.write_queue)?;
+                }
+                Ok(())
+            }
+            cmd => self.encoder.encode(&mut self.write_queue, cmd),
+        }
     }
 
     fn size(&self) -> Result<TerminalSize, Error> {
@@ -269,6 +286,13 @@ impl Terminal for UnixTerminal {
                 height_pixels: winsize.ws_ypixel as usize,
                 width_pixels: winsize.ws_xpixel as usize,
             })
+        }
+    }
+
+    fn image_register(&mut self, img: impl Surface<Item = Color>) -> Result<ImageHandle, Error> {
+        match self.image_storage.as_mut() {
+            None => Err(Error::FeatureNotSupported),
+            Some(storage) => storage.register(&img),
         }
     }
 }

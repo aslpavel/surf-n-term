@@ -13,6 +13,7 @@ pub mod terminal;
 mod unix;
 
 pub use error::Error;
+pub use image::{ImageHandle, ImageStorage, KittyImageStorage};
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt};
 pub use style::{Color, ColorExt, Face, FaceAttrs};
 pub use surface::{

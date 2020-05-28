@@ -4,7 +4,7 @@ use std::{
     io::{Cursor, Read, Write},
 };
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImageHandle(usize);
 
 pub trait ImageStorage {
@@ -12,15 +12,19 @@ pub trait ImageStorage {
     ///
     /// Usally means converting it to appropirate format so it could be send
     /// multiple times quicker.
-    fn register(&mut self, img: impl Surface<Item = Color>) -> Result<ImageHandle, Error>;
+    fn register(&mut self, img: &dyn Surface<Item = Color>) -> Result<ImageHandle, Error>;
 
     /// Draw image
     ///
     /// Send approprite terminal escape sequence so image would be rendered.
-    fn draw(&mut self, handle: ImageHandle, out: impl Write) -> Result<(), Error>;
+    fn draw(&mut self, handle: ImageHandle, out: &mut dyn Write) -> Result<(), Error>;
 
-    /// Remove image at specified position
-    fn remove(&mut self, pos: Position, out: impl Write) -> Result<(), Error>;
+    /// Erase image at specified position
+    ///
+    /// This is needed when erasing characters is not actually removing
+    /// image from the terminal. For example kitty needs to send separate
+    /// escape sequence to actually erase image.
+    fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error>;
 
     /// Handle events frome the terminal
     ///
@@ -51,7 +55,7 @@ impl Default for KittyImageStorage {
 }
 
 impl ImageStorage for KittyImageStorage {
-    fn register(&mut self, img: impl Surface<Item = Color>) -> Result<ImageHandle, Error> {
+    fn register(&mut self, img: &dyn Surface<Item = Color>) -> Result<ImageHandle, Error> {
         let handle = ImageHandle(self.imgs.len() + 1); // id = 0 can not be used.
         let raw: Vec<_> = img.iter().flat_map(|c| ColorIter::new(*c)).collect();
         let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, /* level */ 10);
@@ -88,7 +92,7 @@ impl ImageStorage for KittyImageStorage {
         Ok(handle)
     }
 
-    fn draw(&mut self, handle: ImageHandle, mut out: impl Write) -> Result<(), Error> {
+    fn draw(&mut self, handle: ImageHandle, out: &mut dyn Write) -> Result<(), Error> {
         match self.imgs.get_mut(&handle).and_then(|data| data.take()) {
             Some(data) => {
                 // data has not been send yet.
@@ -102,8 +106,8 @@ impl ImageStorage for KittyImageStorage {
         Ok(())
     }
 
-    fn remove(&mut self, pos: Position, mut out: impl Write) -> Result<(), Error> {
-        write!(&mut out, "\x1b_Ga=d,d=p,x={},y={}\x1b\\", pos.col, pos.row)?;
+    fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error> {
+        write!(out, "\x1b_Ga=d,d=p,x={},y={}\x1b\\", pos.col, pos.row)?;
         Ok(())
     }
 
