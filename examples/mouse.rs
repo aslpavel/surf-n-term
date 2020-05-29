@@ -46,7 +46,8 @@ fn main() -> Result<(), Error> {
         };
 
         // render label with event
-        let mut writer = view.writer(0, 3, None);
+        let mut label = view.view_mut(0..1, 3..-3);
+        let mut writer = label.writer();
         write!(
             &mut writer,
             "┤ Stats: {:?} Count: {} Event: {:?} ├",

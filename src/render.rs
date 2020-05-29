@@ -183,7 +183,8 @@ pub trait TerminalSurfaceExt {
     fn draw_box(&mut self, face: Option<Face>);
     fn draw_image_ascii(&mut self, img: impl Surface<Item = Color>);
     fn draw_image(&mut self, img: ImageHandle);
-    fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_>;
+    fn erase(&mut self, color: Color);
+    fn writer(&mut self) -> TerminalWriter<'_>;
 }
 
 impl<S> TerminalSurfaceExt for S
@@ -227,17 +228,13 @@ where
         }
     }
 
-    fn writer(&mut self, row: usize, col: usize, face: Option<Face>) -> TerminalWriter<'_> {
-        let offset = self.width() * row + col;
-        let mut iter = self.iter_mut();
-        if offset > 0 {
-            iter.nth(offset - 1);
-        }
-        TerminalWriter {
-            face: face.unwrap_or_default(),
-            iter,
-            decoder: crate::decoder::Utf8Decoder::new(),
-        }
+    fn erase(&mut self, color: Color) {
+        let face = Face::default().with_bg(Some(color));
+        self.fill_with(|_, _, _| Cell::new(face, None));
+    }
+
+    fn writer(&mut self) -> TerminalWriter<'_> {
+        TerminalWriter::new(self)
     }
 }
 
@@ -245,6 +242,30 @@ pub struct TerminalWriter<'a> {
     face: Face,
     iter: SurfaceMutIter<'a, Cell>,
     decoder: crate::decoder::Utf8Decoder,
+}
+
+impl<'a> TerminalWriter<'a> {
+    pub fn new<S>(surf: &'a mut S) -> Self
+    where
+        S: SurfaceMut<Item = Cell> + ?Sized,
+    {
+        Self {
+            face: Default::default(),
+            iter: surf.iter_mut(),
+            decoder: crate::decoder::Utf8Decoder::new(),
+        }
+    }
+
+    pub fn face(self, face: Face) -> Self {
+        Self { face, ..self }
+    }
+
+    pub fn skip(mut self, offset: usize) -> Self {
+        if offset > 0 {
+            self.iter.nth(offset - 1);
+        }
+        self
+    }
 }
 
 impl<'a> std::io::Write for TerminalWriter<'a> {
@@ -376,7 +397,7 @@ mod tests {
         let mut render = TerminalRenderer::new(&mut term, false)?;
 
         let mut view = render.view().view_owned(.., 1..);
-        let mut writer = view.writer(0, 4, Some(purple));
+        let mut writer = view.writer().skip(4).face(purple);
         write!(writer, "TEST")?;
         println!("writer with offset: {}", debug(render.view())?);
         render.frame(&mut term)?;
