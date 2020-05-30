@@ -2,7 +2,9 @@ use crate::common::clamp;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    ops::{Bound, RangeBounds},
+    ops::{
+        Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
+    },
     sync::Arc,
 };
 
@@ -109,8 +111,8 @@ pub trait Surface {
     /// Create an immutable sub-surface restricted by `rows` and `cols` bounds.
     fn view<RS, CS>(&self, rows: RS, cols: CS) -> SurfaceView<'_, Self::Item>
     where
-        RS: RangeBounds<i32>,
-        CS: RangeBounds<i32>,
+        RS: ViewBounds,
+        CS: ViewBounds,
         Self: Sized,
     {
         SurfaceView {
@@ -122,8 +124,8 @@ pub trait Surface {
     /// Create owned sub-surface restricted by `rows` and `cols` bounds.
     fn view_owned<RS, CS>(self, rows: RS, cols: CS) -> SurfaceOwnedView<Self>
     where
-        RS: RangeBounds<i32>,
-        CS: RangeBounds<i32>,
+        RS: ViewBounds,
+        CS: ViewBounds,
         Self: Sized,
     {
         SurfaceOwnedView {
@@ -175,8 +177,8 @@ pub trait SurfaceMut: Surface {
     /// Create a mutable sub-surface restricted by `rows` and `cols` bounds.
     fn view_mut<RS, CS>(&mut self, rows: RS, cols: CS) -> SurfaceMutView<'_, Self::Item>
     where
-        RS: RangeBounds<i32>,
-        CS: RangeBounds<i32>,
+        RS: ViewBounds,
+        CS: ViewBounds,
         Self: Sized,
     {
         SurfaceMutView {
@@ -466,8 +468,63 @@ impl<'a, T: 'a> SurfaceMut for SurfaceMutView<'a, T> {
     }
 }
 
-/// Resolve bounds the same way python or numpy does for ranges when indexing arrays
-pub fn view_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usize)> {
+/// Everything that can be intepreted as a view bounds.
+pub trait ViewBounds {
+    /// Resolve bounds the same way python numpy does for ranges when indexing ndarrays
+    ///
+    /// Returns tuple with indices of the first element and the last + 1 element.
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)>;
+}
+
+impl ViewBounds for Range<i32> {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        range_bounds(self, size)
+    }
+}
+
+impl ViewBounds for RangeFrom<i32> {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        range_bounds(self, size)
+    }
+}
+
+impl ViewBounds for RangeTo<i32> {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        range_bounds(self, size)
+    }
+}
+
+impl ViewBounds for RangeInclusive<i32> {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        range_bounds(self, size)
+    }
+}
+
+impl ViewBounds for RangeToInclusive<i32> {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        range_bounds(self, size)
+    }
+}
+
+impl ViewBounds for RangeFull {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        range_bounds(self, size)
+    }
+}
+
+impl ViewBounds for i32 {
+    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+        let size = size as i32;
+        if self < -size || self >= size {
+            None
+        } else {
+            let start = clamp(self + size, 0, 2 * size - 1) % size;
+            Some((start as usize, (start + 1) as usize))
+        }
+    }
+}
+
+fn range_bounds(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usize)> {
     //  (index + size) % size - almost works
     //  0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5  6  7  8  9
     //-10 -9 -8 -7 -6 -5 -4 -3 -2 -1  0  1  2  3  4  5  6  7  8  9
@@ -499,12 +556,12 @@ pub fn view_bound(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, u
 /// Construt new offset and shape for
 fn view_shape<RS, CS>(shape: Shape, rows: RS, cols: CS) -> Shape
 where
-    RS: RangeBounds<i32>,
-    CS: RangeBounds<i32>,
+    RS: ViewBounds,
+    CS: ViewBounds,
 {
     match (
-        view_bound(cols, shape.width),
-        view_bound(rows, shape.height),
+        cols.view_bounds(shape.width),
+        rows.view_bounds(shape.height),
     ) {
         (Some((col_start, col_end)), Some((row_start, row_end))) => {
             let width = col_end - col_start;
@@ -536,15 +593,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_view_bound() {
-        assert_eq!(view_bound(.., 10), Some((0, 10)));
-        assert_eq!(view_bound(..-1, 10), Some((0, 9)));
-        assert_eq!(view_bound(..=-1, 10), Some((0, 10)));
-        assert_eq!(view_bound(-5..8, 10), Some((5, 8)));
-        assert_eq!(view_bound(-10.., 10), Some((0, 10)));
-        assert_eq!(view_bound(..20, 10), Some((0, 10)));
-        assert_eq!(view_bound(10..20, 10), None);
-        assert_eq!(view_bound(9..20, 10), Some((9, 10)));
+    fn test_view_bounds() {
+        assert_eq!((..).view_bounds(10), Some((0, 10)));
+        assert_eq!((..-1).view_bounds(10), Some((0, 9)));
+        assert_eq!((..=-1).view_bounds(10), Some((0, 10)));
+        assert_eq!((-5..8).view_bounds(10), Some((5, 8)));
+        assert_eq!((-10..).view_bounds(10), Some((0, 10)));
+        assert_eq!((..20).view_bounds(10), Some((0, 10)));
+        assert_eq!((10..20).view_bounds(10), None);
+        assert_eq!((9..20).view_bounds(10), Some((9, 10)));
+        assert_eq!((10..).view_bounds(10), None);
+        assert_eq!(1.view_bounds(10), Some((1, 2)));
+        assert_eq!((-1).view_bounds(10), Some((9, 10)));
+        assert_eq!((-10).view_bounds(10), Some((0, 1)));
+        assert_eq!((-11).view_bounds(10), None);
+        assert_eq!(10.view_bounds(10), None);
     }
 
     #[test]

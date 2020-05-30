@@ -199,15 +199,15 @@ where
 
         let h = Cell::new(face, Some('─'));
         let v = Cell::new(face, Some('│'));
-        self.view_mut(..1, 1..-1).fill(h.clone());
-        self.view_mut(-1.., 1..-1).fill(h.clone());
-        self.view_mut(1..-1, ..1).fill(v.clone());
-        self.view_mut(1..-1, -1..).fill(v.clone());
+        self.view_mut(0, 1..-1).fill(h.clone());
+        self.view_mut(-1, 1..-1).fill(h.clone());
+        self.view_mut(1..-1, 0).fill(v.clone());
+        self.view_mut(1..-1, -1).fill(v.clone());
 
-        self.view_mut(..1, ..1).fill(Cell::new(face, Some('┌')));
-        self.view_mut(..1, -1..).fill(Cell::new(face, Some('┐')));
-        self.view_mut(-1.., -1..).fill(Cell::new(face, Some('┘')));
-        self.view_mut(-1.., ..1).fill(Cell::new(face, Some('└')));
+        self.view_mut(0, 0).fill(Cell::new(face, Some('┌')));
+        self.view_mut(0, -1).fill(Cell::new(face, Some('┐')));
+        self.view_mut(-1, -1).fill(Cell::new(face, Some('┘')));
+        self.view_mut(-1, 0).fill(Cell::new(face, Some('└')));
     }
 
     // draw image using unicode uppper half block symbol \u{2580}
