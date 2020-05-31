@@ -134,6 +134,7 @@ pub trait Surface {
         }
     }
 
+    // Crate transposed (same way as matrix is transposed) view of the surface.
     fn transpose(self) -> SurfaceOwnedView<Self>
     where
         Self: Sized,
@@ -147,6 +148,19 @@ pub trait Surface {
             ..shape
         };
         SurfaceOwnedView { shape, inner: self }
+    }
+
+    // Create new owned surface (allocates) by mapping all elements with the function.
+    fn map<F, T>(&self, mut f: F) -> SurfaceOwned<T>
+    where
+        F: FnMut(usize, usize, &Self::Item) -> T,
+        Self: Sized,
+    {
+        let shape = self.shape();
+        let data = self.data();
+        SurfaceOwned::new_with(shape.height, shape.width, |row, col| {
+            f(row, col, &data[shape.offset(row, col)])
+        })
     }
 }
 
@@ -382,8 +396,19 @@ impl<T> SurfaceOwned<T> {
     where
         T: Default,
     {
-        let mut data = Vec::new();
-        data.resize_with(height * width, Default::default);
+        Self::new_with(height, width, |_, _| Default::default())
+    }
+
+    pub fn new_with<F>(height: usize, width: usize, mut f: F) -> Self
+    where
+        F: FnMut(usize, usize) -> T,
+    {
+        let mut data = Vec::with_capacity(height * width);
+        for row in 0..height {
+            for col in 0..width {
+                data.push(f(row, col));
+            }
+        }
         let shape = Shape {
             row_stride: width,
             col_stride: 1,

@@ -78,6 +78,11 @@ pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
         let color = start * (1.0 - t) + end * t;
         color.into()
     }
+
+    fn luma(self) -> f32 {
+        let ColorLinear([r, g, b, _]) = self.into();
+        r * 0.2126 + g * 0.7152 + b * 0.0722
+    }
 }
 
 impl Color {
@@ -240,6 +245,19 @@ impl Face {
     pub fn with_fg(&self, fg: Option<Color>) -> Self {
         Face { fg, ..*self }
     }
+
+    /// Overlay `other` face on top of `self`
+    pub fn overlay(&self, other: &Self) -> Self {
+        let fg = match (self.fg, other.fg) {
+            (Some(dst), Some(src)) => Some(dst.compose(src, Compose::Over)),
+            (_, src) => src,
+        };
+        let bg = match (self.bg, other.bg) {
+            (Some(dst), Some(src)) => Some(dst.compose(src, Compose::Over)),
+            (_, src) => src,
+        };
+        Face { fg, bg, ..*other }
+    }
 }
 
 impl Default for Face {
@@ -311,7 +329,7 @@ mod tests {
     #[test]
     fn test_parse_face() -> Result<(), Error> {
         assert_eq!(
-            "fg=#98971a, bg=#bdae93, bold ,underline".parse::<Face>()?,
+            "fg=#98971a,bg=#bdae93, bold ,underline".parse::<Face>()?,
             Face {
                 fg: Some(Color::RGBA([152, 151, 26, 255])),
                 bg: Some(Color::RGBA([189, 174, 147, 255])),
