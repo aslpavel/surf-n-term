@@ -470,7 +470,7 @@ impl Cubic {
         let Self([p0, p1, p2, p3]) = self;
         let u = 3.0 * p1 - 2.0 * p0 - *p3;
         let v = 3.0 * p2 - *p0 - 2.0 * p3;
-        ((u.x() * u.x()).max(v.x() * v.x()) + (u.y() * u.y()).max(v.y() * v.y()))
+        (u.x() * u.x()).max(v.x() * v.x()) + (u.y() * u.y()).max(v.y() * v.y())
     }
 
     /// Split cubic curve at `t = 0.5`
@@ -503,11 +503,10 @@ impl Cubic {
         let Point([a0, a1]) = -3.0 * p0 + 9.0 * p1 - 9.0 * p2 + 3.0 * p3;
         let Point([b0, b1]) = 6.0 * p0 - 12.0 * p1 + 6.0 * p2;
         let Point([c0, c1]) = -3.0 * p0 + 3.0 * p1;
-        let t0 = quadratic_solve(a0, b0, c0);
-        let t1 = quadratic_solve(a1, b1, c1);
-        t0.iter()
+        quadratic_solve(a0, b0, c0)
+            .iter()
             .flatten()
-            .chain(t1.iter().flatten())
+            .chain(quadratic_solve(a1, b1, c1).iter().flatten())
             .filter(|t| **t > 0.0 && **t < 1.0)
             .fold(bbox, |bbox, t| bbox.extend(self.at(*t)))
     }
@@ -1372,12 +1371,18 @@ pub struct RGBA {
 
 trait Color {
     fn to_rgb(&self) -> [u8; 3];
+    fn to_rgba(&self) -> [u8; 4];
 }
 
 impl Color for Scalar {
     fn to_rgb(&self) -> [u8; 3] {
         let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
         [color; 3]
+    }
+
+    fn to_rgba(&self) -> [u8; 4] {
+        let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
+        [color; 4]
     }
 }
 
@@ -1439,6 +1444,23 @@ impl<C> Image<C> {
         for c in self.data.iter() {
             w.write_all(&c.to_rgb())?;
         }
+        Ok(())
+    }
+
+    fn to_png<W>(&self, w: W) -> Result<(), png::EncodingError>
+    where
+        C: Color,
+        W: Write,
+    {
+        let mut encoder = png::Encoder::new(w, self.width as u32, self.height as u32);
+        encoder.set_color(png::ColorType::RGBA);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header()?;
+        let mut stream_writer = writer.stream_writer();
+        for color in self.data.iter() {
+            stream_writer.write_all(&color.to_rgba())?;
+        }
+        stream_writer.flush()?;
         Ok(())
     }
 }
@@ -1594,15 +1616,16 @@ pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
 fn main() -> Result<(), Error> {
     env_logger::init();
 
-    // let path = Path::from_str(RUST)?;
-    let path = path_load("material_design.path")?;
+    // let path = Path::from_str(SQUIRREL)?;
+    // println!("{:#?}", path);
+    let path = path_load("material-big.path")?;
     let tr = Transform::default(); //.scale(12.0, 12.0);
     let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
     println!("{:?}", mask);
 
     if let Some(mask) = mask {
-        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.ppm")?);
-        timeit("[save]", || mask.to_ppm(&mut image))?;
+        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.png")?);
+        timeit("[save]", || mask.to_png(&mut image))?;
     }
 
     let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
