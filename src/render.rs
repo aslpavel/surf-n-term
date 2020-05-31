@@ -274,7 +274,10 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
         while let Some(glyph) = self.decoder.decode(&mut cur)? {
             let glyph = if glyph == ' ' { None } else { Some(glyph) };
             match self.iter.next() {
-                Some(cell) => *cell = Cell::new(self.face, glyph),
+                Some(cell) => {
+                    let face = cell.face.overlay(&self.face);
+                    *cell = Cell::new(face, glyph)
+                },
                 None => return Ok(buf.len()),
             }
         }

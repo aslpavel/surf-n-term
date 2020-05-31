@@ -56,7 +56,7 @@ pub trait Surface {
     /// Slice containing all the items
     ///
     /// **Note:** This slice contains all elements backed by parent object
-    /// and elements should accesed using offeset calculcated by `Shape::offset`
+    /// and elements should be accesed using the offeset calculcated by `Shape::offset`
     fn data(&self) -> &[Self::Item];
 
     /// Check if surface is empty
