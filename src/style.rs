@@ -43,7 +43,7 @@ impl Add<Self> for ColorLinear {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Compose {
+pub enum Blend {
     Over,
     Out,
     In,
@@ -54,7 +54,7 @@ pub enum Compose {
 impl<C: From<ColorLinear> + Into<ColorLinear>> ColorExt for C {}
 
 pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
-    fn compose(self, other: impl Into<ColorLinear>, method: Compose) -> Self {
+    fn blend(self, other: impl Into<ColorLinear>, method: Blend) -> Self {
         // Reference:
         // https://ciechanow.ski/alpha-compositing/
         // http://ssp.impulsetrain.com/porterduff.html
@@ -63,11 +63,11 @@ pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
         let src = other.into();
         let src_a = src.0[3];
         let color = match method {
-            Compose::Over => src + dst * (1.0 - src_a),
-            Compose::Out => src * (1.0 - dst_a),
-            Compose::In => src * dst_a,
-            Compose::Atop => src * dst_a + dst * (1.0 - src_a),
-            Compose::Xor => src * (1.0 - dst_a) + dst * (1.0 - src_a),
+            Blend::Over => src + dst * (1.0 - src_a),
+            Blend::Out => src * (1.0 - dst_a),
+            Blend::In => src * dst_a,
+            Blend::Atop => src * dst_a + dst * (1.0 - src_a),
+            Blend::Xor => src * (1.0 - dst_a) + dst * (1.0 - src_a),
         };
         color.into()
     }
@@ -249,11 +249,11 @@ impl Face {
     /// Overlay `other` face on top of `self`
     pub fn overlay(&self, other: &Self) -> Self {
         let fg = match (self.fg, other.fg) {
-            (Some(dst), Some(src)) => Some(dst.compose(src, Compose::Over)),
+            (Some(dst), Some(src)) => Some(dst.blend(src, Blend::Over)),
             (_, src) => src,
         };
         let bg = match (self.bg, other.bg) {
-            (Some(dst), Some(src)) => Some(dst.compose(src, Compose::Over)),
+            (Some(dst), Some(src)) => Some(dst.blend(src, Blend::Over)),
             (_, src) => src,
         };
         Face { fg, bg, ..*other }
