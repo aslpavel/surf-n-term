@@ -1,6 +1,6 @@
 use std::{ops::Range, time::Duration};
 use surf_n_term::{
-    Color, ColorExt, DecMode, Error, Key, KeyMod, KeyName, SurfaceMut, SurfaceOwned,
+    Color, ColorExt, ColorLinear, DecMode, Error, Key, KeyMod, KeyName, SurfaceMut, SurfaceOwned,
     SystemTerminal, Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
@@ -20,7 +20,7 @@ fn mandelbrot_at(x0: f64, y0: f64, count: usize) -> usize {
 fn mandelbrot(
     xs: Range<f64>,
     ys: Range<f64>,
-    colors: &Range<Color>,
+    colors: &Range<ColorLinear>,
     count: usize,
     mut img: impl SurfaceMut<Item = Color>,
 ) {
@@ -33,7 +33,7 @@ fn mandelbrot(
         let x = lerp(&xs, (col as f64 + 0.5) / width);
         let y = lerp(&ys, (row as f64 + 0.5) / height);
         let ratio = mandelbrot_at(x, y, count) as f32 / (count as f32);
-        colors.start.lerp(colors.end, ratio)
+        colors.start.lerp(colors.end, ratio).into()
     })
 }
 
@@ -62,8 +62,8 @@ fn main() -> Result<(), Error> {
     let delay = Duration::from_millis(20);
     let mut count = 1;
     let mut img = SurfaceOwned::new(58, 100);
-    let color_start = "#000000".parse()?;
-    let color_end = "#ffffff".parse()?;
+    let color_start = ColorLinear::from("#000000".parse::<Color>()?);
+    let color_end = ColorLinear::from("#ffffff".parse::<Color>()?);
     let colors = color_start..color_end;
     term.run_render(|_term, event, mut view| -> Result<_, Error> {
         mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);

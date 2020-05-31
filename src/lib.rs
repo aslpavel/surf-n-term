@@ -15,7 +15,7 @@ mod unix;
 pub use error::Error;
 pub use image::{ImageHandle, ImageStorage, KittyImageStorage};
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt};
-pub use style::{Color, ColorExt, Face, FaceAttrs};
+pub use style::{Color, ColorExt, ColorLinear, Face, FaceAttrs};
 pub use surface::{
     Shape, Surface, SurfaceIter, SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned,
     SurfaceOwnedView, SurfaceView,

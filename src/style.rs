@@ -6,17 +6,6 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Color {
-    RGBA([u8; 4]),
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Self::RGBA([0, 0, 0, 0])
-    }
-}
-
 /// Color in linear RGB color space with premultiplied alpha
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct ColorLinear([f32; 4]);
@@ -85,6 +74,33 @@ pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
     }
 }
 
+fn srgb_to_linear(value: f32) -> f32 {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(value: f32) -> f32 {
+    if value <= 0.0031308 {
+        value * 12.92
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Color {
+    RGBA([u8; 4]),
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::RGBA([0, 0, 0, 0])
+    }
+}
+
 impl Color {
     pub fn rgb_u8(self) -> [u8; 3] {
         let [r, g, b, a] = self.rgba_u8();
@@ -117,13 +133,12 @@ impl Color {
 }
 
 impl From<Color> for ColorLinear {
-    // TODO: convert color space
     fn from(color: Color) -> Self {
         let [r, g, b, a] = color.rgba_u8();
         let a = (a as f32) / 255.0;
-        let r = (r as f32) / 255.0 * a;
-        let g = (g as f32) / 255.0 * a;
-        let b = (b as f32) / 255.0 * a;
+        let r = srgb_to_linear((r as f32) / 255.0) * a;
+        let g = srgb_to_linear((g as f32) / 255.0) * a;
+        let b = srgb_to_linear((b as f32) / 255.0) * a;
         ColorLinear([r, g, b, a])
     }
 }
@@ -134,10 +149,11 @@ impl From<ColorLinear> for Color {
         if a < std::f32::EPSILON {
             Color::RGBA([0, 0, 0, 0])
         } else {
-            let r = clamp(r * 255.0 / a, 0.0, 255.0) as u8;
-            let g = clamp(g * 255.0 / a, 0.0, 255.0) as u8;
-            let b = clamp(b * 255.0 / a, 0.0, 255.0) as u8;
-            let a = clamp(a * 255.0, 0.0, 255.0) as u8;
+            let a = clamp(a, 0.0, 1.0);
+            let r = (linear_to_srgb(clamp(r / a, 0.0, 1.0)) * 255.0) as u8;
+            let g = (linear_to_srgb(clamp(g / a, 0.0, 1.0)) * 255.0) as u8;
+            let b = (linear_to_srgb(clamp(b / a, 0.0, 1.0)) * 255.0) as u8;
+            let a = (a * 255.0) as u8;
             Color::RGBA([r, g, b, a])
         }
     }
@@ -336,6 +352,13 @@ mod tests {
                 attrs: FaceAttrs::BOLD | FaceAttrs::UNDERLINE,
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_color_linear() -> Result<(), Error> {
+        let color = "#fe801970".parse()?;
+        assert_eq!(Color::from(ColorLinear::from(color)), color);
         Ok(())
     }
 }

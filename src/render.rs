@@ -277,7 +277,7 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
                 Some(cell) => {
                     let face = cell.face.overlay(&self.face);
                     *cell = Cell::new(face, glyph)
-                },
+                }
                 None => return Ok(buf.len()),
             }
         }
