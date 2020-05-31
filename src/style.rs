@@ -167,6 +167,16 @@ impl FromStr for Color {
     }
 }
 
+impl FromStr for ColorLinear {
+    type Err = Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        Color::from_str(string)
+            .map(ColorLinear::from)
+            .ok_or(Error::ParseColorError)
+    }
+}
+
 impl fmt::Debug for Color {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

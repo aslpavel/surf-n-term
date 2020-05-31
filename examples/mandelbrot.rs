@@ -62,8 +62,8 @@ fn main() -> Result<(), Error> {
     let delay = Duration::from_millis(20);
     let mut count = 1;
     let mut img = SurfaceOwned::new(58, 100);
-    let color_start = ColorLinear::from("#000000".parse::<Color>()?);
-    let color_end = ColorLinear::from("#ffffff".parse::<Color>()?);
+    let color_start = "#000000".parse()?;
+    let color_end = "#ffffff".parse()?;
     let colors = color_start..color_end;
     term.run_render(|_term, event, mut view| -> Result<_, Error> {
         mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);
