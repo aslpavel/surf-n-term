@@ -8,6 +8,9 @@ use std::{
     usize,
 };
 
+pub mod surface;
+use crate::surface::{Surface, SurfaceMut, SurfaceOwned};
+
 type Scalar = f64;
 
 const EPSILON: f64 = std::f64::EPSILON;
@@ -19,13 +22,16 @@ const PI: f64 = std::f64::consts::PI;
 const FLATNESS: Scalar = 0.1;
 
 #[inline]
-fn clip(scalar: Scalar, min: Scalar, max: Scalar) -> Scalar {
-    if scalar < min {
+pub fn clamp<T>(val: T, min: T, max: T) -> T
+where
+    T: PartialOrd,
+{
+    if val < min {
         min
-    } else if scalar > max {
+    } else if val > max {
         max
     } else {
-        scalar
+        val
     }
 }
 
@@ -94,7 +100,7 @@ impl Point {
 
     pub fn angle_between(&self, other: &Self) -> Scalar {
         let angle_cos = self.dot(other) / (self.hypot() * other.hypot());
-        let angle = clip(angle_cos, -1.0, 1.0).acos();
+        let angle = clamp(angle_cos, -1.0, 1.0).acos();
         if self.cross(other) < 0.0 {
             -angle
         } else {
@@ -932,7 +938,7 @@ impl Path {
         PathFlattenIter::new(self, tr, flatness, close)
     }
 
-    pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<Image<Scalar>> {
+    pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<SurfaceOwned<Scalar>> {
         // flatten all curves
         let lines: Vec<Line> = timeit("[flatten]", || self.flatten(tr, FLATNESS, true).collect());
         if lines.is_empty() {
@@ -965,19 +971,20 @@ impl Path {
         }
 
         // calculate signed coverage
-        let mut layer: Image<Scalar> =
-            timeit("[alloc]", || Image::new(width as usize, height as usize));
+        let mut surf: SurfaceOwned<Scalar> = timeit("[alloc]", || {
+            SurfaceOwned::new(height as usize, width as usize)
+        });
         timeit("[coverage]", || {
             let offset = Transform::default().translate(-x as Scalar, -y as Scalar);
             for line in lines {
-                layer.coverage_line(line.transform(offset));
+                rasterize_line(&mut surf, line.transform(offset));
             }
         });
 
         // cummulative sum over rows
-        timeit("[mask]", || layer.coverage_to_mask(fill_rule));
+        timeit("[mask]", || coverage_to_mask(&mut surf, fill_rule));
 
-        Some(layer)
+        Some(surf)
     }
 }
 
@@ -1386,211 +1393,156 @@ impl Color for Scalar {
     }
 }
 
-#[derive(Clone)]
-pub struct Image<C> {
-    width: usize,
-    height: usize,
-    data: Vec<C>,
-}
+fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
+    // y - is a row
+    // x - is a column
+    // TODO:
+    //    - bounds check
+    //    - split line at borders
+    let shape = surf.shape();
+    let data = surf.data_mut();
+    let stride = shape.col_stride;
 
-impl<C> Image<C> {
-    pub fn new(width: usize, height: usize) -> Self
-    where
-        C: Default,
-    {
-        let mut data = Vec::with_capacity(width * height);
-        data.resize_with(width * height, Default::default);
-        Self {
-            width,
-            height,
-            data,
-        }
+    let Line([p0, p1]) = line;
+    if (p0.y() - p1.y()).abs() < EPSILON {
+        // line does not introduce any signed converage
+        return;
     }
-
-    #[inline]
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    #[inline]
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    #[inline]
-    pub fn get(&self, x: usize, y: usize) -> Option<&C> {
-        if x >= self.width {
-            None
+    // always iterate from the point with the smallest y coordinate
+    let (dir, p0, p1) = if p0.y() < p1.y() {
+        (1.0, p0, p1)
+    } else {
+        (-1.0, p1, p0)
+    };
+    let dxdy = (p1.x() - p0.x()) / (p1.y() - p0.y());
+    // find first point to trace. since we are going to interate over y's
+    // we should pick min(y , p0.y) as a starting y point, and adjust x
+    // accordingly
+    let y = p0.y() as usize; // = max(p0.y(), 0) as usize
+    let mut x = if p0.y() < 0.0 {
+        p0.x() - p0.y() * dxdy
+    } else {
+        p0.x()
+    };
+    let mut x_next = x;
+    for y in y..min(shape.height, p1.y().ceil() as usize) {
+        x = x_next;
+        let line_offset = shape.offset(y, 0); // current line offset in the data array
+        let dy = ((y + 1) as Scalar).min(p1.y()) - (y as Scalar).max(p0.y());
+        // signed y difference
+        let d = dir * dy;
+        // find next x position
+        x_next = x + dxdy * dy;
+        // order (x, x_next) from smaller value x0 to bigger x1
+        let (x0, x1) = if x < x_next { (x, x_next) } else { (x_next, x) };
+        // lower bound of effected x pixels
+        let x0_floor = x0.floor();
+        let x0i = x0_floor as i32;
+        // uppwer bound of effected x pixels
+        let x1_ceil = x1.ceil();
+        let x1i = x1_ceil as i32;
+        if x1i <= x0i + 1 {
+            // only goes through one pixel (with the total coverage of `d` spread over two pixels)
+            let xmf = 0.5 * (x + x_next) - x0_floor; // effective height
+            data[line_offset + (x0i as usize) * stride] += d * (1.0 - xmf);
+            data[line_offset + ((x0i + 1) as usize) * stride] += d * xmf;
         } else {
-            self.data.get(x + y * self.width)
-        }
-    }
-
-    #[inline]
-    pub fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut C> {
-        if x >= self.width {
-            None
-        } else {
-            self.data.get_mut(x + y * self.width)
-        }
-    }
-
-    fn to_ppm<W>(&self, mut w: W) -> Result<(), std::io::Error>
-    where
-        C: Color,
-        W: Write,
-    {
-        write!(w, "P6 {} {} 255 ", self.width, self.height)?;
-        for c in self.data.iter() {
-            w.write_all(&c.to_rgb())?;
-        }
-        Ok(())
-    }
-
-    fn to_png<W>(&self, w: W) -> Result<(), png::EncodingError>
-    where
-        C: Color,
-        W: Write,
-    {
-        let mut encoder = png::Encoder::new(w, self.width as u32, self.height as u32);
-        encoder.set_color(png::ColorType::RGBA);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header()?;
-        let mut stream_writer = writer.stream_writer();
-        for color in self.data.iter() {
-            stream_writer.write_all(&color.to_rgba())?;
-        }
-        stream_writer.flush()?;
-        Ok(())
-    }
-}
-
-impl Image<Scalar> {
-    fn coverage_line(&mut self, line: Line) {
-        // TODO:
-        //    - bounds check
-        //    - split line at borders
-        let Line([p0, p1]) = line;
-        if (p0.y() - p1.y()).abs() < EPSILON {
-            // line does not introduce any signed converage
-            return;
-        }
-        let (dir, p0, p1) = if p0.y() < p1.y() {
-            (1.0, p0, p1)
-        } else {
-            (-1.0, p1, p0)
-        };
-        let dxdy = (p1.x() - p0.x()) / (p1.y() - p0.y());
-        // find first point to trace. since we are going to interate over y's
-        // we should pick min(y , p0.y) as a starting y point, and adjust x
-        // accordingly
-        let y = p0.y() as usize; // = max(p0.y(), 0) as usize
-        let mut x = if p0.y() < 0.0 {
-            p0.x() - p0.y() * dxdy
-        } else {
-            p0.x()
-        };
-        let mut x_next = x;
-        for y in y..min(self.height, p1.y().ceil() as usize) {
-            x = x_next;
-            let line_offset = y * self.width; // current line offset in data array
-            let dy = ((y + 1) as Scalar).min(p1.y()) - (y as Scalar).max(p0.y());
-            // signed y difference
-            let d = dir * dy;
-            // find next x position
-            x_next = x + dxdy * dy;
-            // order (x, x_next) from smaller value x0 to bigger x1
-            let (x0, x1) = if x < x_next { (x, x_next) } else { (x_next, x) };
-            // lower bound of effected x pixels
-            let x0_floor = x0.floor();
-            let x0i = x0_floor as i32;
-            // uppwer bound of effected x pixels
-            let x1_ceil = x1.ceil();
-            let x1i = x1_ceil as i32;
-            if x1i <= x0i + 1 {
-                // only goes through one pixel
-                let xmf = 0.5 * (x + x_next) - x0_floor; // effective height
-                self.data[line_offset + x0i as usize] += d * (1.0 - xmf);
-                self.data[line_offset + (x0i + 1) as usize] += d * xmf;
+            let s = (x1 - x0).recip();
+            let x0f = x0 - x0_floor; // fractional part of x0
+            let x1f = x1 - x1_ceil + 1.0; // fractional part of x1
+            let a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f); // fractional area of the pixel with smallest x
+            let am = 0.5 * s * x1f * x1f; // fractional area of the pixel with largest x
+            data[line_offset + (x0i as usize) * stride] += d * a0;
+            if x1i == x0i + 2 {
+                // only two pixels are covered
+                data[line_offset + ((x0i + 1) as usize) * stride] += d * (1.0 - a0 - am);
             } else {
-                let s = (x1 - x0).recip();
-                let x0f = x0 - x0_floor; // fractional part of x0
-                let x1f = x1 - x1_ceil + 1.0; // fractional part of x1
-                let a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f); // area of the pixel with smallest x
-                let am = 0.5 * s * x1f * x1f; // area of the pixel with largest x
-                self.data[line_offset + x0i as usize] += d * a0;
-                if x1i == x0i + 2 {
-                    // only two pixels are covered
-                    self.data[line_offset + (x0i + 1) as usize] += d * (1.0 - a0 - am);
-                } else {
-                    // second pixel
-                    let a1 = s * (1.5 - x0f);
-                    self.data[line_offset + (x0i + 1) as usize] += d * (a1 - a0);
-                    // second .. last pixels
-                    for xi in x0i + 2..x1i - 1 {
-                        self.data[line_offset + xi as usize] += d * s;
-                    }
-                    // last pixel
-                    let a2 = a1 + (x1i - x0i - 3) as Scalar * s;
-                    self.data[line_offset + (x1i - 1) as usize] += d * (1.0 - a2 - am);
+                // second pixel
+                let a1 = s * (1.5 - x0f);
+                data[line_offset + ((x0i + 1) as usize) * stride] += d * (a1 - a0);
+                // (second, last) pixels
+                for xi in x0i + 2..x1i - 1 {
+                    data[line_offset + (xi as usize) * stride] += d * s;
                 }
-                self.data[line_offset + x1i as usize] += d * am
+                // last pixel
+                let a2 = a1 + (x1i - x0i - 3) as Scalar * s;
+                data[line_offset + ((x1i - 1) as usize) * stride] += d * (1.0 - a2 - am);
             }
+            data[line_offset + (x1i as usize) * stride] += d * am
         }
     }
+}
 
-    /// Convert signed coverage to mask in-place
-    pub fn coverage_to_mask(&mut self, fill_rule: FillRule) {
-        match fill_rule {
-            FillRule::NonZero => {
-                for y in 0..self.height {
-                    let mut acc = 0.0;
-                    for x in 0..self.width {
-                        let offset = y * self.width + x;
-                        acc += self.data[offset];
+pub fn coverage_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_rule: FillRule) {
+    let shape = surf.shape();
+    let data = surf.data_mut();
+    match fill_rule {
+        FillRule::NonZero => {
+            for y in 0..shape.height {
+                let mut acc = 0.0;
+                for x in 0..shape.width {
+                    let offset = shape.offset(y, x);
+                    acc += data[offset];
 
-                        let value = acc.abs();
-                        self.data[offset] = if value > 1.0 {
-                            1.0
-                        } else if value < 1e-6 {
-                            0.0
-                        } else {
-                            value
-                        };
-                    }
+                    let value = acc.abs();
+                    data[offset] = if value > 1.0 {
+                        1.0
+                    } else if value < 1e-6 {
+                        0.0
+                    } else {
+                        value
+                    };
                 }
             }
-            FillRule::EvenOdd => {
-                for y in 0..self.height {
-                    let mut acc = 0.0;
-                    for x in 0..self.width {
-                        let offset = y * self.width + x;
-                        acc += self.data[offset];
+        }
+        FillRule::EvenOdd => {
+            for y in 0..shape.height {
+                let mut acc = 0.0;
+                for x in 0..shape.width {
+                    let offset = shape.offset(y, x);
+                    acc += data[offset];
 
-                        self.data[offset] = ((acc + 1.0).rem_euclid(2.0) - 1.0).abs()
-                    }
+                    data[offset] = ((acc + 1.0).rem_euclid(2.0) - 1.0).abs()
                 }
             }
         }
     }
 }
 
-impl<C> fmt::Debug for Image<C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Image(width={}, height={}, color={})",
-            self.width,
-            self.height,
-            std::any::type_name::<C>(),
-        )
+fn surf_to_ppm<S, W>(surf: S, mut w: W) -> Result<(), std::io::Error>
+where
+    S: Surface,
+    S::Item: Color,
+    W: Write,
+{
+    write!(w, "P6 {} {} 255 ", surf.width(), surf.height())?;
+    for color in surf.iter() {
+        w.write_all(&color.to_rgb())?;
     }
+    Ok(())
+}
+
+fn surf_to_png<S, W>(surf: S, w: W) -> Result<(), png::EncodingError>
+where
+    S: Surface,
+    S::Item: Color,
+    W: Write,
+{
+    let mut encoder = png::Encoder::new(w, surf.width() as u32, surf.height() as u32);
+    encoder.set_color(png::ColorType::RGBA);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header()?;
+    let mut stream_writer = writer.stream_writer();
+    for color in surf.iter() {
+        stream_writer.write_all(&color.to_rgba())?;
+    }
+    stream_writer.flush()?;
+    Ok(())
 }
 
 // ------------------------------------------------------------------------------
 // Playground
 // ------------------------------------------------------------------------------
-
 pub type Error = Box<dyn std::error::Error>;
 
 pub fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
@@ -1602,6 +1554,9 @@ pub fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
 }
 
 pub const SQUIRREL: &str = "M12 1C9.79 1 8 2.31 8 3.92c0 1.94.5 3.03 0 6.08 0-4.5-2.77-6.34-4-6.34.05-.5-.48-.66-.48-.66s-.22.11-.3.34c-.27-.31-.56-.27-.56-.27l-.13.58S.7 4.29 .68 6.87c.2.33 1.53.6 2.47.43.89.05.67.79.47.99C2.78 9.13 2 8 1 8S0 9 1 9s1 1 3 1c-3.09 1.2 0 4 0 4H3c-1 0-1 1-1 1h6c3 0 5-1 5-3.47 0-.85-.43-1.79 -1-2.53-1.11-1.46.23-2.68 1-2 .77.68 3 1 3-2 0-2.21-1.79-4-4-4zM2.5 6 c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z";
+
+pub const VERIFIED: &str = "M7.67 14.72H8.38L10.1 13H12.5L13 12.5V10.08L14.74 8.36004V7.65004L13.03 5.93004V3.49004L12.53 3.00004H10.1L8.38 1.29004H7.67L6 3.00004H3.53L3 3.50004V5.93004L1.31 7.65004V8.36004L3 10.08V12.5L3.53 13H6L7.67 14.72ZM6.16 12H4V9.87004L3.88 9.52004L2.37 8.00004L3.85 6.49004L4 6.14004V4.00004H6.16L6.52 3.86004L8 2.35004L9.54 3.86004L9.89 4.00004H12V6.14004L12.17 6.49004L13.69 8.00004L12.14 9.52004L12 9.87004V12H9.89L9.51 12.15L8 13.66L6.52 12.14L6.16 12ZM6.73004 10.4799H7.44004L11.21 6.71L10.5 6L7.09004 9.41991L5.71 8.03984L5 8.74984L6.73004 10.4799Z";
+
 pub const NOMOVE: &str = "M50,100 0,50 25,25Z L100,50 75,25Z";
 pub const STAR: &str = "M50,0 21,90 98,35 2,35 79,90z M110,0 h90 v90 h-90 z M130,20 h50 v50 h-50 zM210,0  h90 v90 h-90 z M230,20 v50 h50 v-50 z";
 pub const ARCS: &str = "M600,350 l 50,-25a80,60 -30 1,1 50,-25 l 50,-25a25,50 -30 0,1 50,-25 l 50,-25a25,75 -30 0,1 50,-25 l 50,-25a25,100 -30 0,1 50,-25 l 50,-25";
@@ -1621,11 +1576,15 @@ fn main() -> Result<(), Error> {
     let path = path_load("material-big.path")?;
     let tr = Transform::default(); //.scale(12.0, 12.0);
     let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
-    println!("{:?}", mask);
 
     if let Some(mask) = mask {
-        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.png")?);
-        timeit("[save]", || mask.to_png(&mut image))?;
+        if false {
+            let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.png")?);
+            timeit("[save:surf]", || surf_to_png(&mask, &mut image))?;
+        } else {
+            let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.ppm")?);
+            timeit("[save:surf]", || surf_to_ppm(&mask, &mut image))?;
+        }
     }
 
     let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
