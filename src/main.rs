@@ -38,7 +38,7 @@ where
 fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
     let mut result = [None; 2];
     let det = b * b - 4.0 * a * c;
-    if (det - 0.0).abs() < EPSILON {
+    if det.abs() < EPSILON {
         result[0] = Some(-b / (2.0 * a));
     } else if det > 0.0 {
         let sq = det.sqrt();
@@ -49,10 +49,14 @@ fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
 }
 
 fn scalar_fmt(f: &mut fmt::Formatter<'_>, value: Scalar) -> fmt::Result {
-    if value > 9999.0 || value <= 0.0001 {
-        write!(f, "{:e}", value)
+    if value.abs() < EPSILON {
+        write!(f, "0.0")
     } else {
-        write!(f, "{:.3}", value)
+        if value.abs() > 9999.0 || value.abs() <= 0.0001 {
+            write!(f, "{:.3e}", value)
+        } else {
+            write!(f, "{:.3}", value)
+        }
     }
 }
 
@@ -71,6 +75,11 @@ impl fmt::Debug for Point {
 }
 
 impl Point {
+    #[inline]
+    pub fn new(x: Scalar, y: Scalar) -> Self {
+        Self([x, y])
+    }
+
     #[inline]
     pub fn x(&self) -> Scalar {
         self.0[0]
@@ -354,6 +363,11 @@ impl Line {
         self.0[1]
     }
 
+    pub fn at(&self, t: Scalar) -> Point {
+        let Self([p0, p1]) = self;
+        (1.0 - t) * p0 + t * p1
+    }
+
     pub fn bbox(&self) -> BBox {
         let Self([p0, p1]) = self;
         BBox::new(*p0, *p1)
@@ -399,6 +413,13 @@ impl Quad {
 
     pub fn to(&self) -> Point {
         self.0[2]
+    }
+
+    pub fn at(&self, t: Scalar) -> Point {
+        let Self([p0, p1, p2]) = self;
+        let (t1, t_1) = (t, 1.0 - t);
+        let (t2, t_2) = (t1 * t1, t_1 * t_1);
+        t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2
     }
 
     pub fn smooth(&self) -> Point {
@@ -498,7 +519,7 @@ impl Cubic {
         (left, right)
     }
 
-    fn bbox(&self) -> BBox {
+    pub fn bbox(&self) -> BBox {
         let Self([p0, p1, p2, p3]) = self;
         let bbox = BBox::new(*p0, *p3);
         if bbox.contains(*p1) && bbox.contains(*p2) {
@@ -1396,14 +1417,59 @@ impl Color for Scalar {
 fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
     // y - is a row
     // x - is a column
-    // TODO:
-    //    - bounds check
-    //    - split line at borders
+    let Line([p0, p1]) = line;
+
+    // handle lines that are intersecting `x == surf.width()`
+    // - just throw away part that has x > surf.width for all points
+    let width = surf.width() as Scalar - 1.0;
+    let line = if p0.x() > width || p1.x() > width {
+        if p0.x() > width && p1.x() > width {
+            return;
+        }
+        let t = (p0.x() - width) / (p0.x() - p1.x());
+        let mid = Point::new(width, (1.0 - t) * p0.y() + t * p1.y());
+        if p0.x() < width {
+            Line::new(p0, mid)
+        } else {
+            Line::new(mid, p1)
+        }
+    } else {
+        line
+    };
+
+    // handle lines that are intersecting `x == 0.0`
+    // - line is splitted in left (for all points where x < 0.0) and the mid part
+    // - left part is converted to a vertical line that spans same y's and x == 0.0
+    // - left part is rastterized recursivelly, and mid part rasterized after this
+    let line = if p0.x() < 0.0 || p1.x() < 0.0 {
+        let (vertical, line) = if p1.x() > 0.0 || p0.x() > 0.0 {
+            let t = p0.x() / (p0.x() - p1.x());
+            let mid = Point::new(0.0, (1.0 - t) * p0.y() + t * p1.y());
+            if p1.x() > 0.0 {
+                let p = Point::new(0.0, p0.y());
+                (Line::new(p, mid), Line::new(mid, p1))
+            } else {
+                let p = Point::new(0.0, p1.y());
+                (Line::new(mid, p), Line::new(p0, mid))
+            }
+        } else {
+            (
+                Line::new((0.0, p0.y()), (0.0, p1.y())),
+                Line::new((0.0, 0.0), (0.0, 0.0)),
+            )
+        };
+        // calculate coverage by the line left of `x == 0.0`
+        rasterize_line(surf.view_mut(.., ..), vertical);
+        line
+    } else {
+        line
+    };
+
+    let Line([p0, p1]) = line;
     let shape = surf.shape();
     let data = surf.data_mut();
     let stride = shape.col_stride;
 
-    let Line([p0, p1]) = line;
     if (p0.y() - p1.y()).abs() < EPSILON {
         // line does not introduce any signed converage
         return;
@@ -1540,6 +1606,21 @@ where
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cubic_bbox() {
+        let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
+        let bbox = curve.bbox();
+        assert!((bbox.x() - 87.308).abs() < 0.001);
+        assert!(bbox.y().abs() < 0.001);
+        assert!((bbox.width() - 242.724).abs() < 0.001);
+        assert!((bbox.height() - 125.140).abs() < 0.001);
+    }
+}
+
 // ------------------------------------------------------------------------------
 // Playground
 // ------------------------------------------------------------------------------
@@ -1571,25 +1652,30 @@ pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
 fn main() -> Result<(), Error> {
     env_logger::init();
 
-    // let path = Path::from_str(SQUIRREL)?;
-    // println!("{:#?}", path);
+    // let path = Path::from_str(VERIFIED)?;
+    // let tr = Transform::default().scale(12.0, 12.0);
+
     let path = path_load("material-big.path")?;
-    let tr = Transform::default(); //.scale(12.0, 12.0);
-    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
+    let tr = Transform::default();
 
-    if let Some(mask) = mask {
-        if false {
-            let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.png")?);
-            timeit("[save:surf]", || surf_to_png(&mask, &mut image))?;
-        } else {
-            let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.ppm")?);
-            timeit("[save:surf]", || surf_to_ppm(&mask, &mut image))?;
-        }
+    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd)).unwrap();
+
+    // let path = Path::from_str(VERIFIED)?;
+    // let tr = Transform::default().scale(12.0, 12.0).translate(3.5, 0.0);
+    // let mut mask = SurfaceOwned::new(200, 200);
+    // for line in path.flatten(tr, FLATNESS, true) {
+    //     rasterize_line(&mut mask, line);
+    // }
+    // coverage_to_mask(&mut mask, FillRule::EvenOdd);
+
+    println!("{:?}", mask.shape());
+    if false {
+        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.png")?);
+        timeit("[save:png]", || surf_to_png(&mask, &mut image))?;
+    } else {
+        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.ppm")?);
+        timeit("[save:ppm]", || surf_to_ppm(&mask, &mut image))?;
     }
-
-    let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
-    println!("{:?}", curve);
-    println!("{:?}", curve.bbox());
 
     Ok(())
 }
