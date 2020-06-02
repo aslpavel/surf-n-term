@@ -138,168 +138,38 @@ impl Mul for Point {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Transform([Scalar; 6]);
+pub trait Curve {
+    // Iterator returned by flatten method
+    type FlattenIter: Iterator<Item = Line>;
 
-impl Default for Transform {
-    fn default() -> Self {
-        Self([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
-    }
-}
+    /// Convert curve to an iterator over line segments
+    fn flatten(&self, tr: Transform, flatness: Scalar) -> Self::FlattenIter;
 
-impl Transform {
-    pub fn apply(&self, point: Point) -> Point {
-        let Self([m00, m01, m02, m10, m11, m12]) = self;
-        let Point([x, y]) = point;
-        Point([x * m00 + y * m01 + m02, x * m10 + y * m11 + m12])
-    }
-
-    pub fn invert(&self) -> Option<Self> {
-        // inv([[M, v], [0, 1]]) = [[inv(M), - inv(M) * v], [0, 1]]
-        let Self([m00, m01, m02, m10, m11, m12]) = self;
-        let det = m00 * m11 - m10 * m01;
-        if det.abs() <= EPSILON {
-            return None;
-        }
-        let o00 = m11 / det;
-        let o01 = -m01 / det;
-        let o10 = -m10 / det;
-        let o11 = m00 / det;
-        let o02 = -o00 * m02 - o01 * m12;
-        let o12 = -o10 * m02 - o11 * m12;
-        Some(Self([o00, o01, o02, o10, o11, o12]))
-    }
-
-    pub fn translate(&self, tx: Scalar, ty: Scalar) -> Self {
-        self.matmul(&Self([1.0, 0.0, tx, 0.0, 1.0, ty]))
-    }
-
-    pub fn scale(&self, sx: Scalar, sy: Scalar) -> Self {
-        self.matmul(&Self([sx, 0.0, 0.0, 0.0, sy, 0.0]))
-    }
-
-    pub fn rotate(&self, a: Scalar) -> Self {
-        let (sin, cos) = a.sin_cos();
-        self.matmul(&Self([cos, -sin, 0.0, sin, cos, 0.0]))
-    }
-
-    pub fn rotate_around(&self, a: Scalar, p: impl Into<Point>) -> Self {
-        let p = p.into();
-        self.translate(p.x(), p.y())
-            .rotate(a)
-            .translate(-p.x(), -p.y())
-    }
-
-    pub fn skew(&self, ax: Scalar, ay: Scalar) -> Self {
-        self.matmul(&Self([1.0, ax.tan(), 0.0, ay.tan(), 1.0, 0.0]))
-    }
-
-    pub fn matmul(&self, other: &Transform) -> Self {
-        let Self([s00, s01, s02, s10, s11, s12]) = self;
-        let Self([o00, o01, o02, o10, o11, o12]) = other;
-
-        // s00, s01, s02 | o00, o01, o02
-        // s10, s11, s12 | o10, o11, o12
-        // 0  , 0  , 1   | 0  , 0  , 1
-        Self([
-            s00 * o00 + s01 * o10,
-            s00 * o01 + s01 * o11,
-            s00 * o02 + s01 * o12 + s02,
-            s10 * o00 + s11 * o10,
-            s10 * o01 + s11 * o11,
-            s10 * o02 + s11 * o12 + s12,
-        ])
-    }
-}
-
-pub trait Transformable {
+    /// Apply affine transformation to the curve
     fn transform(&self, tr: Transform) -> Self;
-}
 
-#[derive(Clone, Copy)]
-pub struct BBox {
-    min: Point,
-    max: Point,
-}
+    /// Point at which curve starts
+    fn from(&self) -> Point;
 
-impl BBox {
-    pub fn new(p0: Point, p1: Point) -> Self {
-        let Point([x0, y0]) = p0;
-        let Point([x1, y1]) = p1;
-        let (x0, x1) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
-        let (y0, y1) = if y0 <= y1 { (y0, y1) } else { (y1, y0) };
-        Self {
-            min: Point([x0, y0]),
-            max: Point([x1, y1]),
-        }
-    }
+    /// Point at which curve ends
+    fn to(&self) -> Point;
 
-    #[inline]
-    pub fn x(&self) -> Scalar {
-        self.min.x()
-    }
+    /// Parametric representation of the curve at `t` (0.0 .. 1.0)
+    fn at(&self, t: Scalar) -> Point;
 
-    #[inline]
-    pub fn y(&self) -> Scalar {
-        self.min.y()
-    }
-
-    #[inline]
-    pub fn width(&self) -> Scalar {
-        self.max.x() - self.min.x()
-    }
-
-    #[inline]
-    pub fn height(&self) -> Scalar {
-        self.max.y() - self.min.y()
-    }
-
-    pub fn contains(&self, point: Point) -> bool {
-        let Point([x, y]) = point;
-        self.min.x() <= x && x <= self.max.x() && self.min.y() <= y && y <= self.max.y()
-    }
-
-    pub fn extend(&self, point: Point) -> Self {
-        let Point([x, y]) = point;
-        let Point([x0, y0]) = self.min;
-        let Point([x1, y1]) = self.max;
-        let (x0, x1) = if x < x0 {
-            (x, x1)
-        } else if x > x1 {
-            (x0, x)
-        } else {
-            (x0, x1)
-        };
-        let (y0, y1) = if y < y0 {
-            (y, y1)
-        } else if y > y1 {
-            (y0, y)
-        } else {
-            (y0, y1)
-        };
-        Self {
-            min: Point([x0, y0]),
-            max: Point([x1, y1]),
-        }
-    }
-}
-
-impl fmt::Debug for BBox {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BBox ")?;
-        scalar_fmt(f, self.x())?;
-        write!(f, ", ")?;
-        scalar_fmt(f, self.y())?;
-        write!(f, ", ")?;
-        scalar_fmt(f, self.width())?;
-        write!(f, ", ")?;
-        scalar_fmt(f, self.height())
-    }
+    /// Bounding box of the curve
+    fn bbox(&self) -> BBox;
 }
 
 // Line curve
 #[derive(Clone, Copy)]
 pub struct Line([Point; 2]);
+
+impl Line {
+    pub fn new<P: Into<Point>>(p0: P, p1: P) -> Self {
+        Self([p0.into(), p1.into()])
+    }
+}
 
 impl fmt::Debug for Line {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -308,38 +178,34 @@ impl fmt::Debug for Line {
     }
 }
 
-impl Line {
-    pub fn new<P: Into<Point>>(p0: P, p1: P) -> Self {
-        Self([p0.into(), p1.into()])
-    }
+impl Curve for Line {
+    type FlattenIter = LineFlattenIter;
 
-    pub fn flatten(&self, tr: Transform) -> LineFlattenIter {
+    fn flatten(&self, tr: Transform, _: Scalar) -> Self::FlattenIter {
         LineFlattenIter(Some(self.transform(tr)))
     }
 
-    pub fn from(&self) -> Point {
+    fn transform(&self, tr: Transform) -> Self {
+        let Line([p0, p1]) = self;
+        Self([tr.apply(*p0), tr.apply(*p1)])
+    }
+
+    fn from(&self) -> Point {
         self.0[0]
     }
 
-    pub fn to(&self) -> Point {
+    fn to(&self) -> Point {
         self.0[1]
     }
 
-    pub fn at(&self, t: Scalar) -> Point {
+    fn at(&self, t: Scalar) -> Point {
         let Self([p0, p1]) = self;
         (1.0 - t) * p0 + t * p1
     }
 
-    pub fn bbox(&self) -> BBox {
+    fn bbox(&self) -> BBox {
         let Self([p0, p1]) = self;
         BBox::new(*p0, *p1)
-    }
-}
-
-impl Transformable for Line {
-    fn transform(&self, tr: Transform) -> Self {
-        let Line([p0, p1]) = self;
-        Self([tr.apply(*p0), tr.apply(*p1)])
     }
 }
 
@@ -369,31 +235,42 @@ impl Quad {
         Self([p0.into(), p1.into(), p2.into()])
     }
 
-    pub fn from(&self) -> Point {
-        self.0[0]
-    }
-
-    pub fn to(&self) -> Point {
-        self.0[2]
-    }
-
-    pub fn at(&self, t: Scalar) -> Point {
-        let Self([p0, p1, p2]) = self;
-        let (t1, t_1) = (t, 1.0 - t);
-        let (t2, t_2) = (t1 * t1, t_1 * t_1);
-        t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2
-    }
-
     pub fn smooth(&self) -> Point {
         let Quad([_p0, p1, p2]) = self;
         2.0 * p2 - *p1
     }
 }
 
-impl Transformable for Quad {
+impl Curve for Quad {
+    type FlattenIter = CubicFlattenIter;
+
+    fn flatten(&self, tr: Transform, flatness: Scalar) -> Self::FlattenIter {
+        let cubic: Cubic = From::from(*self);
+        cubic.flatten(tr, flatness)
+    }
+
     fn transform(&self, tr: Transform) -> Self {
         let Quad([p0, p1, p2]) = self;
         Self([tr.apply(*p0), tr.apply(*p1), tr.apply(*p2)])
+    }
+
+    fn from(&self) -> Point {
+        self.0[0]
+    }
+
+    fn to(&self) -> Point {
+        self.0[2]
+    }
+
+    fn at(&self, t: Scalar) -> Point {
+        let Self([p0, p1, p2]) = self;
+        let (t1, t_1) = (t, 1.0 - t);
+        let (t2, t_2) = (t1 * t1, t_1 * t_1);
+        t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2
+    }
+
+    fn bbox(&self) -> BBox {
+        todo!()
     }
 }
 
@@ -411,29 +288,6 @@ impl fmt::Debug for Cubic {
 impl Cubic {
     pub fn new<P: Into<Point>>(p0: P, p1: P, p2: P, p3: P) -> Self {
         Self([p0.into(), p1.into(), p2.into(), p3.into()])
-    }
-
-    pub fn flatten(&self, tr: Transform, flatness: Scalar) -> CubicFlattenIter {
-        CubicFlattenIter {
-            flatness: 16.0 * flatness * flatness,
-            cubics: vec![self.transform(tr)],
-        }
-    }
-
-    pub fn from(&self) -> Point {
-        self.0[0]
-    }
-
-    pub fn to(&self) -> Point {
-        self.0[3]
-    }
-
-    pub fn at(&self, t: Scalar) -> Point {
-        let Self([p0, p1, p2, p3]) = self;
-        let (t1, t_1) = (t, 1.0 - t);
-        let (t2, t_2) = (t1 * t1, t_1 * t_1);
-        let (t3, t_3) = (t2 * t1, t_2 * t_1);
-        t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3
     }
 
     pub fn smooth(&self) -> Point {
@@ -480,8 +334,40 @@ impl Cubic {
         ]);
         (left, right)
     }
+}
 
-    pub fn bbox(&self) -> BBox {
+impl Curve for Cubic {
+    type FlattenIter = CubicFlattenIter;
+
+    fn flatten(&self, tr: Transform, flatness: Scalar) -> CubicFlattenIter {
+        CubicFlattenIter {
+            flatness: 16.0 * flatness * flatness,
+            cubics: vec![self.transform(tr)],
+        }
+    }
+
+    fn transform(&self, tr: Transform) -> Self {
+        let Cubic([p0, p1, p2, p3]) = self;
+        Self([tr.apply(*p0), tr.apply(*p1), tr.apply(*p2), tr.apply(*p3)])
+    }
+
+    fn from(&self) -> Point {
+        self.0[0]
+    }
+
+    fn to(&self) -> Point {
+        self.0[3]
+    }
+
+    fn at(&self, t: Scalar) -> Point {
+        let Self([p0, p1, p2, p3]) = self;
+        let (t1, t_1) = (t, 1.0 - t);
+        let (t2, t_2) = (t1 * t1, t_1 * t_1);
+        let (t3, t_3) = (t2 * t1, t_2 * t_1);
+        t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3
+    }
+
+    fn bbox(&self) -> BBox {
         let Self([p0, p1, p2, p3]) = self;
         let bbox = BBox::new(*p0, *p3);
         if bbox.contains(*p1) && bbox.contains(*p2) {
@@ -498,13 +384,6 @@ impl Cubic {
             .chain(quadratic_solve(a1, b1, c1).iter().flatten())
             .filter(|t| **t > 0.0 && **t < 1.0)
             .fold(bbox, |bbox, t| bbox.extend(self.at(*t)))
-    }
-}
-
-impl Transformable for Cubic {
-    fn transform(&self, tr: Transform) -> Self {
-        let Cubic([p0, p1, p2, p3]) = self;
-        Self([tr.apply(*p0), tr.apply(*p1), tr.apply(*p2), tr.apply(*p3)])
     }
 }
 
@@ -635,26 +514,42 @@ impl ElipArc {
         }
     }
 
-    pub fn at(&self, t: Scalar) -> Point {
-        let (angle_sin, angle_cos) = (self.eta + t * self.eta_delta).sin_cos();
-        let point = Point([self.rx * angle_cos, self.ry * angle_sin]);
-        Transform::default().rotate(self.phi).apply(point) + self.center
-    }
-
-    pub fn from(&self) -> Point {
-        self.at(0.0)
-    }
-
-    pub fn to(&self) -> Point {
-        self.at(1.0)
-    }
-
     pub fn to_cubic(&self) -> ElipArcCubicIter {
         ElipArcCubicIter::new(*self)
     }
 
     pub fn flatten(&self, tr: Transform, flatness: Scalar) -> ElipArcFlattenIter {
         ElipArcFlattenIter::new(*self, tr, flatness)
+    }
+}
+
+impl Curve for ElipArc {
+    type FlattenIter = ElipArcFlattenIter;
+
+    fn flatten(&self, tr: Transform, flatness: Scalar) -> ElipArcFlattenIter {
+        ElipArcFlattenIter::new(*self, tr, flatness)
+    }
+
+    fn transform(&self, _tr: Transform) -> ElipArc {
+        todo!()
+    }
+
+    fn from(&self) -> Point {
+        self.at(0.0)
+    }
+
+    fn to(&self) -> Point {
+        self.at(1.0)
+    }
+
+    fn at(&self, t: Scalar) -> Point {
+        let (angle_sin, angle_cos) = (self.eta + t * self.eta_delta).sin_cos();
+        let point = Point([self.rx * angle_cos, self.ry * angle_sin]);
+        Transform::default().rotate(self.phi).apply(point) + self.center
+    }
+
+    fn bbox(&self) -> BBox {
+        todo!()
     }
 }
 
@@ -784,11 +679,12 @@ impl fmt::Debug for Segment {
     }
 }
 
-impl Segment {
-    /// Split path segment into lines with specified tolerance.
-    pub fn flatten(&self, tr: Transform, flatness: Scalar) -> SegmentFlattenIter {
+impl Curve for Segment {
+    type FlattenIter = SegmentFlattenIter;
+
+    fn flatten(&self, tr: Transform, flatness: Scalar) -> SegmentFlattenIter {
         match self {
-            Segment::Line(line) => SegmentFlattenIter::Line(line.flatten(tr)),
+            Segment::Line(line) => SegmentFlattenIter::Line(line.flatten(tr, flatness)),
             Segment::Quad(quad) => {
                 let cubic: Cubic = From::from(*quad);
                 SegmentFlattenIter::Cubic(cubic.flatten(tr, flatness))
@@ -798,7 +694,16 @@ impl Segment {
         }
     }
 
-    pub fn from(&self) -> Point {
+    fn transform(&self, tr: Transform) -> Self {
+        match self {
+            Segment::Line(line) => line.transform(tr).into(),
+            Segment::Quad(quad) => quad.transform(tr).into(),
+            Segment::Cubic(cubic) => cubic.transform(tr).into(),
+            Segment::ElipArc(arc) => arc.transform(tr).into(),
+        }
+    }
+
+    fn from(&self) -> Point {
         match self {
             Segment::Line(line) => line.from(),
             Segment::Quad(quad) => quad.from(),
@@ -807,12 +712,30 @@ impl Segment {
         }
     }
 
-    pub fn to(&self) -> Point {
+    fn to(&self) -> Point {
         match self {
             Segment::Line(line) => line.to(),
             Segment::Quad(quad) => quad.to(),
             Segment::Cubic(cubic) => cubic.to(),
             Segment::ElipArc(arc) => arc.to(),
+        }
+    }
+
+    fn at(&self, t: Scalar) -> Point {
+        match self {
+            Segment::Line(line) => line.at(t),
+            Segment::Quad(quad) => quad.at(t),
+            Segment::Cubic(cubic) => cubic.at(t),
+            Segment::ElipArc(arc) => arc.at(t),
+        }
+    }
+
+    fn bbox(&self) -> BBox {
+        match self {
+            Segment::Line(line) => line.bbox(),
+            Segment::Quad(quad) => quad.bbox(),
+            Segment::Cubic(cubic) => cubic.bbox(),
+            Segment::ElipArc(arc) => arc.bbox(),
         }
     }
 }
@@ -886,11 +809,11 @@ impl SubPath {
     }
 
     fn from(&self) -> Option<Point> {
-        self.segments.first().map(Segment::from)
+        self.segments.first().map(Curve::from)
     }
 
     fn to(&self) -> Option<Point> {
-        self.segments.last().map(Segment::to)
+        self.segments.last().map(Curve::to)
     }
 }
 
@@ -1336,6 +1259,164 @@ impl<'a> PathParser<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Transform([Scalar; 6]);
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+    }
+}
+
+impl Transform {
+    pub fn apply(&self, point: Point) -> Point {
+        let Self([m00, m01, m02, m10, m11, m12]) = self;
+        let Point([x, y]) = point;
+        Point([x * m00 + y * m01 + m02, x * m10 + y * m11 + m12])
+    }
+
+    pub fn invert(&self) -> Option<Self> {
+        // inv([[M, v], [0, 1]]) = [[inv(M), - inv(M) * v], [0, 1]]
+        let Self([m00, m01, m02, m10, m11, m12]) = self;
+        let det = m00 * m11 - m10 * m01;
+        if det.abs() <= EPSILON {
+            return None;
+        }
+        let o00 = m11 / det;
+        let o01 = -m01 / det;
+        let o10 = -m10 / det;
+        let o11 = m00 / det;
+        let o02 = -o00 * m02 - o01 * m12;
+        let o12 = -o10 * m02 - o11 * m12;
+        Some(Self([o00, o01, o02, o10, o11, o12]))
+    }
+
+    pub fn translate(&self, tx: Scalar, ty: Scalar) -> Self {
+        self.matmul(&Self([1.0, 0.0, tx, 0.0, 1.0, ty]))
+    }
+
+    pub fn scale(&self, sx: Scalar, sy: Scalar) -> Self {
+        self.matmul(&Self([sx, 0.0, 0.0, 0.0, sy, 0.0]))
+    }
+
+    pub fn rotate(&self, a: Scalar) -> Self {
+        let (sin, cos) = a.sin_cos();
+        self.matmul(&Self([cos, -sin, 0.0, sin, cos, 0.0]))
+    }
+
+    pub fn rotate_around(&self, a: Scalar, p: impl Into<Point>) -> Self {
+        let p = p.into();
+        self.translate(p.x(), p.y())
+            .rotate(a)
+            .translate(-p.x(), -p.y())
+    }
+
+    pub fn skew(&self, ax: Scalar, ay: Scalar) -> Self {
+        self.matmul(&Self([1.0, ax.tan(), 0.0, ay.tan(), 1.0, 0.0]))
+    }
+
+    pub fn matmul(&self, other: &Transform) -> Self {
+        let Self([s00, s01, s02, s10, s11, s12]) = self;
+        let Self([o00, o01, o02, o10, o11, o12]) = other;
+
+        // s00, s01, s02 | o00, o01, o02
+        // s10, s11, s12 | o10, o11, o12
+        // 0  , 0  , 1   | 0  , 0  , 1
+        Self([
+            s00 * o00 + s01 * o10,
+            s00 * o01 + s01 * o11,
+            s00 * o02 + s01 * o12 + s02,
+            s10 * o00 + s11 * o10,
+            s10 * o01 + s11 * o11,
+            s10 * o02 + s11 * o12 + s12,
+        ])
+    }
+}
+
+/// Bounding box
+#[derive(Clone, Copy)]
+pub struct BBox {
+    min: Point,
+    max: Point,
+}
+
+impl BBox {
+    pub fn new(p0: Point, p1: Point) -> Self {
+        let Point([x0, y0]) = p0;
+        let Point([x1, y1]) = p1;
+        let (x0, x1) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
+        let (y0, y1) = if y0 <= y1 { (y0, y1) } else { (y1, y0) };
+        Self {
+            min: Point([x0, y0]),
+            max: Point([x1, y1]),
+        }
+    }
+
+    #[inline]
+    pub fn x(&self) -> Scalar {
+        self.min.x()
+    }
+
+    #[inline]
+    pub fn y(&self) -> Scalar {
+        self.min.y()
+    }
+
+    #[inline]
+    pub fn width(&self) -> Scalar {
+        self.max.x() - self.min.x()
+    }
+
+    #[inline]
+    pub fn height(&self) -> Scalar {
+        self.max.y() - self.min.y()
+    }
+
+    /// Determine if the point is inside of the bounding box
+    pub fn contains(&self, point: Point) -> bool {
+        let Point([x, y]) = point;
+        self.min.x() <= x && x <= self.max.x() && self.min.y() <= y && y <= self.max.y()
+    }
+
+    /// Extend bounding box so it would contains provided point
+    pub fn extend(&self, point: Point) -> Self {
+        let Point([x, y]) = point;
+        let Point([x0, y0]) = self.min;
+        let Point([x1, y1]) = self.max;
+        let (x0, x1) = if x < x0 {
+            (x, x1)
+        } else if x > x1 {
+            (x0, x)
+        } else {
+            (x0, x1)
+        };
+        let (y0, y1) = if y < y0 {
+            (y, y1)
+        } else if y > y1 {
+            (y0, y)
+        } else {
+            (y0, y1)
+        };
+        Self {
+            min: Point([x0, y0]),
+            max: Point([x1, y1]),
+        }
+    }
+}
+
+impl fmt::Debug for BBox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BBox ")?;
+        scalar_fmt(f, self.x())?;
+        write!(f, ", ")?;
+        scalar_fmt(f, self.y())?;
+        write!(f, ", ")?;
+        scalar_fmt(f, self.width())?;
+        write!(f, ", ")?;
+        scalar_fmt(f, self.height())
+    }
+}
+
 fn linear_to_srgb(value: Scalar) -> Scalar {
     if value <= 0.0031308 {
         value * 12.92
@@ -1605,12 +1686,10 @@ fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
 fn scalar_fmt(f: &mut fmt::Formatter<'_>, value: Scalar) -> fmt::Result {
     if value.abs() < EPSILON {
         write!(f, "0.0")
+    } else if value.abs() > 9999.0 || value.abs() <= 0.0001 {
+        write!(f, "{:.3e}", value)
     } else {
-        if value.abs() > 9999.0 || value.abs() <= 0.0001 {
-            write!(f, "{:.3e}", value)
-        } else {
-            write!(f, "{:.3}", value)
-        }
+        write!(f, "{:.3}", value)
     }
 }
 
