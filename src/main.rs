@@ -222,7 +222,8 @@ impl Transform {
         self.matmul(&Self([cos, -sin, 0.0, sin, cos, 0.0]))
     }
 
-    pub fn rotate_around(&self, a: Scalar, p: Point) -> Self {
+    pub fn rotate_around(&self, a: Scalar, p: impl Into<Point>) -> Self {
+        let p = p.into();
         self.translate(p.x(), p.y())
             .rotate(a)
             .translate(-p.x(), -p.y())
