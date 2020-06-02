@@ -149,10 +149,10 @@ pub trait Curve {
     fn transform(&self, tr: Transform) -> Self;
 
     /// Point at which curve starts
-    fn from(&self) -> Point;
+    fn start(&self) -> Point;
 
     /// Point at which curve ends
-    fn to(&self) -> Point;
+    fn end(&self) -> Point;
 
     /// Parametric representation of the curve at `t` (0.0 .. 1.0)
     fn at(&self, t: Scalar) -> Point;
@@ -190,11 +190,11 @@ impl Curve for Line {
         Self([tr.apply(*p0), tr.apply(*p1)])
     }
 
-    fn from(&self) -> Point {
+    fn start(&self) -> Point {
         self.0[0]
     }
 
-    fn to(&self) -> Point {
+    fn end(&self) -> Point {
         self.0[1]
     }
 
@@ -245,8 +245,7 @@ impl Curve for Quad {
     type FlattenIter = CubicFlattenIter;
 
     fn flatten(&self, tr: Transform, flatness: Scalar) -> Self::FlattenIter {
-        let cubic: Cubic = From::from(*self);
-        cubic.flatten(tr, flatness)
+        Cubic::from(*self).flatten(tr, flatness)
     }
 
     fn transform(&self, tr: Transform) -> Self {
@@ -254,11 +253,11 @@ impl Curve for Quad {
         Self([tr.apply(*p0), tr.apply(*p1), tr.apply(*p2)])
     }
 
-    fn from(&self) -> Point {
+    fn start(&self) -> Point {
         self.0[0]
     }
 
-    fn to(&self) -> Point {
+    fn end(&self) -> Point {
         self.0[2]
     }
 
@@ -351,11 +350,11 @@ impl Curve for Cubic {
         Self([tr.apply(*p0), tr.apply(*p1), tr.apply(*p2), tr.apply(*p3)])
     }
 
-    fn from(&self) -> Point {
+    fn start(&self) -> Point {
         self.0[0]
     }
 
-    fn to(&self) -> Point {
+    fn end(&self) -> Point {
         self.0[3]
     }
 
@@ -534,11 +533,11 @@ impl Curve for ElipArc {
         todo!()
     }
 
-    fn from(&self) -> Point {
+    fn start(&self) -> Point {
         self.at(0.0)
     }
 
-    fn to(&self) -> Point {
+    fn end(&self) -> Point {
         self.at(1.0)
     }
 
@@ -685,10 +684,7 @@ impl Curve for Segment {
     fn flatten(&self, tr: Transform, flatness: Scalar) -> SegmentFlattenIter {
         match self {
             Segment::Line(line) => SegmentFlattenIter::Line(line.flatten(tr, flatness)),
-            Segment::Quad(quad) => {
-                let cubic: Cubic = From::from(*quad);
-                SegmentFlattenIter::Cubic(cubic.flatten(tr, flatness))
-            }
+            Segment::Quad(quad) => SegmentFlattenIter::Cubic(quad.flatten(tr, flatness)),
             Segment::Cubic(cubic) => SegmentFlattenIter::Cubic(cubic.flatten(tr, flatness)),
             Segment::ElipArc(arc) => SegmentFlattenIter::ElipArc(arc.flatten(tr, flatness)),
         }
@@ -703,21 +699,21 @@ impl Curve for Segment {
         }
     }
 
-    fn from(&self) -> Point {
+    fn start(&self) -> Point {
         match self {
-            Segment::Line(line) => line.from(),
-            Segment::Quad(quad) => quad.from(),
-            Segment::Cubic(cubic) => cubic.from(),
-            Segment::ElipArc(arc) => arc.from(),
+            Segment::Line(line) => line.start(),
+            Segment::Quad(quad) => quad.start(),
+            Segment::Cubic(cubic) => cubic.start(),
+            Segment::ElipArc(arc) => arc.start(),
         }
     }
 
-    fn to(&self) -> Point {
+    fn end(&self) -> Point {
         match self {
-            Segment::Line(line) => line.to(),
-            Segment::Quad(quad) => quad.to(),
-            Segment::Cubic(cubic) => cubic.to(),
-            Segment::ElipArc(arc) => arc.to(),
+            Segment::Line(line) => line.end(),
+            Segment::Quad(quad) => quad.end(),
+            Segment::Cubic(cubic) => cubic.end(),
+            Segment::ElipArc(arc) => arc.end(),
         }
     }
 
@@ -796,8 +792,8 @@ impl SubPath {
         close: bool,
     ) -> impl Iterator<Item = Line> + 'a {
         let last = if self.closed || close {
-            self.to()
-                .and_then(|p1| self.from().map(|p2| Line([p1, p2]).transform(tr)))
+            self.end()
+                .and_then(|p1| self.start().map(|p2| Line([p1, p2]).transform(tr)))
         } else {
             None
         };
@@ -808,12 +804,12 @@ impl SubPath {
             .chain(last)
     }
 
-    fn from(&self) -> Option<Point> {
-        self.segments.first().map(Curve::from)
+    fn start(&self) -> Option<Point> {
+        self.segments.first().map(Curve::start)
     }
 
-    fn to(&self) -> Option<Point> {
-        self.segments.last().map(Curve::to)
+    fn end(&self) -> Option<Point> {
+        self.segments.last().map(Curve::end)
     }
 }
 
@@ -910,9 +906,11 @@ impl PathFlattenIter {
         stack.reserve(size * 2);
         for subpath in path.subpaths.iter().rev() {
             if subpath.closed || close {
-                let line = subpath
-                    .to()
-                    .and_then(|p1| subpath.from().map(|p2| Ok(Line::new(p1, p2).transform(tr))));
+                let line = subpath.end().and_then(|p1| {
+                    subpath
+                        .start()
+                        .map(|p2| Ok(Line::new(p1, p2).transform(tr)))
+                });
                 stack.extend(line);
             }
             for segment in subpath.segments.iter().rev() {
@@ -1047,7 +1045,7 @@ impl<'a> PathParser<'a> {
 
     fn position(&self) -> Result<Point, PathParseError> {
         self.prev_seg
-            .map(|segment| segment.to())
+            .map(|segment| segment.end())
             .ok_or_else(|| self.error("position: current position is missing"))
     }
 
