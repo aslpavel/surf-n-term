@@ -1610,6 +1610,56 @@ where
 mod tests {
     use super::*;
 
+    macro_rules! assert_approx_eq {
+        ( $v0:expr, $v1: expr ) => {{
+            assert!(($v0 - $v1).abs() < EPSILON, "{} != {}", $v0, $v1);
+        }};
+    }
+
+    #[test]
+    fn test_rasterize_line() {
+        let mut surf = SurfaceOwned::new(2, 5);
+
+        // line convers many columns but just one row
+        rasterize_line(&mut surf, Line::new((0.5, 1.0), (3.5, 0.0)));
+        // covered areas per-pixel
+        let a0 = (0.5 * (1.0 / 6.0)) / 2.0;
+        let a1 = ((1.0 / 6.0) + (3.0 / 6.0)) / 2.0;
+        let a2 = ((3.0 / 6.0) + (5.0 / 6.0)) / 2.0;
+        assert_approx_eq!(*surf.get(0, 0).unwrap(), -a0);
+        assert_approx_eq!(*surf.get(0, 1).unwrap(), a0 - a1);
+        assert_approx_eq!(*surf.get(0, 2).unwrap(), a1 - a2);
+        assert_approx_eq!(*surf.get(0, 3).unwrap(), a0 - a1);
+        assert_approx_eq!(*surf.get(0, 4).unwrap(), -a0);
+        // total difference
+        let a: Scalar = surf.iter().sum();
+        assert_approx_eq!(a, -1.0);
+        surf.clear();
+
+        // out of bound line (intersects x = 0.0)
+        rasterize_line(&mut surf, Line::new((-1.0, 0.0), (1.0, 1.0)));
+        assert_approx_eq!(*surf.get(0, 0).unwrap(), 3.0 / 4.0);
+        assert_approx_eq!(*surf.get(0, 1).unwrap(), 1.0 / 4.0);
+        surf.clear();
+
+        // multiple rows diag
+        rasterize_line(&mut surf, Line::new((0.0, -0.5), (2.0, 1.5)));
+        assert_approx_eq!(*surf.get(0, 0).unwrap(), 1.0 / 8.0);
+        assert_approx_eq!(*surf.get(0, 1).unwrap(), 1.0 - 2.0 / 8.0);
+        assert_approx_eq!(*surf.get(0, 2).unwrap(), 1.0 / 8.0);
+        assert_approx_eq!(*surf.get(1, 1).unwrap(), 1.0 / 8.0);
+        assert_approx_eq!(*surf.get(1, 2).unwrap(), 0.5 - 1.0 / 8.0);
+        surf.clear();
+
+        // multiple rows vertical
+        rasterize_line(&mut surf, Line::new((0.5, 0.5), (0.5, 1.75)));
+        assert_approx_eq!(*surf.get(0, 0).unwrap(), 1.0 / 4.0);
+        assert_approx_eq!(*surf.get(0, 1).unwrap(), 1.0 / 4.0);
+        assert_approx_eq!(*surf.get(1, 0).unwrap(), 3.0 / 8.0);
+        assert_approx_eq!(*surf.get(1, 1).unwrap(), 3.0 / 8.0);
+        surf.clear();
+    }
+
     #[test]
     fn test_cubic_bbox() {
         let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
