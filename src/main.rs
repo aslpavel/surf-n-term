@@ -223,9 +223,9 @@ impl Transform {
     }
 
     pub fn rotate_around(&self, a: Scalar, p: Point) -> Self {
-        self.translate(-p.x(), -p.y())
+        self.translate(p.x(), p.y())
             .rotate(a)
-            .translate(p.x(), p.y())
+            .translate(-p.x(), -p.y())
     }
 
     pub fn skew(&self, ax: Scalar, ay: Scalar) -> Self {
@@ -1484,7 +1484,7 @@ fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
     // find first point to trace. since we are going to interate over y's
     // we should pick min(y , p0.y) as a starting y point, and adjust x
     // accordingly
-    let y = p0.y() as usize; // = max(p0.y(), 0) as usize
+    let y = p0.y().max(0.0) as usize;
     let mut x = if p0.y() < 0.0 {
         p0.x() - p0.y() * dxdy
     } else {
@@ -1502,7 +1502,7 @@ fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
         // order (x, x_next) from smaller value x0 to bigger x1
         let (x0, x1) = if x < x_next { (x, x_next) } else { (x_next, x) };
         // lower bound of effected x pixels
-        let x0_floor = x0.floor();
+        let x0_floor = x0.floor().max(0.0);
         let x0i = x0_floor as i32;
         // uppwer bound of effected x pixels
         let x1_ceil = x1.ceil();
@@ -1641,6 +1641,7 @@ pub const VERIFIED: &str = "M7.67 14.72H8.38L10.1 13H12.5L13 12.5V10.08L14.74 8.
 pub const NOMOVE: &str = "M50,100 0,50 25,25Z L100,50 75,25Z";
 pub const STAR: &str = "M50,0 21,90 98,35 2,35 79,90z M110,0 h90 v90 h-90 z M130,20 h50 v50 h-50 zM210,0  h90 v90 h-90 z M230,20 v50 h50 v-50 z";
 pub const ARCS: &str = "M600,350 l 50,-25a80,60 -30 1,1 50,-25 l 50,-25a25,50 -30 0,1 50,-25 l 50,-25a25,75 -30 0,1 50,-25 l 50,-25a25,100 -30 0,1 50,-25 l 50,-25";
+pub const TEST: &str = "M-20.0,-10.0 L-10.0,-20.0 L20.0,10.0 L10.0,20.0 Z";
 
 pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
     let start = std::time::Instant::now();
@@ -1652,7 +1653,7 @@ pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
 fn main() -> Result<(), Error> {
     env_logger::init();
 
-    // let path = Path::from_str(VERIFIED)?;
+    // let path = Path::from_str(SQUIRREL)?;
     // let tr = Transform::default().scale(12.0, 12.0);
 
     let path = path_load("material-big.path")?;
@@ -1661,8 +1662,11 @@ fn main() -> Result<(), Error> {
     let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd)).unwrap();
 
     // let path = Path::from_str(VERIFIED)?;
-    // let tr = Transform::default().scale(12.0, 12.0).translate(3.5, 0.0);
-    // let mut mask = SurfaceOwned::new(200, 200);
+    // let tr = Transform::default()
+    //     .scale(12.0, 12.0)
+    //     .rotate_around(0.523598, Point::new(-8.0, -8.0))
+    //     .translate(-1.0, -1.0);
+    // let mut mask = SurfaceOwned::new(300, 300);
     // for line in path.flatten(tr, FLATNESS, true) {
     //     rasterize_line(&mut mask, line);
     // }
