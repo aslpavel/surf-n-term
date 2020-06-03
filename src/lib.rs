@@ -11,8 +11,7 @@ use std::{
 pub mod surface;
 pub use crate::surface::*;
 
-type Scalar = f64;
-
+pub type Scalar = f64;
 const EPSILON: f64 = std::f64::EPSILON;
 const INFINITY: f64 = std::f64::INFINITY;
 const NEG_INFINITY: f64 = std::f64::NEG_INFINITY;
@@ -161,7 +160,7 @@ pub trait Curve {
     fn bbox(&self) -> BBox;
 }
 
-// Line curve
+/// Line segment curve
 #[derive(Clone, Copy)]
 pub struct Line([Point; 2]);
 
@@ -911,12 +910,12 @@ impl Path {
         timeit("[coverage]", || {
             let offset = Transform::default().translate(-x as Scalar, -y as Scalar);
             for line in lines {
-                rasterize_line(&mut surf, line.transform(offset));
+                signed_difference_line(&mut surf, line.transform(offset));
             }
         });
 
         // cummulative sum over rows
-        timeit("[mask]", || coverage_to_mask(&mut surf, fill_rule));
+        timeit("[mask]", || signed_difference_to_mask(&mut surf, fill_rule));
 
         Some(surf)
     }
@@ -1447,7 +1446,10 @@ impl fmt::Debug for BBox {
     }
 }
 
-fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
+/// Update provided surface with the signed difference of the line
+///
+/// Signed difference is a diffrence between adjacent pixels introduced by the line.
+fn signed_difference_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
     // y - is a row
     // x - is a column
     let Line([p0, p1]) = line;
@@ -1492,7 +1494,7 @@ fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
             )
         };
         // calculate coverage by the line left of `x == 0.0`
-        rasterize_line(surf.view_mut(.., ..), vertical);
+        signed_difference_line(surf.view_mut(.., ..), vertical);
         line
     } else {
         line
@@ -1572,7 +1574,7 @@ fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
     }
 }
 
-pub fn coverage_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_rule: FillRule) {
+pub fn signed_difference_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_rule: FillRule) {
     let shape = surf.shape();
     let data = surf.data_mut();
     match fill_rule {
@@ -1737,11 +1739,11 @@ mod tests {
     }
 
     #[test]
-    fn test_rasterize_line() {
+    fn test_signed_difference_line() {
         let mut surf = SurfaceOwned::new(2, 5);
 
         // line convers many columns but just one row
-        rasterize_line(&mut surf, Line::new((0.5, 1.0), (3.5, 0.0)));
+        signed_difference_line(&mut surf, Line::new((0.5, 1.0), (3.5, 0.0)));
         // covered areas per-pixel
         let a0 = (0.5 * (1.0 / 6.0)) / 2.0;
         let a1 = ((1.0 / 6.0) + (3.0 / 6.0)) / 2.0;
@@ -1757,13 +1759,13 @@ mod tests {
         surf.clear();
 
         // out of bound line (intersects x = 0.0)
-        rasterize_line(&mut surf, Line::new((-1.0, 0.0), (1.0, 1.0)));
+        signed_difference_line(&mut surf, Line::new((-1.0, 0.0), (1.0, 1.0)));
         assert_approx_eq!(*surf.get(0, 0).unwrap(), 3.0 / 4.0);
         assert_approx_eq!(*surf.get(0, 1).unwrap(), 1.0 / 4.0);
         surf.clear();
 
         // multiple rows diag
-        rasterize_line(&mut surf, Line::new((0.0, -0.5), (2.0, 1.5)));
+        signed_difference_line(&mut surf, Line::new((0.0, -0.5), (2.0, 1.5)));
         assert_approx_eq!(*surf.get(0, 0).unwrap(), 1.0 / 8.0);
         assert_approx_eq!(*surf.get(0, 1).unwrap(), 1.0 - 2.0 / 8.0);
         assert_approx_eq!(*surf.get(0, 2).unwrap(), 1.0 / 8.0);
@@ -1772,7 +1774,7 @@ mod tests {
         surf.clear();
 
         // multiple rows vertical
-        rasterize_line(&mut surf, Line::new((0.5, 0.5), (0.5, 1.75)));
+        signed_difference_line(&mut surf, Line::new((0.5, 0.5), (0.5, 1.75)));
         assert_approx_eq!(*surf.get(0, 0).unwrap(), 1.0 / 4.0);
         assert_approx_eq!(*surf.get(0, 1).unwrap(), 1.0 / 4.0);
         assert_approx_eq!(*surf.get(1, 0).unwrap(), 3.0 / 8.0);
