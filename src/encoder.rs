@@ -1,4 +1,4 @@
-use crate::{error::Error, FaceAttrs, TerminalCommand};
+use crate::{error::Error, Color, FaceAttrs, TerminalCommand};
 use std::io::Write;
 
 pub trait Encoder {

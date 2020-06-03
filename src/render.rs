@@ -1,6 +1,6 @@
 use crate::{
-    decoder::Decoder, error::Error, Color, Face, FaceAttrs, ImageHandle, Position, Surface,
-    SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
+    decoder::Decoder, error::Error, Face, FaceAttrs, ImageHandle, Position, Surface, SurfaceMut,
+    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, RGBA,
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -181,9 +181,9 @@ impl TerminalRenderer {
 
 pub trait TerminalSurfaceExt {
     fn draw_box(&mut self, face: Option<Face>);
-    fn draw_image_ascii(&mut self, img: impl Surface<Item = Color>);
+    fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
     fn draw_image(&mut self, img: ImageHandle);
-    fn erase(&mut self, color: Color);
+    fn erase(&mut self, color: RGBA);
     fn writer(&mut self) -> TerminalWriter<'_>;
 }
 
@@ -211,7 +211,7 @@ where
     }
 
     // draw image using unicode uppper half block symbol \u{2580}
-    fn draw_image_ascii(&mut self, img: impl Surface<Item = Color>) {
+    fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>) {
         let height = (img.height() / 2 + img.height() % 2) as i32;
         let width = img.width() as i32;
         self.view_mut(..height, ..width).fill_with(|row, col, _| {
@@ -228,7 +228,7 @@ where
         }
     }
 
-    fn erase(&mut self, color: Color) {
+    fn erase(&mut self, color: RGBA) {
         let face = Face::default().with_bg(Some(color));
         self.fill_with(|_, _, _| Cell::new(face, None));
     }
@@ -383,7 +383,7 @@ mod tests {
 
         fn image_register(
             &mut self,
-            _img: impl Surface<Item = Color>,
+            _img: impl Surface<Item = RGBA>,
         ) -> Result<ImageHandle, Error> {
             unimplemented!()
         }

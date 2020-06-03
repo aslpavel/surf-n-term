@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     render::{TerminalRenderer, TerminalSurface},
-    Color, Face, ImageHandle, Surface,
+    Face, ImageHandle, Surface, RGBA,
 };
 use std::{fmt, io::Write, time::Duration};
 
@@ -22,7 +22,7 @@ pub trait Terminal: Write {
     fn size(&self) -> Result<TerminalSize, Error>;
 
     /// Register image
-    fn image_register(&mut self, img: impl Surface<Item = Color>) -> Result<ImageHandle, Error>;
+    fn image_register(&mut self, img: impl Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
 
     /// Run terminal with event handler
     fn run<H, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<(), E>

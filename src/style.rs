@@ -1,193 +1,5 @@
-use crate::common::clamp;
-use crate::error::Error;
-use std::{
-    fmt,
-    ops::{Add, Mul},
-    str::FromStr,
-};
-
-/// Color in linear RGB color space with premultiplied alpha
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub struct ColorLinear([f32; 4]);
-
-impl Mul<f32> for ColorLinear {
-    type Output = Self;
-
-    #[inline]
-    fn mul(self, v: f32) -> Self::Output {
-        let Self([r, g, b, a]) = self;
-        Self([r * v, g * v, b * v, a * v])
-    }
-}
-
-impl Add<Self> for ColorLinear {
-    type Output = Self;
-
-    #[inline]
-    fn add(self, other: Self) -> Self::Output {
-        let Self([r0, g0, b0, a0]) = self;
-        let Self([r1, g1, b1, a1]) = other;
-        Self([r0 + r1, g0 + g1, b0 + b1, a0 + a1])
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Blend {
-    Over,
-    Out,
-    In,
-    Atop,
-    Xor,
-}
-
-impl<C: From<ColorLinear> + Into<ColorLinear>> ColorExt for C {}
-
-pub trait ColorExt: From<ColorLinear> + Into<ColorLinear> {
-    fn blend(self, other: impl Into<ColorLinear>, method: Blend) -> Self {
-        // Reference:
-        // https://ciechanow.ski/alpha-compositing/
-        // http://ssp.impulsetrain.com/porterduff.html
-        let dst = self.into();
-        let dst_a = dst.0[3];
-        let src = other.into();
-        let src_a = src.0[3];
-        let color = match method {
-            Blend::Over => src + dst * (1.0 - src_a),
-            Blend::Out => src * (1.0 - dst_a),
-            Blend::In => src * dst_a,
-            Blend::Atop => src * dst_a + dst * (1.0 - src_a),
-            Blend::Xor => src * (1.0 - dst_a) + dst * (1.0 - src_a),
-        };
-        color.into()
-    }
-
-    fn lerp(self, other: impl Into<ColorLinear>, t: f32) -> Self {
-        let start = self.into();
-        let end = other.into();
-        let color = start * (1.0 - t) + end * t;
-        color.into()
-    }
-
-    fn luma(self) -> f32 {
-        let ColorLinear([r, g, b, _]) = self.into();
-        r * 0.2126 + g * 0.7152 + b * 0.0722
-    }
-}
-
-fn srgb_to_linear(value: f32) -> f32 {
-    if value <= 0.04045 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-fn linear_to_srgb(value: f32) -> f32 {
-    if value <= 0.0031308 {
-        value * 12.92
-    } else {
-        1.055 * value.powf(1.0 / 2.4) - 0.055
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Color {
-    RGBA([u8; 4]),
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Self::RGBA([0, 0, 0, 0])
-    }
-}
-
-impl Color {
-    pub fn rgb_u8(self) -> [u8; 3] {
-        let [r, g, b, a] = self.rgba_u8();
-        if a == 255 {
-            [r, g, b]
-        } else {
-            let alpha = a as f32 / 255.0;
-            let [r, g, b, _] = Color::RGBA([0, 0, 0, 255]).lerp(self, alpha).rgba_u8();
-            [r, g, b]
-        }
-    }
-
-    pub fn rgba_u8(self) -> [u8; 4] {
-        match self {
-            Self::RGBA([r, g, b, a]) => [r, g, b, a],
-        }
-    }
-
-    pub fn from_str_opt(rgba: &str) -> Option<Self> {
-        if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
-            return None;
-        }
-        let mut hex = crate::decoder::hex_decode(rgba[1..].as_bytes());
-        let red = hex.next()?;
-        let green = hex.next()?;
-        let blue = hex.next()?;
-        let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
-        Some(Self::RGBA([red, green, blue, alpha]))
-    }
-}
-
-impl From<Color> for ColorLinear {
-    fn from(color: Color) -> Self {
-        let [r, g, b, a] = color.rgba_u8();
-        let a = (a as f32) / 255.0;
-        let r = srgb_to_linear((r as f32) / 255.0) * a;
-        let g = srgb_to_linear((g as f32) / 255.0) * a;
-        let b = srgb_to_linear((b as f32) / 255.0) * a;
-        ColorLinear([r, g, b, a])
-    }
-}
-
-impl From<ColorLinear> for Color {
-    fn from(color: ColorLinear) -> Self {
-        let ColorLinear([r, g, b, a]) = color;
-        if a < std::f32::EPSILON {
-            Color::RGBA([0, 0, 0, 0])
-        } else {
-            let a = clamp(a, 0.0, 1.0);
-            let r = (linear_to_srgb(clamp(r / a, 0.0, 1.0)) * 255.0) as u8;
-            let g = (linear_to_srgb(clamp(g / a, 0.0, 1.0)) * 255.0) as u8;
-            let b = (linear_to_srgb(clamp(b / a, 0.0, 1.0)) * 255.0) as u8;
-            let a = (a * 255.0) as u8;
-            Color::RGBA([r, g, b, a])
-        }
-    }
-}
-
-impl FromStr for Color {
-    type Err = Error;
-
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        Self::from_str_opt(string).ok_or(Error::ParseColorError)
-    }
-}
-
-impl FromStr for ColorLinear {
-    type Err = Error;
-
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        Color::from_str(string).map(ColorLinear::from)
-    }
-}
-
-impl fmt::Debug for Color {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Color::RGBA([r, g, b, a]) => {
-                write!(f, "#{:02x}{:02x}{:02x}", r, g, b)?;
-                if *a != 255 {
-                    write!(f, "{:02x}", a)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
+use crate::{Blend, Color, Error, RGBA};
+use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceAttrs {
@@ -252,21 +64,21 @@ impl fmt::Debug for FaceAttrs {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Face {
-    pub fg: Option<Color>,
-    pub bg: Option<Color>,
+    pub fg: Option<RGBA>,
+    pub bg: Option<RGBA>,
     pub attrs: FaceAttrs,
 }
 
 impl Face {
-    pub fn new(fg: Option<Color>, bg: Option<Color>, attrs: FaceAttrs) -> Self {
+    pub fn new(fg: Option<RGBA>, bg: Option<RGBA>, attrs: FaceAttrs) -> Self {
         Self { fg, bg, attrs }
     }
 
-    pub fn with_bg(&self, bg: Option<Color>) -> Self {
+    pub fn with_bg(&self, bg: Option<RGBA>) -> Self {
         Face { bg, ..*self }
     }
 
-    pub fn with_fg(&self, fg: Option<Color>) -> Self {
+    pub fn with_fg(&self, fg: Option<RGBA>) -> Self {
         Face { fg, ..*self }
     }
 
@@ -338,35 +150,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_color() -> Result<(), Error> {
-        assert_eq!(
-            "#d3869b".parse::<Color>()?,
-            Color::RGBA([211, 134, 155, 255])
-        );
-        assert_eq!(
-            "#b8bb2680".parse::<Color>()?,
-            Color::RGBA([184, 187, 38, 128])
-        );
-        Ok(())
-    }
-
-    #[test]
     fn test_parse_face() -> Result<(), Error> {
         assert_eq!(
             "fg=#98971a,bg=#bdae93, bold ,underline".parse::<Face>()?,
             Face {
-                fg: Some(Color::RGBA([152, 151, 26, 255])),
-                bg: Some(Color::RGBA([189, 174, 147, 255])),
+                fg: Some(RGBA::new(152, 151, 26, 255)),
+                bg: Some(RGBA::new(189, 174, 147, 255)),
                 attrs: FaceAttrs::BOLD | FaceAttrs::UNDERLINE,
             }
         );
-        Ok(())
-    }
-
-    #[test]
-    fn test_color_linear() -> Result<(), Error> {
-        let color = "#fe801970".parse()?;
-        assert_eq!(Color::from(ColorLinear::from(color)), color);
         Ok(())
     }
 }

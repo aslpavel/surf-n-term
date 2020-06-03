@@ -593,14 +593,13 @@ where
             let height = row_end - row_start;
             let start = shape.offset(row_start, col_start);
             let end = shape.offset(row_end - 1, col_end);
-            let shape = Shape {
+            Shape {
                 width,
                 height,
                 start,
                 end,
                 ..shape
-            };
-            shape
+            }
         }
         _ => Shape {
             height: 0,

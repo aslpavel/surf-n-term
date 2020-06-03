@@ -5,7 +5,7 @@ use crate::{
     encoder::{Encoder, TTYEncoder},
     error::Error,
     terminal::{Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats},
-    Color, DecMode, ImageHandle, ImageStorage, KittyImageStorage, Surface,
+    DecMode, ImageHandle, ImageStorage, KittyImageStorage, Surface, RGBA,
 };
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -294,7 +294,7 @@ impl Terminal for UnixTerminal {
         }
     }
 
-    fn image_register(&mut self, img: impl Surface<Item = Color>) -> Result<ImageHandle, Error> {
+    fn image_register(&mut self, img: impl Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
         match self.image_storage.as_mut() {
             None => Err(Error::FeatureNotSupported),
             Some(storage) => storage.register(&img),

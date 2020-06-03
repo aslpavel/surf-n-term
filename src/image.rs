@@ -1,4 +1,4 @@
-use crate::{encoder::base64_encode, Color, Error, Position, Surface, TerminalEvent};
+use crate::{encoder::base64_encode, Color, Error, Position, Surface, TerminalEvent, RGBA};
 use std::{
     collections::HashMap,
     io::{Cursor, Read, Write},
@@ -12,7 +12,7 @@ pub trait ImageStorage {
     ///
     /// Usally means converting it to appropirate format so it could be send
     /// multiple times quicker.
-    fn register(&mut self, img: &dyn Surface<Item = Color>) -> Result<ImageHandle, Error>;
+    fn register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
 
     /// Draw image
     ///
@@ -54,9 +54,9 @@ impl Default for KittyImageStorage {
 }
 
 impl ImageStorage for KittyImageStorage {
-    fn register(&mut self, img: &dyn Surface<Item = Color>) -> Result<ImageHandle, Error> {
+    fn register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
         let handle = ImageHandle(self.imgs.len() + 1); // id = 0 can not be used.
-        let raw: Vec<_> = img.iter().flat_map(|c| ColorIter::new(*c)).collect();
+        let raw: Vec<_> = img.iter().flat_map(|c| RGBAIter::new(*c)).collect();
         let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, /* level */ 10);
         let mut base64 = Cursor::new(Vec::new());
         base64_encode(base64.get_mut(), compressed.iter().copied())?;
@@ -123,13 +123,13 @@ impl ImageStorage for KittyImageStorage {
     }
 }
 
-struct ColorIter {
+struct RGBAIter {
     color: [u8; 4],
     index: usize,
 }
 
-impl ColorIter {
-    fn new(color: Color) -> Self {
+impl RGBAIter {
+    fn new(color: RGBA) -> Self {
         Self {
             color: color.rgba_u8(),
             index: 0,
@@ -137,7 +137,7 @@ impl ColorIter {
     }
 }
 
-impl Iterator for ColorIter {
+impl Iterator for RGBAIter {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
