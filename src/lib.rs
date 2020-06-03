@@ -165,7 +165,7 @@ pub trait Curve {
 pub struct Line([Point; 2]);
 
 impl Line {
-    pub fn new<P: Into<Point>>(p0: P, p1: P) -> Self {
+    pub fn new(p0: impl Into<Point>, p1: impl Into<Point>) -> Self {
         Self([p0.into(), p1.into()])
     }
 }
@@ -230,7 +230,7 @@ impl fmt::Debug for Quad {
 }
 
 impl Quad {
-    pub fn new<P: Into<Point>>(p0: P, p1: P, p2: P) -> Self {
+    pub fn new(p0: impl Into<Point>, p1: impl Into<Point>, p2: impl Into<Point>) -> Self {
         Self([p0.into(), p1.into(), p2.into()])
     }
 
@@ -311,7 +311,12 @@ impl fmt::Debug for Cubic {
 }
 
 impl Cubic {
-    pub fn new<P: Into<Point>>(p0: P, p1: P, p2: P, p3: P) -> Self {
+    pub fn new(
+        p0: impl Into<Point>,
+        p1: impl Into<Point>,
+        p2: impl Into<Point>,
+        p3: impl Into<Point>,
+    ) -> Self {
         Self([p0.into(), p1.into(), p2.into(), p3.into()])
     }
 
@@ -811,13 +816,31 @@ impl Iterator for SegmentFlattenIter {
     }
 }
 
-#[derive(Debug, Clone)]
-struct SubPath {
+#[derive(Clone)]
+pub struct SubPath {
     segments: Vec<Segment>,
     closed: bool,
 }
 
+impl fmt::Debug for SubPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for segment in self.segments.iter() {
+            writeln!(f, "{:?}", segment)?;
+        }
+        if self.closed {
+            writeln!(f, "Close")?;
+        } else {
+            writeln!(f, "End")?
+        }
+        Ok(())
+    }
+}
+
 impl SubPath {
+    pub fn new(segments: Vec<Segment>, closed: bool) -> Self {
+        Self { segments, closed }
+    }
+
     fn flatten<'a>(
         &'a self,
         tr: Transform,
@@ -852,12 +875,33 @@ pub enum FillRule {
     EvenOdd,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Path {
     subpaths: Vec<SubPath>,
 }
 
+impl fmt::Debug for Path {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.subpaths.is_empty() {
+            write!(f, "Empty")?;
+        } else {
+            for subpath in self.subpaths.iter() {
+                subpath.fmt(f)?
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Path {
+    pub fn new(subpaths: Vec<SubPath>) -> Self {
+        Self { subpaths }
+    }
+
+    pub fn builder() -> PathBuilder {
+        PathBuilder::new()
+    }
+
     pub fn flatten_simple<'a>(
         &'a self,
         tr: Transform,
@@ -984,6 +1028,123 @@ impl Iterator for PathFlattenIter {
                 }
             }
         }
+    }
+}
+
+pub struct PathBuilder {
+    position: Point,
+    subpath: Vec<Segment>,
+    subpaths: Vec<SubPath>,
+}
+
+impl Default for PathBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PathBuilder {
+    pub fn new() -> Self {
+        Self {
+            position: Point::new(0.0, 0.0),
+            subpath: Default::default(),
+            subpaths: Default::default(),
+        }
+    }
+
+    pub fn build(self) -> Path {
+        let PathBuilder {
+            subpath,
+            mut subpaths,
+            ..
+        } = self;
+        if !subpath.is_empty() {
+            subpaths.push(SubPath::new(subpath, false));
+        }
+        Path::new(subpaths)
+    }
+
+    pub fn move_to(mut self, p: impl Into<Point>) -> Self {
+        let subpath = std::mem::replace(&mut self.subpath, Vec::new());
+        if !subpath.is_empty() {
+            self.subpaths.push(SubPath::new(subpath, false));
+        }
+        self.position = p.into();
+        self
+    }
+
+    pub fn close(mut self) -> Self {
+        let subpath = std::mem::replace(&mut self.subpath, Vec::new());
+        if !subpath.is_empty() {
+            self.subpaths.push(SubPath::new(subpath, true));
+        }
+        self
+    }
+
+    pub fn line_to(mut self, p: impl Into<Point>) -> Self {
+        let line = Line::new(self.position, p);
+        self.position = line.end();
+        self.subpath.push(line.into());
+        self
+    }
+
+    pub fn quad_to(mut self, p1: impl Into<Point>, p2: impl Into<Point>) -> Self {
+        let quad = Quad::new(self.position, p1, p2);
+        self.position = quad.end();
+        self.subpath.push(quad.into());
+        self
+    }
+
+    pub fn quad_smooth_to(self, p2: impl Into<Point>) -> Self {
+        let p1 = match self.subpath.last() {
+            Some(Segment::Quad(quad)) => quad.smooth(),
+            _ => self.position,
+        };
+        self.quad_to(p1, p2)
+    }
+
+    pub fn cubic_to(
+        mut self,
+        p1: impl Into<Point>,
+        p2: impl Into<Point>,
+        p3: impl Into<Point>,
+    ) -> Self {
+        let cubic = Cubic::new(self.position, p1, p2, p3);
+        self.position = cubic.end();
+        self.subpath.push(cubic.into());
+        self
+    }
+
+    pub fn cubic_smooth_to(self, p2: impl Into<Point>, p3: impl Into<Point>) -> Self {
+        let p1 = match self.subpath.last() {
+            Some(Segment::Cubic(cubic)) => cubic.smooth(),
+            _ => self.position,
+        };
+        self.cubic_to(p1, p2, p3)
+    }
+
+    pub fn arc_to(
+        mut self,
+        radii: impl Into<Point>,
+        x_axis_rot: Scalar,
+        large: bool,
+        sweep: bool,
+        p: impl Into<Point>,
+    ) -> Self {
+        let radii: Point = radii.into();
+        let p = p.into();
+        let arc = ElipArc::new_param(
+            self.position,
+            p,
+            radii.x(),
+            radii.y(),
+            x_axis_rot,
+            large,
+            sweep,
+        );
+        self.subpath.push(arc.into());
+        self.position = p;
+        self
     }
 }
 
@@ -1804,5 +1965,53 @@ mod tests {
         assert_approx_eq!(bbox.y(), 50.0, 0.001);
         assert_approx_eq!(bbox.width(), 124.483, 0.001);
         assert_approx_eq!(bbox.height(), 86.538, 0.001);
+    }
+
+    const SQUIRREL: &str = r#"
+    M12 1C9.79 1 8 2.31 8 3.92c0 1.94.5 3.03 0 6.08 0-4.5-2.77-6.34-4-6.34.05-.5-.48
+    -.66-.48-.66s-.22.11-.3.34c-.27-.31-.56-.27-.56-.27l-.13.58S.7 4.29 .68 6.87c.2.33
+    1.53.6 2.47.43.89.05.67.79.47.99C2.78 9.13 2 8 1 8S0 9 1 9s1 1 3 1c-3.09 1.2 0 4 0 4
+    H3c-1 0-1 1-1 1h6c3 0 5-1 5-3.47 0-.85-.43-1.79 -1-2.53-1.11-1.46.23-2.68 1-2
+    .77.68 3 1 3-2 0-2.21-1.79-4-4-4zM2.5 6 c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5
+    -.22.5-.5.5z
+    "#;
+
+    #[test]
+    fn test_path_parse() -> Result<(), PathParseError> {
+        let path: Path = SQUIRREL.parse()?;
+        let reference = Path::builder()
+            .move_to((12.0, 1.0))
+            .cubic_to((9.79, 1.0), (8.0, 2.31), (8.0, 3.92))
+            .cubic_to((8.0, 5.86), (8.5, 6.95), (8.0, 10.0))
+            .cubic_to((8.0, 5.5), (5.23, 3.66), (4.0, 3.66))
+            .cubic_to((4.05, 3.16), (3.52, 3.0), (3.52, 3.0))
+            .cubic_to((3.52, 3.0), (3.3, 3.11), (3.22, 3.34))
+            .cubic_to((2.95, 3.03), (2.66, 3.07), (2.66, 3.07))
+            .line_to((2.53, 3.65))
+            .cubic_to((2.53, 3.65), (0.7, 4.29), (0.68, 6.87))
+            .cubic_to((0.88, 7.2), (2.21, 7.47), (3.15, 7.3))
+            .cubic_to((4.04, 7.35), (3.82, 8.09), (3.62, 8.29))
+            .cubic_to((2.78, 9.13), (2.0, 8.0), (1.0, 8.0))
+            .cubic_to((0.0, 8.0), (0.0, 9.0), (1.0, 9.0))
+            .cubic_to((2.0, 9.0), (2.0, 10.0), (4.0, 10.0))
+            .cubic_to((0.91, 11.2), (4.0, 14.0), (4.0, 14.0))
+            .line_to((3.0, 14.0))
+            .cubic_to((2.0, 14.0), (2.0, 15.0), (2.0, 15.0))
+            .line_to((8.0, 15.0))
+            .cubic_to((11.0, 15.0), (13.0, 14.0), (13.0, 11.53))
+            .cubic_to((13.0, 10.68), (12.57, 9.74), (12.0, 9.0))
+            .cubic_to((10.89, 7.54), (12.23, 6.32), (13.0, 7.0))
+            .cubic_to((13.77, 7.68), (16.0, 8.0), (16.0, 5.0))
+            .cubic_to((16.0, 2.79), (14.21, 1.0), (12.0, 1.0))
+            .close()
+            .move_to((2.5, 6.0))
+            .cubic_to((2.22, 6.0), (2.0, 5.78), (2.0, 5.5))
+            .cubic_to((2.0, 5.22), (2.22, 5.0), (2.5, 5.0))
+            .cubic_to((2.78, 5.0), (3.0, 5.22), (3.0, 5.5))
+            .cubic_to((3.0, 5.78), (2.78, 6.0), (2.5, 6.0))
+            .close()
+            .build();
+        assert_eq!(format!("{:?}", path), format!("{:?}", reference));
+        Ok(())
     }
 }
