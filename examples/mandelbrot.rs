@@ -1,7 +1,8 @@
 use std::{ops::Range, time::Duration};
 use surf_n_term::{
-    Color, ColorExt, ColorLinear, DecMode, Error, Key, KeyMod, KeyName, SurfaceMut, SurfaceOwned,
+    Color, ColorLinear, DecMode, Error, Key, KeyMod, KeyName, SurfaceMut, SurfaceOwned,
     SystemTerminal, Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    RGBA,
 };
 
 fn mandelbrot_at(x0: f64, y0: f64, count: usize) -> usize {
@@ -22,7 +23,7 @@ fn mandelbrot(
     ys: Range<f64>,
     colors: &Range<ColorLinear>,
     count: usize,
-    mut img: impl SurfaceMut<Item = Color>,
+    mut img: impl SurfaceMut<Item = RGBA>,
 ) {
     if img.height() < 2 || img.width() < 2 {
         return;
