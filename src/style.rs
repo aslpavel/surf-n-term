@@ -119,7 +119,7 @@ impl Color {
         }
     }
 
-    pub fn from_str(rgba: &str) -> Option<Self> {
+    pub fn from_str_opt(rgba: &str) -> Option<Self> {
         if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
             return None;
         }
@@ -163,7 +163,7 @@ impl FromStr for Color {
     type Err = Error;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        Self::from_str(string).ok_or(Error::ParseColorError)
+        Self::from_str_opt(string).ok_or(Error::ParseColorError)
     }
 }
 
@@ -171,9 +171,7 @@ impl FromStr for ColorLinear {
     type Err = Error;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        Color::from_str(string)
-            .map(ColorLinear::from)
-            .ok_or(Error::ParseColorError)
+        Color::from_str(string).map(ColorLinear::from)
     }
 }
 
