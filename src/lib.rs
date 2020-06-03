@@ -262,6 +262,10 @@ impl Curve for Quad {
     }
 
     fn at(&self, t: Scalar) -> Point {
+        // at(t) =
+        //   (1 - t) ^ 2 * p0 +
+        //   2 * (1 - t) * t * p1 +
+        //   t ^ 2 * p2
         let Self([p0, p1, p2]) = self;
         let (t1, t_1) = (t, 1.0 - t);
         let (t2, t_2) = (t1 * t1, t_1 * t_1);
@@ -269,7 +273,30 @@ impl Curve for Quad {
     }
 
     fn bbox(&self) -> BBox {
-        todo!()
+        let Self([p0, p1, p2]) = self;
+        let mut bbox = BBox::new(*p0, *p2);
+        if bbox.contains(*p1) {
+            return bbox;
+        }
+
+        let Point([a0, a1]) = *p2 - 2.0 * p1 + *p0;
+        let Point([b0, b1]) = *p1 - *p0;
+        // curve'(t)_x = 0
+        if a0.abs() > EPSILON {
+            let t0 = -b0 / a0;
+            if t0 >= 0.0 && t0 <= 1.0 {
+                bbox = bbox.extend(self.at(t0));
+            }
+        }
+        // curve'(t)_y = 0
+        if a1.abs() > EPSILON {
+            let t1 = -b1 / a1;
+            if t1 >= 0.0 && t1 <= 1.0 {
+                bbox = bbox.extend(self.at(t1));
+            }
+        }
+
+        bbox
     }
 }
 
@@ -359,6 +386,11 @@ impl Curve for Cubic {
     }
 
     fn at(&self, t: Scalar) -> Point {
+        // at(t) =
+        //   (1 - t) ^ 3 * p0 +
+        //   3 * (1 - t) ^ 2 * t * p1 +
+        //   3 * (1 - t) * t ^ 2 * p2 +
+        //   t ^ 3 * p3
         let Self([p0, p1, p2, p3]) = self;
         let (t1, t_1) = (t, 1.0 - t);
         let (t2, t_2) = (t1 * t1, t_1 * t_1);
@@ -374,14 +406,14 @@ impl Curve for Cubic {
         }
 
         // Solve for `curve'(t)_x = 0 || curve'(t)_y = 0`
-        let Point([a0, a1]) = -3.0 * p0 + 9.0 * p1 - 9.0 * p2 + 3.0 * p3;
-        let Point([b0, b1]) = 6.0 * p0 - 12.0 * p1 + 6.0 * p2;
-        let Point([c0, c1]) = -3.0 * p0 + 3.0 * p1;
+        let Point([a0, a1]) = -1.0 * p0 + 3.0 * p1 - 3.0 * p2 + 1.0 * p3;
+        let Point([b0, b1]) = 2.0 * p0 - 4.0 * p1 + 2.0 * p2;
+        let Point([c0, c1]) = -1.0 * p0 + *p1;
         quadratic_solve(a0, b0, c0)
             .iter()
             .flatten()
             .chain(quadratic_solve(a1, b1, c1).iter().flatten())
-            .filter(|t| **t > 0.0 && **t < 1.0)
+            .filter(|t| **t >= 0.0 && **t <= 1.0)
             .fold(bbox, |bbox, t| bbox.extend(self.at(*t)))
     }
 }
@@ -1699,6 +1731,9 @@ mod tests {
         ( $v0:expr, $v1: expr ) => {{
             assert!(($v0 - $v1).abs() < EPSILON, "{} != {}", $v0, $v1);
         }};
+        ( $v0:expr, $v1: expr, $e: expr ) => {{
+            assert!(($v0 - $v1).abs() < $e, "{} != {}", $v0, $v1);
+        }};
     }
 
     #[test]
@@ -1746,12 +1781,19 @@ mod tests {
     }
 
     #[test]
-    fn test_cubic_bbox() {
-        let curve = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
-        let bbox = curve.bbox();
-        assert!((bbox.x() - 87.308).abs() < 0.001);
-        assert!(bbox.y().abs() < 0.001);
-        assert!((bbox.width() - 242.724).abs() < 0.001);
-        assert!((bbox.height() - 125.140).abs() < 0.001);
+    fn test_bbox() {
+        let cubic = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
+        let bbox = cubic.bbox();
+        assert_approx_eq!(bbox.x(), 87.308, 0.001);
+        assert_approx_eq!(bbox.y(), 0.0, 0.001);
+        assert_approx_eq!(bbox.width(), 242.724, 0.001);
+        assert_approx_eq!(bbox.height(), 125.140, 0.001);
+
+        let quad = Quad::new((30.0, 90.0), (220.0, 200.0), (120.0, 50.0));
+        let bbox = quad.bbox();
+        assert_approx_eq!(bbox.x(), 30.0, 0.001);
+        assert_approx_eq!(bbox.y(), 50.0, 0.001);
+        assert_approx_eq!(bbox.width(), 124.483, 0.001);
+        assert_approx_eq!(bbox.height(), 86.538, 0.001);
     }
 }
