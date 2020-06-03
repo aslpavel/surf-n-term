@@ -586,7 +586,7 @@ impl Curve for ElipArc {
 
 /// Approximate arc with a sequnce of cubic bezier curves
 ///
-/// [Drawing an elliptical arc using polylines, quadraticor cubic Bezier curves]
+/// [Drawing an elliptical arc using polylines, quadratic or cubic Bezier curves]
 /// (http://www.spaceroots.org/documents/ellipse/elliptical-arc.pdf)
 /// [Approximating Arcs Using Cubic Bézier Curves]
 /// (https://www.joecridge.me/content/pdf/bezier-arcs.pdf)
@@ -1447,46 +1447,6 @@ impl fmt::Debug for BBox {
     }
 }
 
-fn linear_to_srgb(value: Scalar) -> Scalar {
-    if value <= 0.0031308 {
-        value * 12.92
-    } else {
-        1.055 * value.powf(1.0 / 2.4) - 0.055
-    }
-}
-
-/*
-fn srgb_to_linear(value: Scalar) -> Scalar {
-    if value <= 0.04045 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.5)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct RGBA {
-    rgba: [Scalar; 4],
-}
-*/
-
-pub trait Color {
-    fn to_rgb(&self) -> [u8; 3];
-    fn to_rgba(&self) -> [u8; 4];
-}
-
-impl Color for Scalar {
-    fn to_rgb(&self) -> [u8; 3] {
-        let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
-        [color; 3]
-    }
-
-    fn to_rgba(&self) -> [u8; 4] {
-        let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
-        [color; 4]
-    }
-}
-
 fn rasterize_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) {
     // y - is a row
     // x - is a column
@@ -1720,6 +1680,46 @@ fn scalar_fmt(f: &mut fmt::Formatter<'_>, value: Scalar) -> fmt::Result {
         write!(f, "{:.3e}", value)
     } else {
         write!(f, "{:.3}", value)
+    }
+}
+
+fn linear_to_srgb(value: Scalar) -> Scalar {
+    if value <= 0.0031308 {
+        value * 12.92
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/*
+fn srgb_to_linear(value: Scalar) -> Scalar {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.5)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct RGBA {
+    rgba: [Scalar; 4],
+}
+*/
+
+pub trait Color {
+    fn to_rgb(&self) -> [u8; 3];
+    fn to_rgba(&self) -> [u8; 4];
+}
+
+impl Color for Scalar {
+    fn to_rgb(&self) -> [u8; 3] {
+        let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
+        [color; 3]
+    }
+
+    fn to_rgba(&self) -> [u8; 4] {
+        let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
+        [color; 4]
     }
 }
 
