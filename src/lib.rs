@@ -579,7 +579,9 @@ impl Curve for ElipArc {
     }
 
     fn bbox(&self) -> BBox {
-        todo!()
+        let mut iter = ElipArcCubicIter::new(*self).map(|cubic| cubic.bbox());
+        let bbox = iter.next().expect("ElipArcCubicIter is empty");
+        iter.fold(bbox, |bbox, other| bbox.union(other))
     }
 }
 
@@ -1430,6 +1432,11 @@ impl BBox {
             min: Point([x0, y0]),
             max: Point([x1, y1]),
         }
+    }
+
+    /// Create bounding box the spans both bbox-es
+    pub fn union(&self, other: BBox) -> Self {
+        self.extend(other.min).extend(other.max)
     }
 }
 
