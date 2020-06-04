@@ -837,8 +837,12 @@ impl fmt::Debug for SubPath {
 }
 
 impl SubPath {
-    pub fn new(segments: Vec<Segment>, closed: bool) -> Self {
-        Self { segments, closed }
+    pub fn new(segments: Vec<Segment>, closed: bool) -> Option<Self> {
+        if segments.is_empty() {
+            None
+        } else {
+            Some(Self { segments, closed })
+        }
     }
 
     pub fn flatten<'a>(
@@ -848,24 +852,34 @@ impl SubPath {
         close: bool,
     ) -> impl Iterator<Item = Line> + 'a {
         let last = if self.closed || close {
-            self.end()
-                .and_then(|p1| self.start().map(|p2| Line([p1, p2]).transform(tr)))
+            Some(Line::new(self.end(), self.start()).transform(tr))
         } else {
             None
         };
-
         self.segments
             .iter()
             .flat_map(move |segment| segment.flatten(tr, flatness))
             .chain(last)
     }
 
-    fn start(&self) -> Option<Point> {
-        self.segments.first().map(Curve::start)
+    fn start(&self) -> Point {
+        self.segments
+            .first()
+            .expect("SubPath is never emtpy")
+            .start()
     }
 
-    fn end(&self) -> Option<Point> {
-        self.segments.last().map(Curve::end)
+    fn end(&self) -> Point {
+        self.segments.last().expect("SubPath is never empty").end()
+    }
+
+    pub fn bbox(&self, tr: Transform) -> BBox {
+        let mut iter = self
+            .segments
+            .iter()
+            .map(|segment| segment.transform(tr).bbox());
+        let bbox = iter.next().expect("SubPath is never empty");
+        iter.fold(bbox, |bbox, other| bbox.union(other))
     }
 }
 
@@ -968,6 +982,12 @@ impl Path {
 
         Some(surf)
     }
+
+    pub fn bbox(&self, tr: Transform) -> Option<BBox> {
+        let mut iter = self.subpaths.iter().map(|sp| sp.bbox(tr));
+        let bbox = iter.next()?;
+        Some(iter.fold(bbox, |bbox, other| bbox.union(other)))
+    }
 }
 
 pub struct PathFlattenIter {
@@ -986,12 +1006,7 @@ impl PathFlattenIter {
         stack.reserve(size * 2);
         for subpath in path.subpaths.iter().rev() {
             if subpath.closed || close {
-                let line = subpath.end().and_then(|p1| {
-                    subpath
-                        .start()
-                        .map(|p2| Ok(Line::new(p1, p2).transform(tr)))
-                });
-                stack.extend(line);
+                stack.push(Ok(Line::new(subpath.end(), subpath.start())));
             }
             for segment in subpath.segments.iter().rev() {
                 match segment {
@@ -1063,9 +1078,7 @@ impl PathBuilder {
             mut subpaths,
             ..
         } = self;
-        if !subpath.is_empty() {
-            subpaths.push(SubPath::new(subpath, false));
-        }
+        subpaths.extend(SubPath::new(subpath, false));
         Path::new(subpaths)
     }
 
@@ -1078,9 +1091,7 @@ impl PathBuilder {
     /// Move current position, ending current subpath
     pub fn move_to(mut self, p: impl Into<Point>) -> Self {
         let subpath = std::mem::replace(&mut self.subpath, Vec::new());
-        if !subpath.is_empty() {
-            self.subpaths.push(SubPath::new(subpath, false));
-        }
+        self.subpaths.extend(SubPath::new(subpath, false));
         self.position = p.into();
         self
     }
@@ -1091,9 +1102,7 @@ impl PathBuilder {
         if let Some(seg) = subpath.first() {
             self.position = seg.start();
         }
-        if !subpath.is_empty() {
-            self.subpaths.push(SubPath::new(subpath, true));
-        }
+        self.subpaths.extend(SubPath::new(subpath, true));
         self
     }
 
@@ -1992,14 +2001,16 @@ mod tests {
                     Line::new((1.0, -1.0), (1.0, 0.0)).into(),
                 ],
                 true,
-            ),
+            )
+            .unwrap(),
             SubPath::new(
                 vec![
                     Line::new((0.0, 0.0), (0.0, 1.0)).into(),
                     Line::new((0.0, 1.0), (1.0, 1.0)).into(),
                 ],
                 true,
-            ),
+            )
+            .unwrap(),
         ]);
         assert_eq!(format!("{:?}", path), format!("{:?}", reference));
         Ok(())
