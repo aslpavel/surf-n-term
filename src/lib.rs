@@ -1031,6 +1031,7 @@ impl Iterator for PathFlattenIter {
     }
 }
 
+#[derive(Clone)]
 pub struct PathBuilder {
     position: Point,
     subpath: Vec<Segment>,
@@ -1052,6 +1053,7 @@ impl PathBuilder {
         }
     }
 
+    /// Build path
     pub fn build(self) -> Path {
         let PathBuilder {
             subpath,
@@ -1064,6 +1066,13 @@ impl PathBuilder {
         Path::new(subpaths)
     }
 
+    /// Extend path from string, which is specified in the same format as SVGs path element.
+    pub fn from_str(self, string: &str) -> Result<Self, PathParseError> {
+        let parser = PathParser::new(string.as_ref());
+        parser.parse(self)
+    }
+
+    /// Move current position, ending current subpath
     pub fn move_to(mut self, p: impl Into<Point>) -> Self {
         let subpath = std::mem::replace(&mut self.subpath, Vec::new());
         if !subpath.is_empty() {
@@ -1073,6 +1082,7 @@ impl PathBuilder {
         self
     }
 
+    /// Close current subpath
     pub fn close(mut self) -> Self {
         let subpath = std::mem::replace(&mut self.subpath, Vec::new());
         if let Some(seg) = subpath.first() {
@@ -1084,6 +1094,7 @@ impl PathBuilder {
         self
     }
 
+    /// Add line from the current position to the specified point
     pub fn line_to(mut self, p: impl Into<Point>) -> Self {
         let line = Line::new(self.position, p);
         self.position = line.end();
@@ -1091,6 +1102,7 @@ impl PathBuilder {
         self
     }
 
+    /// Add quadratic bezier curve
     pub fn quad_to(mut self, p1: impl Into<Point>, p2: impl Into<Point>) -> Self {
         let quad = Quad::new(self.position, p1, p2);
         self.position = quad.end();
@@ -1098,6 +1110,7 @@ impl PathBuilder {
         self
     }
 
+    /// Add smooth quadratic bezier curve
     pub fn quad_smooth_to(self, p2: impl Into<Point>) -> Self {
         let p1 = match self.subpath.last() {
             Some(Segment::Quad(quad)) => quad.smooth(),
@@ -1106,6 +1119,7 @@ impl PathBuilder {
         self.quad_to(p1, p2)
     }
 
+    /// Add cubic beizer curve
     pub fn cubic_to(
         mut self,
         p1: impl Into<Point>,
@@ -1118,6 +1132,7 @@ impl PathBuilder {
         self
     }
 
+    /// Add smooth cubic bezier curve
     pub fn cubic_smooth_to(self, p2: impl Into<Point>, p3: impl Into<Point>) -> Self {
         let p1 = match self.subpath.last() {
             Some(Segment::Cubic(cubic)) => cubic.smooth(),
@@ -1126,6 +1141,7 @@ impl PathBuilder {
         self.cubic_to(p1, p2, p3)
     }
 
+    /// Add elliptic arc segment
     pub fn arc_to(
         mut self,
         radii: impl Into<Point>,
@@ -1150,6 +1166,7 @@ impl PathBuilder {
         self
     }
 
+    /// Current possition of the builder
     pub fn position(&self) -> Point {
         self.position
     }
@@ -1159,27 +1176,9 @@ impl FromStr for Path {
     type Err = PathParseError;
 
     fn from_str(text: &str) -> Result<Path, Self::Err> {
-        let mut parser = PathParser::new(text);
-        let mut segments = Vec::new();
-        let mut subpaths = Vec::new();
-        while !parser.is_eof() {
-            match parser.parse_segment()? {
-                Ok(segment) => segments.push(segment),
-                Err(closed) if !segments.is_empty() => subpaths.push(SubPath {
-                    closed,
-                    segments: std::mem::replace(&mut segments, Vec::new()),
-                }),
-                _ => (),
-            }
-            parser.parse_separators()?;
-        }
-        if !segments.is_empty() {
-            subpaths.push(SubPath {
-                closed: false,
-                segments: std::mem::replace(&mut segments, Vec::new()),
-            })
-        }
-        Ok(Path { subpaths })
+        let parser = PathParser::new(text);
+        let builder = parser.parse(PathBuilder::new())?;
+        Ok(builder.build())
     }
 }
 
@@ -1203,10 +1202,6 @@ pub struct PathParser<'a> {
     text: &'a [u8],
     // current offset in the text
     offset: usize,
-    // start of the current subpath
-    start: Option<Point>,
-    // previous segment
-    prev_seg: Option<Segment>,
     // previous command
     prev_cmd: Option<u8>,
     // position
@@ -1218,8 +1213,6 @@ impl<'a> PathParser<'a> {
         Self {
             text: text.as_ref(),
             offset: 0,
-            start: None,
-            prev_seg: None,
             prev_cmd: None,
             position: Point::new(0.0, 0.0),
         }
@@ -1245,12 +1238,6 @@ impl<'a> PathParser<'a> {
 
     fn is_eof(&self) -> bool {
         self.offset >= self.text.len()
-    }
-
-    fn position(&self) -> Result<Point, PathParseError> {
-        self.prev_seg
-            .map(|segment| segment.end())
-            .ok_or_else(|| self.error("position: current position is missing"))
     }
 
     fn parse_separators(&mut self) -> Result<(), PathParseError> {
@@ -1329,7 +1316,7 @@ impl<'a> PathParser<'a> {
             None => false,
         };
         if is_relative {
-            Ok(Point([x, y]) + self.position()?)
+            Ok(Point([x, y]) + self.position)
         } else {
             Ok(Point([x, y]))
         }
@@ -1369,13 +1356,19 @@ impl<'a> PathParser<'a> {
             }
             _ => match self.prev_cmd {
                 Some(cmd) => Ok(cmd),
-                None => Err(self.error(format!("parse_cmd: command expected `{}`", cmd))),
+                None => {
+                    Err(self.error(format!("parse_cmd: command expected `{}`", char::from(cmd))))
+                }
             },
         }
     }
 
-    fn build(mut self, mut builder: PathBuilder) -> Result<PathBuilder, PathParseError> {
-        while !self.is_eof() {
+    fn parse(mut self, mut builder: PathBuilder) -> Result<PathBuilder, PathParseError> {
+        loop {
+            self.parse_separators()?;
+            if self.is_eof() {
+                break;
+            }
             self.position = builder.position();
             let cmd = self.parse_cmd()?;
             builder = match cmd {
@@ -1389,7 +1382,7 @@ impl<'a> PathParser<'a> {
                     } else {
                         Point::new(p0.x(), y)
                     };
-                    builder.move_to(p1)
+                    builder.line_to(p1)
                 }
                 b'H' | b'h' => {
                     let x = self.parse_scalar()?;
@@ -1399,7 +1392,7 @@ impl<'a> PathParser<'a> {
                     } else {
                         Point::new(x, p0.y())
                     };
-                    builder.move_to(p1)
+                    builder.line_to(p1)
                 }
                 b'Q' | b'q' => builder.quad_to(self.parse_point()?, self.parse_point()?),
                 b'T' | b't' => builder.quad_smooth_to(self.parse_point()?),
@@ -1423,95 +1416,6 @@ impl<'a> PathParser<'a> {
             }
         }
         Ok(builder)
-    }
-
-    fn parse_segment(&mut self) -> Result<Result<Segment, bool>, PathParseError> {
-        self.parse_separators()?;
-        let cmd = self.parse_cmd()?;
-        let seg: Segment = match cmd {
-            b'M' | b'm' => {
-                let p = self.parse_point()?;
-                self.prev_seg = Some(Line([Point([0.0, 0.0]), p]).into());
-                self.start = Some(p);
-                return Ok(Err(false));
-            }
-            b'L' | b'l' => {
-                let p0 = self.position()?;
-                let p1 = self.parse_point()?;
-                Line([p0, p1]).into()
-            }
-            b'V' | b'v' => {
-                let p0 = self.position()?;
-                let y = self.parse_scalar()?;
-                let p1 = if cmd == b'v' {
-                    Point([p0.x(), p0.y() + y])
-                } else {
-                    Point([p0.x(), y])
-                };
-                Line([p0, p1]).into()
-            }
-            b'H' | b'h' => {
-                let p0 = self.position()?;
-                let x = self.parse_scalar()?;
-                let p1 = if cmd == b'h' {
-                    Point([p0.x() + x, p0.y()])
-                } else {
-                    Point([x, p0.y()])
-                };
-                Line([p0, p1]).into()
-            }
-            b'C' | b'c' => {
-                let p0 = self.position()?;
-                let p1 = self.parse_point()?;
-                let p2 = self.parse_point()?;
-                let p3 = self.parse_point()?;
-                Cubic([p0, p1, p2, p3]).into()
-            }
-            b'S' | b's' => {
-                let p0 = self.position()?;
-                let p1 = match self.prev_seg {
-                    Some(Segment::Cubic(cubic)) => cubic.smooth(),
-                    _ => p0,
-                };
-                let p2 = self.parse_point()?;
-                let p3 = self.parse_point()?;
-                Cubic([p0, p1, p2, p3]).into()
-            }
-            b'Q' | b'q' => {
-                let p0 = self.position()?;
-                let p1 = self.parse_point()?;
-                let p2 = self.parse_point()?;
-                Quad([p0, p1, p2]).into()
-            }
-            b'T' | b't' => {
-                let p0 = self.position()?;
-                let p1 = match self.prev_seg {
-                    Some(Segment::Quad(quad)) => quad.smooth(),
-                    _ => p0,
-                };
-                let p2 = self.parse_point()?;
-                Quad([p0, p1, p2]).into()
-            }
-            b'A' | b'a' => {
-                let src = self.position()?;
-                let rx = self.parse_scalar()?;
-                let ry = self.parse_scalar()?;
-                let x_axis_rot = self.parse_scalar()?;
-                let large_flag = self.parse_flag()?;
-                let sweep_flag = self.parse_flag()?;
-                let dst = self.parse_point()?;
-                ElipArc::new_param(src, dst, rx, ry, x_axis_rot, large_flag, sweep_flag).into()
-            }
-            b'Z' | b'z' => {
-                if let Some(start) = self.start {
-                    self.prev_seg = Some(Line([Point([0.0, 0.0]), start]).into());
-                }
-                return Ok(Err(true));
-            }
-            _ => return Err(self.error(format!("parse_segment: invalid command: {}", cmd))),
-        };
-        self.prev_seg = Some(seg);
-        Ok(Ok(seg))
     }
 }
 
