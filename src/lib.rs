@@ -1146,6 +1146,10 @@ impl PathBuilder {
         self.position = p;
         self
     }
+
+    pub fn position(&self) -> Point {
+        self.position
+    }
 }
 
 impl FromStr for Path {
@@ -1311,9 +1315,13 @@ impl<'a> PathParser<'a> {
         Ok(scalar)
     }
 
-    fn parse_point(&mut self, is_relative: bool) -> Result<Point, PathParseError> {
+    fn parse_point(&mut self) -> Result<Point, PathParseError> {
         let x = self.parse_scalar()?;
         let y = self.parse_scalar()?;
+        let is_relative = match self.prev_cmd {
+            Some(cmd) => cmd.is_ascii_lowercase(),
+            None => false,
+        };
         if is_relative {
             Ok(Point([x, y]) + self.position()?)
         } else {
@@ -1342,7 +1350,13 @@ impl<'a> PathParser<'a> {
             b'M' | b'm' | b'L' | b'l' | b'V' | b'v' | b'H' | b'h' | b'C' | b'c' | b'S' | b's'
             | b'Q' | b'q' | b'T' | b't' | b'A' | b'a' | b'Z' | b'z' => {
                 self.advance(1);
-                self.prev_cmd = Some(cmd);
+                self.prev_cmd = if cmd == b'm' {
+                    Some(b'l')
+                } else if cmd == b'M' {
+                    Some(b'L')
+                } else {
+                    Some(cmd)
+                };
                 Ok(cmd)
             }
             _ => match self.prev_cmd {
@@ -1352,22 +1366,56 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /*
+    fn build(mut self, mut builder: PathBuilder) -> Result<PathBuilder, PathParseError> {
+        while !self.is_eof() {
+            let cmd = self.parse_cmd()?;
+            let is_relative = cmd.is_ascii_lowercase();
+            builder = match cmd {
+                b'M' | b'm' => builder.move_to(self.parse_point(is_relative)?),
+                b'L' | b'l' => builder.line_to(self.parse_point(is_relative)?),
+                b'V' | b'v' => {
+                    let y = self.parse_scalar()?;
+                    let p0 = builder.position();
+                    let p1 = if is_relative {
+                        Point::new(p0.x(), p0.y() + y)
+                    } else {
+                        Point::new(p0.x(), y)
+                    };
+                    builder.move_to(p1)
+                }
+                b'H' | b'h' => {
+                    let x = self.parse_scalar()?;
+                    let p0 = builder.position();
+                    let p1 = if is_relative {
+                        Point::new(p0.x() + x, p0.y())
+                    } else {
+                        Point::new(x, p0.y())
+                    };
+                    builder.move_to(p1)
+                }
+                b'C' | b'c' => {
+                    builder.cubic_to(self.parse_point(), p2, p3)
+                }
+            }
+        }
+        Ok(builder)
+    }
+    */
+
     fn parse_segment(&mut self) -> Result<Result<Segment, bool>, PathParseError> {
         self.parse_separators()?;
         let cmd = self.parse_cmd()?;
         let seg: Segment = match cmd {
             b'M' | b'm' => {
-                let is_relative = cmd == b'm';
-                let p = self.parse_point(is_relative && self.prev_seg.is_some())?;
+                let p = self.parse_point()?;
                 self.prev_seg = Some(Line([Point([0.0, 0.0]), p]).into());
-                self.prev_cmd = Some(if is_relative { b'l' } else { b'L' });
                 self.start = Some(p);
                 return Ok(Err(false));
             }
             b'L' | b'l' => {
-                let is_relative = cmd == b'l';
                 let p0 = self.position()?;
-                let p1 = self.parse_point(is_relative)?;
+                let p1 = self.parse_point()?;
                 Line([p0, p1]).into()
             }
             b'V' | b'v' => {
@@ -1391,50 +1439,45 @@ impl<'a> PathParser<'a> {
                 Line([p0, p1]).into()
             }
             b'C' | b'c' => {
-                let is_relative = cmd == b'c';
                 let p0 = self.position()?;
-                let p1 = self.parse_point(is_relative)?;
-                let p2 = self.parse_point(is_relative)?;
-                let p3 = self.parse_point(is_relative)?;
+                let p1 = self.parse_point()?;
+                let p2 = self.parse_point()?;
+                let p3 = self.parse_point()?;
                 Cubic([p0, p1, p2, p3]).into()
             }
             b'S' | b's' => {
-                let is_relative = cmd == b's';
                 let p0 = self.position()?;
                 let p1 = match self.prev_seg {
                     Some(Segment::Cubic(cubic)) => cubic.smooth(),
                     _ => p0,
                 };
-                let p2 = self.parse_point(is_relative)?;
-                let p3 = self.parse_point(is_relative)?;
+                let p2 = self.parse_point()?;
+                let p3 = self.parse_point()?;
                 Cubic([p0, p1, p2, p3]).into()
             }
             b'Q' | b'q' => {
-                let is_relative = cmd == b'q';
                 let p0 = self.position()?;
-                let p1 = self.parse_point(is_relative)?;
-                let p2 = self.parse_point(is_relative)?;
+                let p1 = self.parse_point()?;
+                let p2 = self.parse_point()?;
                 Quad([p0, p1, p2]).into()
             }
             b'T' | b't' => {
-                let is_relative = cmd == b't';
                 let p0 = self.position()?;
                 let p1 = match self.prev_seg {
                     Some(Segment::Quad(quad)) => quad.smooth(),
                     _ => p0,
                 };
-                let p2 = self.parse_point(is_relative)?;
+                let p2 = self.parse_point()?;
                 Quad([p0, p1, p2]).into()
             }
             b'A' | b'a' => {
-                let is_relative = cmd == b'a';
                 let src = self.position()?;
                 let rx = self.parse_scalar()?;
                 let ry = self.parse_scalar()?;
                 let x_axis_rot = self.parse_scalar()?;
                 let large_flag = self.parse_flag()?;
                 let sweep_flag = self.parse_flag()?;
-                let dst = self.parse_point(is_relative)?;
+                let dst = self.parse_point()?;
                 ElipArc::new_param(src, dst, rx, ry, x_axis_rot, large_flag, sweep_flag).into()
             }
             b'Z' | b'z' => {
