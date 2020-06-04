@@ -957,7 +957,7 @@ impl Path {
         let height = (bbox.height() + 2.0).ceil() as usize;
         let surf = SurfaceOwned::new(height, width);
         let shift = Transform::default().translate(1.0 - bbox.x(), 1.0 - bbox.y());
-        self.rasterize_to(shift.matmul(&tr), fill_rule, surf)
+        self.rasterize_to(shift * tr, fill_rule, surf)
     }
 }
 
@@ -1436,16 +1436,16 @@ impl Transform {
     }
 
     pub fn translate(&self, tx: Scalar, ty: Scalar) -> Self {
-        self.matmul(&Self([1.0, 0.0, tx, 0.0, 1.0, ty]))
+        self.matmul(Self([1.0, 0.0, tx, 0.0, 1.0, ty]))
     }
 
     pub fn scale(&self, sx: Scalar, sy: Scalar) -> Self {
-        self.matmul(&Self([sx, 0.0, 0.0, 0.0, sy, 0.0]))
+        self.matmul(Self([sx, 0.0, 0.0, 0.0, sy, 0.0]))
     }
 
     pub fn rotate(&self, a: Scalar) -> Self {
         let (sin, cos) = a.sin_cos();
-        self.matmul(&Self([cos, -sin, 0.0, sin, cos, 0.0]))
+        self.matmul(Self([cos, -sin, 0.0, sin, cos, 0.0]))
     }
 
     pub fn rotate_around(&self, a: Scalar, p: impl Into<Point>) -> Self {
@@ -1456,10 +1456,10 @@ impl Transform {
     }
 
     pub fn skew(&self, ax: Scalar, ay: Scalar) -> Self {
-        self.matmul(&Self([1.0, ax.tan(), 0.0, ay.tan(), 1.0, 0.0]))
+        self.matmul(Self([1.0, ax.tan(), 0.0, ay.tan(), 1.0, 0.0]))
     }
 
-    pub fn matmul(&self, other: &Transform) -> Self {
+    pub fn matmul(&self, other: Transform) -> Self {
         let Self([s00, s01, s02, s10, s11, s12]) = self;
         let Self([o00, o01, o02, o10, o11, o12]) = other;
 
@@ -1474,6 +1474,14 @@ impl Transform {
             s10 * o01 + s11 * o11,
             s10 * o02 + s11 * o12 + s12,
         ])
+    }
+}
+
+impl Mul<Transform> for Transform {
+    type Output = Transform;
+
+    fn mul(self, other: Transform) -> Self::Output {
+        self.matmul(other)
     }
 }
 
@@ -2020,5 +2028,24 @@ mod tests {
         assert_approx_eq!(area, 16492.5, 1.0);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_trasform() {
+        let tr = Transform::default()
+            .translate(1.0, 2.0)
+            .rotate(PI / 3.0)
+            .skew(2.0, 3.0)
+            .scale(3.0, 2.0);
+        let inv = tr.invert().unwrap();
+        let p0 = Point::new(1.0, 1.0);
+
+        let p1 = tr.apply(p0);
+        assert_approx_eq!(p1.x(), -1.04674389, 1e-6);
+        assert_approx_eq!(p1.y(), 1.59965634, 1e-6);
+
+        let p2 = inv.apply(p1);
+        assert_approx_eq!(p2.x(), 1.0, 1e-6);
+        assert_approx_eq!(p2.y(), 1.0, 1e-6);
     }
 }
