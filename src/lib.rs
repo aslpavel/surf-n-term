@@ -1043,7 +1043,7 @@ impl PathBuilder {
     }
 
     /// Extend path from string, which is specified in the same format as SVGs path element.
-    pub fn from_str(self, string: &str) -> Result<Self, PathParseError> {
+    pub fn from_str(self, string: impl AsRef<[u8]>) -> Result<Self, PathParseError> {
         let parser = PathParser::new(string.as_ref());
         parser.parse(self)
     }
@@ -1148,7 +1148,7 @@ impl FromStr for Path {
     type Err = PathParseError;
 
     fn from_str(text: &str) -> Result<Path, Self::Err> {
-        let parser = PathParser::new(text);
+        let parser = PathParser::new(text.as_ref());
         let builder = parser.parse(PathBuilder::new())?;
         Ok(builder.build())
     }
@@ -1176,12 +1176,12 @@ pub struct PathParser<'a> {
     offset: usize,
     // previous command
     prev_cmd: Option<u8>,
-    // position
+    // current position from which next curve will start
     position: Point,
 }
 
 impl<'a> PathParser<'a> {
-    fn new(text: &'a str) -> PathParser<'a> {
+    fn new(text: &'a [u8]) -> PathParser<'a> {
         Self {
             text: text.as_ref(),
             offset: 0,
