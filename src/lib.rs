@@ -966,7 +966,8 @@ impl PathFlattenIter {
         stack.reserve(size * 2);
         for subpath in path.subpaths.iter().rev() {
             if subpath.closed || close {
-                stack.push(Ok(Line::new(subpath.end(), subpath.start())));
+                let line = Line::new(subpath.end(), subpath.start()).transform(tr);
+                stack.push(Ok(line));
             }
             for segment in subpath.segments.iter().rev() {
                 match segment {
@@ -1391,7 +1392,7 @@ impl<'a> PathParser<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Transform([Scalar; 6]);
 
 impl Default for Transform {
@@ -1601,7 +1602,7 @@ fn signed_difference_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) 
                 Line::new((0.0, 0.0), (0.0, 0.0)),
             )
         };
-        // calculate coverage by the line left of `x == 0.0`
+        // signed difference by the line left of `x == 0.0`
         signed_difference_line(surf.view_mut(.., ..), vertical);
         line
     } else {
@@ -1830,7 +1831,7 @@ impl Color for Scalar {
     fn to_rgba(&self) -> [u8; 4] {
         // let color = (clamp(1.0 - *self, 0.0, 1.0) * 255.0).round() as u8;
         let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
-        [color; 4]
+        [color, color, color, 255]
     }
 }
 
@@ -1979,6 +1980,7 @@ mod tests {
 
     #[test]
     fn test_fill_rule() -> Result<(), PathParseError> {
+        let tr = Transform::default();
         let path: Path = r#"
             M50,0 21,90 98,35 2,35 79,90z
             M110,0 h90 v90 h-90z
@@ -1992,20 +1994,18 @@ mod tests {
         let x1 = 150; // middle of the first box
         let x2 = 250; // middle of the second box
 
-        let tr = Transform::default();
-
-        let even_odd = path.rasterize(tr, FillRule::EvenOdd).unwrap();
-        assert_approx_eq!(even_odd.get(y, x0).unwrap(), 0.0);
-        assert_approx_eq!(even_odd.get(y, x1).unwrap(), 0.0);
-        assert_approx_eq!(even_odd.get(y, x2).unwrap(), 0.0);
-        let area = even_odd.iter().sum::<Scalar>();
+        let surf = path.rasterize(tr, FillRule::EvenOdd).unwrap();
+        assert_approx_eq!(surf.get(y, x0).unwrap(), 0.0);
+        assert_approx_eq!(surf.get(y, x1).unwrap(), 0.0);
+        assert_approx_eq!(surf.get(y, x2).unwrap(), 0.0);
+        let area = surf.iter().sum::<Scalar>();
         assert_approx_eq!(area, 13130.0, 1.0);
 
-        let non_zero = path.rasterize(tr, FillRule::NonZero).unwrap();
-        assert_approx_eq!(non_zero.get(y, x0).unwrap(), 1.0);
-        assert_approx_eq!(non_zero.get(y, x1).unwrap(), 1.0);
-        assert_approx_eq!(non_zero.get(y, x2).unwrap(), 0.0);
-        let area = non_zero.iter().sum::<Scalar>();
+        let surf = path.rasterize(tr, FillRule::NonZero).unwrap();
+        assert_approx_eq!(surf.get(y, x0).unwrap(), 1.0);
+        assert_approx_eq!(surf.get(y, x1).unwrap(), 1.0);
+        assert_approx_eq!(surf.get(y, x2).unwrap(), 0.0);
+        let area = surf.iter().sum::<Scalar>();
         assert_approx_eq!(area, 16492.5, 1.0);
 
         Ok(())
