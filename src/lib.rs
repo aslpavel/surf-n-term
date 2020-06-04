@@ -920,12 +920,17 @@ impl Path {
         PathFlattenIter::new(self, tr, flatness, close)
     }
 
+    /// Bounding box of the path after provided transformation is applied.
     pub fn bbox(&self, tr: Transform) -> Option<BBox> {
         let mut iter = self.subpaths.iter().map(|sp| sp.bbox(tr));
         let bbox = iter.next()?;
         Some(iter.fold(bbox, |bbox, other| bbox.union(other)))
     }
 
+    /// Rasterize mast for the path in into a provided surface.
+    ///
+    /// Everything that is outside of the surface will be cropped. Surface is assumed
+    /// to contain zeros.
     pub fn rasterize_to<S: SurfaceMut<Item = Scalar>>(
         &self,
         tr: Transform,
@@ -939,14 +944,20 @@ impl Path {
         surf
     }
 
-    pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<SurfaceOwned<Scalar>> {
-        let bbox = self.bbox(tr)?;
+    /// Rasteraize mask for the path into an allocated surface.
+    ///
+    /// Surface of required size will be allocated.
+    pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> SurfaceOwned<Scalar> {
+        let bbox = match self.bbox(tr) {
+            Some(bbox) => bbox,
+            None => return SurfaceOwned::new(0, 0),
+        };
         // one pixel border to account for anti-aliasing
         let width = (bbox.width() + 2.0).ceil() as usize;
         let height = (bbox.height() + 2.0).ceil() as usize;
         let surf = SurfaceOwned::new(height, width);
         let shift = Transform::default().translate(1.0 - bbox.x(), 1.0 - bbox.y());
-        Some(self.rasterize_to(shift.matmul(&tr), fill_rule, surf))
+        self.rasterize_to(shift.matmul(&tr), fill_rule, surf)
     }
 }
 
@@ -1994,14 +2005,14 @@ mod tests {
         let x1 = 150; // middle of the first box
         let x2 = 250; // middle of the second box
 
-        let surf = path.rasterize(tr, FillRule::EvenOdd).unwrap();
+        let surf = path.rasterize(tr, FillRule::EvenOdd);
         assert_approx_eq!(surf.get(y, x0).unwrap(), 0.0);
         assert_approx_eq!(surf.get(y, x1).unwrap(), 0.0);
         assert_approx_eq!(surf.get(y, x2).unwrap(), 0.0);
         let area = surf.iter().sum::<Scalar>();
         assert_approx_eq!(area, 13130.0, 1.0);
 
-        let surf = path.rasterize(tr, FillRule::NonZero).unwrap();
+        let surf = path.rasterize(tr, FillRule::NonZero);
         assert_approx_eq!(surf.get(y, x0).unwrap(), 1.0);
         assert_approx_eq!(surf.get(y, x1).unwrap(), 1.0);
         assert_approx_eq!(surf.get(y, x2).unwrap(), 0.0);
