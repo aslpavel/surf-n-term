@@ -841,7 +841,7 @@ impl SubPath {
         Self { segments, closed }
     }
 
-    fn flatten<'a>(
+    pub fn flatten<'a>(
         &'a self,
         tr: Transform,
         flatness: Scalar,
@@ -894,27 +894,30 @@ impl fmt::Debug for Path {
 }
 
 impl Path {
+    /// Create path from the list of subpaths
     pub fn new(subpaths: Vec<SubPath>) -> Self {
         Self { subpaths }
     }
 
+    /// Convenience method to create `PathBuilder`
     pub fn builder() -> PathBuilder {
         PathBuilder::new()
     }
 
-    pub fn flatten_simple<'a>(
-        &'a self,
-        tr: Transform,
-        flatness: Scalar,
-        close: bool,
-    ) -> impl Iterator<Item = Line> + 'a {
-        self.subpaths
-            .iter()
-            .flat_map(move |subpath| subpath.flatten(tr, flatness, close))
-    }
-
     pub fn flatten(&self, tr: Transform, flatness: Scalar, close: bool) -> PathFlattenIter {
         PathFlattenIter::new(self, tr, flatness, close)
+    }
+
+    pub fn rasterize_in(
+        &self,
+        tr: Transform,
+        fill_rule: FillRule,
+        mut surf: impl SurfaceMut<Item = Scalar>,
+    ) {
+        for line in self.flatten(tr, FLATNESS, true) {
+            signed_difference_line(&mut surf, line);
+        }
+        signed_difference_to_mask(&mut surf, fill_rule)
     }
 
     pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<SurfaceOwned<Scalar>> {
@@ -1999,6 +2002,40 @@ mod tests {
             ),
         ]);
         assert_eq!(format!("{:?}", path), format!("{:?}", reference));
+        Ok(())
+    }
+
+    #[test]
+    fn test_fill_rule() -> Result<(), PathParseError> {
+        let path: Path = r#"
+            M50,0 21,90 98,35 2,35 79,90z
+            M110,0 h90 v90 h-90z
+            M130,20 h50 v50 h-50 z
+            M210,0  h90 v90 h-90 z
+            M230,20 v50 h50 v-50 z
+        "#
+        .parse()?;
+        let y = 50;
+        let x0 = 50; // middle of the star
+        let x1 = 150; // middle of the first box
+        let x2 = 250; // middle of the second box
+
+        let tr = Transform::default();
+
+        let even_odd = path.rasterize(tr, FillRule::EvenOdd).unwrap();
+        assert_approx_eq!(even_odd.get(y, x0).unwrap(), 0.0);
+        assert_approx_eq!(even_odd.get(y, x1).unwrap(), 0.0);
+        assert_approx_eq!(even_odd.get(y, x2).unwrap(), 0.0);
+        let area = even_odd.iter().sum::<Scalar>();
+        assert_approx_eq!(area, 13130.0, 1.0);
+
+        let non_zero = path.rasterize(tr, FillRule::NonZero).unwrap();
+        assert_approx_eq!(non_zero.get(y, x0).unwrap(), 1.0);
+        assert_approx_eq!(non_zero.get(y, x1).unwrap(), 1.0);
+        assert_approx_eq!(non_zero.get(y, x2).unwrap(), 0.0);
+        let area = non_zero.iter().sum::<Scalar>();
+        assert_approx_eq!(area, 16492.5, 1.0);
+
         Ok(())
     }
 }
