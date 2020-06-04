@@ -13,12 +13,10 @@ pub use crate::surface::*;
 
 pub type Scalar = f64;
 const EPSILON: f64 = std::f64::EPSILON;
-const INFINITY: f64 = std::f64::INFINITY;
-const NEG_INFINITY: f64 = std::f64::NEG_INFINITY;
 const PI: f64 = std::f64::consts::PI;
 
-/// flatness of 0.1px gives good accuracy tradeoff
-const FLATNESS: Scalar = 0.1;
+/// flatness of 0.05px gives good accuracy tradeoff
+const FLATNESS: Scalar = 0.05;
 
 #[derive(Clone, Copy)]
 pub struct Point([Scalar; 2]);
@@ -922,71 +920,33 @@ impl Path {
         PathFlattenIter::new(self, tr, flatness, close)
     }
 
-    pub fn rasterize_in(
-        &self,
-        tr: Transform,
-        fill_rule: FillRule,
-        mut surf: impl SurfaceMut<Item = Scalar>,
-    ) {
-        for line in self.flatten(tr, FLATNESS, true) {
-            signed_difference_line(&mut surf, line);
-        }
-        signed_difference_to_mask(&mut surf, fill_rule)
-    }
-
-    pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<SurfaceOwned<Scalar>> {
-        // flatten all curves
-        let lines: Vec<Line> = timeit("[flatten]", || self.flatten(tr, FLATNESS, true).collect());
-        if lines.is_empty() {
-            return None;
-        }
-        debug!("[lines]: {}", lines.len());
-
-        // determine size of output layer
-        let (min_x, min_y, max_x, max_y) = timeit("[size]", || {
-            lines.iter().fold(
-                (INFINITY, INFINITY, NEG_INFINITY, NEG_INFINITY),
-                |(min_x, min_y, max_x, max_y), Line([p0, p1])| {
-                    (
-                        min_x.min(p0.x().min(p1.x())),
-                        min_y.min(p0.y().min(p1.y())),
-                        max_x.max(p0.x().max(p1.x())),
-                        max_y.max(p0.y().max(p1.y())),
-                    )
-                },
-            )
-        });
-        // one pixel broder to account for anti-aliasing
-        let x = min_x.floor() as i32 - 1;
-        let y = min_y.floor() as i32 - 1;
-        let width = max_x.ceil() as i32 - x + 1;
-        let height = max_y.ceil() as i32 - y + 1;
-
-        if width == 0 || height == 0 {
-            return None;
-        }
-
-        // calculate signed coverage
-        let mut surf: SurfaceOwned<Scalar> = timeit("[alloc]", || {
-            SurfaceOwned::new(height as usize, width as usize)
-        });
-        timeit("[coverage]", || {
-            let offset = Transform::default().translate(-x as Scalar, -y as Scalar);
-            for line in lines {
-                signed_difference_line(&mut surf, line.transform(offset));
-            }
-        });
-
-        // cummulative sum over rows
-        timeit("[mask]", || signed_difference_to_mask(&mut surf, fill_rule));
-
-        Some(surf)
-    }
-
     pub fn bbox(&self, tr: Transform) -> Option<BBox> {
         let mut iter = self.subpaths.iter().map(|sp| sp.bbox(tr));
         let bbox = iter.next()?;
         Some(iter.fold(bbox, |bbox, other| bbox.union(other)))
+    }
+
+    pub fn rasterize_to<S: SurfaceMut<Item = Scalar>>(
+        &self,
+        tr: Transform,
+        fill_rule: FillRule,
+        mut surf: S,
+    ) -> S {
+        for line in self.flatten(tr, FLATNESS, true) {
+            signed_difference_line(&mut surf, line);
+        }
+        signed_difference_to_mask(&mut surf, fill_rule);
+        surf
+    }
+
+    pub fn rasterize(&self, tr: Transform, fill_rule: FillRule) -> Option<SurfaceOwned<Scalar>> {
+        let bbox = self.bbox(tr)?;
+        // one pixel border to account for anti-aliasing
+        let width = (bbox.width() + 2.0).ceil() as usize;
+        let height = (bbox.height() + 2.0).ceil() as usize;
+        let surf = SurfaceOwned::new(height, width);
+        let shift = Transform::default().translate(1.0 - bbox.x(), 1.0 - bbox.y());
+        Some(self.rasterize_to(shift.matmul(&tr), fill_rule, surf))
     }
 }
 
@@ -1674,7 +1634,7 @@ fn signed_difference_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) 
         p0.x()
     };
     let mut x_next = x;
-    for y in y..min(shape.height, p1.y().ceil() as usize) {
+    for y in y..min(shape.height, p1.y().ceil().max(0.0) as usize) {
         x = x_next;
         let line_offset = shape.offset(y, 0); // current line offset in the data array
         let dy = ((y + 1) as Scalar).min(p1.y()) - (y as Scalar).max(p0.y());
@@ -1868,6 +1828,7 @@ impl Color for Scalar {
     }
 
     fn to_rgba(&self) -> [u8; 4] {
+        // let color = (clamp(1.0 - *self, 0.0, 1.0) * 255.0).round() as u8;
         let color = (linear_to_srgb(1.0 - *self) * 255.0).round() as u8;
         [color; 4]
     }
