@@ -957,21 +957,15 @@ impl Path {
         if surf.height() < 3 || surf.height() < 3 {
             return surf;
         }
-        let bbox = match self.bbox(tr) {
+        let src_bbox = match self.bbox(tr) {
             Some(bbox) if bbox.width() > 0.0 && bbox.height() > 0.0 => bbox,
             _ => return surf,
         };
-        let sw = surf.width() as Scalar;
-        let sh = surf.height() as Scalar;
-        let scale = ((sw - 2.0) / bbox.width()).min((sh - 2.0) / bbox.height());
-        let fit = Transform::default()
-            .translate(
-                (sw - bbox.width() * scale) / 2.0,
-                (sh - bbox.height() * scale) / 2.0,
-            )
-            .scale(scale, scale)
-            .translate(-bbox.x(), -bbox.y());
-        self.rasterize_to(fit * tr, fill_rule, surf)
+        let dst_bbox = BBox::new(
+            Point::new(1.0, 1.0),
+            Point::new((surf.width() - 1) as Scalar, (surf.height() - 1) as Scalar),
+        );
+        self.rasterize_to(Transform::fit(src_bbox, dst_bbox) * tr, fill_rule, surf)
     }
 
     /// Rasteraize mask for the path into an allocated surface.
@@ -1504,6 +1498,18 @@ impl Transform {
             s10 * o01 + s11 * o11,
             s10 * o02 + s11 * o12 + s12,
         ])
+    }
+
+    pub fn fit(src: BBox, dst: BBox) -> Transform {
+        let scale = (dst.height() / src.height()).min(dst.width() / src.width());
+        Transform::default()
+            .translate(
+                (dst.width() - src.width() * scale) / 2.0,
+                (dst.height() - src.height() * scale) / 2.0,
+            )
+            .translate(dst.x(), dst.y())
+            .scale(scale, scale)
+            .translate(-src.x(), -src.y())
     }
 }
 
