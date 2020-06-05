@@ -916,6 +916,7 @@ impl Path {
         PathBuilder::new()
     }
 
+    /// Convert path to an iterator over line segments
     pub fn flatten(&self, tr: Transform, flatness: Scalar, close: bool) -> PathFlattenIter {
         PathFlattenIter::new(self, tr, flatness, close)
     }
@@ -942,6 +943,35 @@ impl Path {
         }
         signed_difference_to_mask(&mut surf, fill_rule);
         surf
+    }
+
+    /// Rasterize fitted mask for the path into a provided sruface.
+    ///
+    /// Path is rescaled and centered appropriately to fit into a provided surface.
+    pub fn rasterize_fit<S: SurfaceMut<Item = Scalar>>(
+        &self,
+        tr: Transform,
+        fill_rule: FillRule,
+        surf: S,
+    ) -> S {
+        if surf.height() < 3 || surf.height() < 3 {
+            return surf;
+        }
+        let bbox = match self.bbox(tr) {
+            Some(bbox) if bbox.width() > 0.0 && bbox.height() > 0.0 => bbox,
+            _ => return surf,
+        };
+        let sw = surf.width() as Scalar;
+        let sh = surf.height() as Scalar;
+        let scale = ((sw - 2.0) / bbox.width()).min((sh - 2.0) / bbox.height());
+        let fit = Transform::default()
+            .translate(
+                (sw - bbox.width() * scale) / 2.0,
+                (sh - bbox.height() * scale) / 2.0,
+            )
+            .scale(scale, scale)
+            .translate(-bbox.x(), -bbox.y());
+        self.rasterize_to(fit * tr, fill_rule, surf)
     }
 
     /// Rasteraize mask for the path into an allocated surface.
