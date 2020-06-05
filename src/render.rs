@@ -823,6 +823,14 @@ impl SubPath {
         }
     }
 
+    pub fn closed(&self) -> bool {
+        self.closed
+    }
+
+    pub fn segements(&self) -> &[Segment] {
+        &self.segments
+    }
+
     pub fn flatten<'a>(
         &'a self,
         tr: Transform,
@@ -887,6 +895,10 @@ impl Path {
     /// Create path from the list of subpaths
     pub fn new(subpaths: Vec<SubPath>) -> Self {
         Self { subpaths }
+    }
+
+    pub fn subpaths(&self) -> &[SubPath] {
+        &self.subpaths
     }
 
     /// Convenience method to create `PathBuilder`
