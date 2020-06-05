@@ -5,6 +5,8 @@ authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-env_logger = "*"
-log = "*"
-png = "*"
+log = "0.4.8"
+png = "0.16.4"
+
+[dev-dependencies]
+env_logger = "0.7.1"

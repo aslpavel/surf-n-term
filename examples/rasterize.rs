@@ -1,55 +1,38 @@
-use rasterize::{surf_to_png, surf_to_ppm, timeit, FillRule, Path, Surface, Transform};
-use std::str::FromStr;
+use env_logger::Env;
+use rasterize::{surf_to_png, timeit, FillRule, Path, Transform};
+use std::{
+    env,
+    fs::File,
+    io::{BufWriter, Read},
+};
+
 pub type Error = Box<dyn std::error::Error>;
 
 pub fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
-    use std::{fs::File, io::Read};
     let mut file = File::open(path)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
-    Ok(timeit("[parse]", || Path::from_str(&contents))?)
+    Ok(timeit("[parse]", || contents.parse())?)
 }
 
-pub const SQUIRREL: &str = "M12 1C9.79 1 8 2.31 8 3.92c0 1.94.5 3.03 0 6.08 0-4.5-2.77-6.34-4-6.34.05-.5-.48-.66-.48-.66s-.22.11-.3.34c-.27-.31-.56-.27-.56-.27l-.13.58S.7 4.29 .68 6.87c.2.33 1.53.6 2.47.43.89.05.67.79.47.99C2.78 9.13 2 8 1 8S0 9 1 9s1 1 3 1c-3.09 1.2 0 4 0 4H3c-1 0-1 1-1 1h6c3 0 5-1 5-3.47 0-.85-.43-1.79 -1-2.53-1.11-1.46.23-2.68 1-2 .77.68 3 1 3-2 0-2.21-1.79-4-4-4zM2.5 6 c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z";
-pub const SQ: &str = "M62.3205,-67.9423 C43.1813,-78.9923 21.1295,-76.5974 13.0795,-62.6543 3.37949,-45.8535 2.25962,-33.9138 -17.3205,-10 5.17949,-48.9711 -9.60941,-78.756 -20.2615,-84.906 -17.3285,-88.9861 -21.1184,-93.0218 -21.1184,-93.0218 -21.1184,-93.0218 -23.5737,-93.1692 -25.4165,-91.5773 -26.2048,-95.612 -28.9163,-96.7156 -28.9163,-96.7156 L-32.9421,-92.3426 C-32.9421,-92.3426 -51.9904,-95.9501 -65.0636,-73.7066 -64.9815,-69.8487 -54.8134,-60.8604 -45.8227,-57.6327 -38.3651,-52.7497 -43.9704,-47.4411 -46.7024,-46.709 -58.177,-43.6344 -59.282,-57.3205 -67.9423,-62.3205 -76.6025,-67.3205 -81.6025,-58.6603 -72.9423,-53.6603 -64.282,-48.6603 -69.282,-40 -51.9615,-30 -84.7217,-35.0577 -71.9615,4.64102 -71.9615,4.64102 L-80.6218,-0.358984 C-89.282,-5.35898 -94.282,3.30127 -94.282,3.30127 L-42.3205,33.3013 C-16.3397,48.3013 5.98076,49.641 18.3308,28.2502 22.5808,20.889 23.5569,10.5983 22.3205,1.33975 20.0076,-16.8542 37.7124,-20.7197 40.9808,-10.9808 44.2492,-1.24179 61.9615,12.6795 76.9615,-13.3013 88.0115,-32.4404 81.4597,-56.8923 62.3205,-67.9423 Z M-44.9519,-72.141 C-47.3768,-73.541 -48.182,-76.5463 -46.782,-78.9711 -45.382,-81.396 -42.3768,-82.2013 -39.9519,-80.8013 -37.527,-79.4013 -36.7218,-76.396 -38.1218,-73.9711 -39.5218,-71.5463 -42.527,-70.741 -44.9519,-72.141 Z";
-
-pub const VERIFIED: &str = "M7.67 14.72H8.38L10.1 13H12.5L13 12.5V10.08L14.74 8.36004V7.65004L13.03 5.93004V3.49004L12.53 3.00004H10.1L8.38 1.29004H7.67L6 3.00004H3.53L3 3.50004V5.93004L1.31 7.65004V8.36004L3 10.08V12.5L3.53 13H6L7.67 14.72ZM6.16 12H4V9.87004L3.88 9.52004L2.37 8.00004L3.85 6.49004L4 6.14004V4.00004H6.16L6.52 3.86004L8 2.35004L9.54 3.86004L9.89 4.00004H12V6.14004L12.17 6.49004L13.69 8.00004L12.14 9.52004L12 9.87004V12H9.89L9.51 12.15L8 13.66L6.52 12.14L6.16 12ZM6.73004 10.4799H7.44004L11.21 6.71L10.5 6L7.09004 9.41991L5.71 8.03984L5 8.74984L6.73004 10.4799Z";
-
-pub const NOMOVE: &str = "M50,100 0,50 25,25Z L100,50 75,25Z";
-pub const STAR: &str = "M50,0 21,90 98,35 2,35 79,90z M110,0 h90 v90 h-90 z M130,20 h50 v50 h-50 zM210,0  h90 v90 h-90 z M230,20 v50 h50 v-50 z";
-pub const ARCS: &str = "M600,350 l 50,-25a80,60 -30 1,1 50,-25 l 50,-25a25,50 -30 0,1 50,-25 l 50,-25a25,75 -30 0,1 50,-25 l 50,-25a25,100 -30 0,1 50,-25 l 50,-25";
-pub const TEST: &str = "M-20.0,-10.0 L-10.0,-20.0 L20.0,10.0 L10.0,20.0 Z";
-
 fn main() -> Result<(), Error> {
-    env_logger::init();
+    env_logger::from_env(Env::default().default_filter_or("debug")).init();
 
-    // let path = Path::from_str(SQ)?;
-    // let tr = Transform::default().scale(0.5, 0.5); // .scale(12.0, 12.0);
+    let mut args = env::args();
+    if args.len() != 3 {
+        eprintln!("Usage: rasterize <file.path> <out.png>");
+        return Ok(());
+    }
+    let _cmd = args.next().unwrap();
+    let path_filename = args.next().unwrap();
+    let output_filename = args.next().unwrap();
 
-    let path = path_load("material-big.path")?;
     let tr = Transform::default();
-
+    let path = path_load(path_filename)?;
     let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
 
-    // let path = Path::from_str(VERIFIED)?;
-    // let tr = Transform::default()
-    //     .scale(12.0, 12.0)
-    //     .rotate_around(0.523598, Point::new(-8.0, -8.0))
-    //     .translate(-1.0, -1.0);
-    // let mut mask = SurfaceOwned::new(300, 300);
-    // for line in path.flatten(tr, FLATNESS, true) {
-    //     rasterize_line(&mut mask, line);
-    // }
-    // coverage_to_mask(&mut mask, FillRule::EvenOdd);
-
-    println!("{:?}", mask.shape());
-    if false {
-        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.png")?);
-        timeit("[save:png]", || surf_to_png(&mask, &mut image))?;
-    } else {
-        let mut image = std::io::BufWriter::new(std::fs::File::create("rasterize.ppm")?);
-        timeit("[save:ppm]", || surf_to_ppm(&mask, &mut image))?;
-    }
+    let mut image = BufWriter::new(File::create(output_filename)?);
+    timeit("[save:png]", || surf_to_png(&mask, &mut image))?;
 
     Ok(())
 }
