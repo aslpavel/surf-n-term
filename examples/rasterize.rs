@@ -6,9 +6,9 @@ use std::{
     io::{BufWriter, Read},
 };
 
-pub type Error = Box<dyn std::error::Error>;
+type Error = Box<dyn std::error::Error>;
 
-pub fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
+fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
     let mut file = File::open(path)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;

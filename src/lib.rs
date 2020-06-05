@@ -3,7 +3,7 @@ use std::io::Write;
 pub mod render;
 pub mod surface;
 
-pub use render::{Align, FillRule, Path, Scalar, Transform};
+pub use render::{Align, Curve, FillRule, Path, Scalar, Transform};
 pub use surface::{Surface, SurfaceMut, SurfaceOwned};
 
 #[inline]
@@ -27,6 +27,7 @@ pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
     result
 }
 
+/// Save surface as PPM
 pub fn surf_to_ppm<S, W>(surf: S, mut w: W) -> Result<(), std::io::Error>
 where
     S: Surface,
@@ -40,6 +41,7 @@ where
     Ok(())
 }
 
+/// Save surface as PNG
 pub fn surf_to_png<S, W>(surf: S, w: W) -> Result<(), png::EncodingError>
 where
     S: Surface,

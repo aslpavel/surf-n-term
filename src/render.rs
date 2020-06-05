@@ -132,7 +132,7 @@ impl Mul for Point {
 }
 
 pub trait Curve {
-    // Iterator returned by flatten method
+    /// Iterator returned by flatten method
     type FlattenIter: Iterator<Item = Line>;
 
     /// Convert curve to an iterator over line segments
