@@ -952,6 +952,7 @@ impl Path {
         &self,
         tr: Transform,
         fill_rule: FillRule,
+        align: Align,
         surf: S,
     ) -> S {
         if surf.height() < 3 || surf.height() < 3 {
@@ -965,7 +966,8 @@ impl Path {
             Point::new(1.0, 1.0),
             Point::new((surf.width() - 1) as Scalar, (surf.height() - 1) as Scalar),
         );
-        self.rasterize_to(Transform::fit(src_bbox, dst_bbox) * tr, fill_rule, surf)
+        let tr = Transform::fit(src_bbox, dst_bbox, align) * tr;
+        self.rasterize_to(tr, fill_rule, surf)
     }
 
     /// Rasteraize mask for the path into an allocated surface.
@@ -1500,17 +1502,32 @@ impl Transform {
         ])
     }
 
-    pub fn fit(src: BBox, dst: BBox) -> Transform {
+    pub fn fit(src: BBox, dst: BBox, align: Align) -> Transform {
         let scale = (dst.height() / src.height()).min(dst.width() / src.width());
-        Transform::default()
-            .translate(
-                (dst.width() - src.width() * scale) / 2.0,
-                (dst.height() - src.height() * scale) / 2.0,
-            )
+        let base = Transform::default()
             .translate(dst.x(), dst.y())
             .scale(scale, scale)
-            .translate(-src.x(), -src.y())
+            .translate(-src.x(), -src.y());
+        let align = match align {
+            Align::Min => Transform::default(),
+            Align::Mid => Transform::default().translate(
+                (dst.width() - src.width() * scale) / 2.0,
+                (dst.height() - src.height() * scale) / 2.0,
+            ),
+            Align::Max => Transform::default().translate(
+                dst.width() - src.width() * scale,
+                dst.height() - src.height() * scale,
+            ),
+        };
+        align * base
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Align {
+    Min,
+    Mid,
+    Max,
 }
 
 impl Mul<Transform> for Transform {
