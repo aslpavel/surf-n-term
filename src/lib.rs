@@ -154,8 +154,8 @@ pub trait Curve {
     /// Parametric representation of the curve at `t` (0.0 .. 1.0)
     fn at(&self, t: Scalar) -> Point;
 
-    /// Bounding box of the curve
-    fn bbox(&self) -> BBox;
+    /// Bounding box of the curve given initial bounding box.
+    fn bbox(&self, init: Option<BBox>) -> BBox;
 }
 
 /// Line segment curve
@@ -200,9 +200,9 @@ impl Curve for Line {
         (1.0 - t) * p0 + t * p1
     }
 
-    fn bbox(&self) -> BBox {
+    fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1]) = self;
-        BBox::new(*p0, *p1)
+        BBox::new(*p0, *p1).union_opt(init)
     }
 }
 
@@ -269,9 +269,9 @@ impl Curve for Quad {
         t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2
     }
 
-    fn bbox(&self) -> BBox {
+    fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1, p2]) = self;
-        let mut bbox = BBox::new(*p0, *p2);
+        let mut bbox = BBox::new(*p0, *p2).union_opt(init);
         if bbox.contains(*p1) {
             return bbox;
         }
@@ -400,9 +400,9 @@ impl Curve for Cubic {
         t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3
     }
 
-    fn bbox(&self) -> BBox {
+    fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1, p2, p3]) = self;
-        let bbox = BBox::new(*p0, *p3);
+        let bbox = BBox::new(*p0, *p3).union_opt(init);
         if bbox.contains(*p1) && bbox.contains(*p2) {
             return bbox;
         }
@@ -581,10 +581,10 @@ impl Curve for ElipArc {
         Transform::default().rotate(self.phi).apply(point) + self.center
     }
 
-    fn bbox(&self) -> BBox {
-        let mut iter = ElipArcCubicIter::new(*self).map(|cubic| cubic.bbox());
-        let bbox = iter.next().expect("ElipArcCubicIter is empty");
-        iter.fold(bbox, |bbox, other| bbox.union(other))
+    fn bbox(&self, init: Option<BBox>) -> BBox {
+        ElipArcCubicIter::new(*self)
+            .fold(init, |bbox, cubic| Some(cubic.bbox(bbox)))
+            .expect("ElipArcCubicIter is empty")
     }
 }
 
@@ -755,11 +755,11 @@ impl Curve for Segment {
         }
     }
 
-    fn bbox(&self) -> BBox {
+    fn bbox(&self, init: Option<BBox>) -> BBox {
         match self {
-            Segment::Line(line) => line.bbox(),
-            Segment::Quad(quad) => quad.bbox(),
-            Segment::Cubic(cubic) => cubic.bbox(),
+            Segment::Line(line) => line.bbox(init),
+            Segment::Quad(quad) => quad.bbox(init),
+            Segment::Cubic(cubic) => cubic.bbox(init),
         }
     }
 }
@@ -855,13 +855,11 @@ impl SubPath {
         self.segments.last().expect("SubPath is never empty").end()
     }
 
-    pub fn bbox(&self, tr: Transform) -> BBox {
-        let mut iter = self
-            .segments
+    pub fn bbox(&self, init: Option<BBox>, tr: Transform) -> BBox {
+        self.segments
             .iter()
-            .map(|segment| segment.transform(tr).bbox());
-        let bbox = iter.next().expect("SubPath is never empty");
-        iter.fold(bbox, |bbox, other| bbox.union(other))
+            .fold(init, |bbox, seg| Some(seg.transform(tr).bbox(bbox)))
+            .expect("SubPath is never empty")
     }
 }
 
@@ -907,9 +905,9 @@ impl Path {
 
     /// Bounding box of the path after provided transformation is applied.
     pub fn bbox(&self, tr: Transform) -> Option<BBox> {
-        let mut iter = self.subpaths.iter().map(|sp| sp.bbox(tr));
-        let bbox = iter.next()?;
-        Some(iter.fold(bbox, |bbox, other| bbox.union(other)))
+        self.subpaths
+            .iter()
+            .fold(None, |bbox, subpath| Some(subpath.bbox(bbox, tr)))
     }
 
     /// Rasterize mast for the path in into a provided surface.
@@ -1202,7 +1200,7 @@ pub struct PathParser<'a> {
 impl<'a> PathParser<'a> {
     fn new(text: &'a [u8]) -> PathParser<'a> {
         Self {
-            text: text.as_ref(),
+            text,
             offset: 0,
             prev_cmd: None,
             position: Point::new(0.0, 0.0),
@@ -1593,6 +1591,13 @@ impl BBox {
     pub fn union(&self, other: BBox) -> Self {
         self.extend(other.min).extend(other.max)
     }
+
+    pub fn union_opt(&self, other: Option<BBox>) -> Self {
+        match other {
+            Some(other) => self.union(other),
+            None => *self,
+        }
+    }
 }
 
 impl fmt::Debug for BBox {
@@ -1948,14 +1953,14 @@ mod tests {
     #[test]
     fn test_bbox() {
         let cubic = Cubic::new((106.0, 0.0), (0.0, 100.0), (382.0, 216.0), (324.0, 14.0));
-        let bbox = cubic.bbox();
+        let bbox = cubic.bbox(None);
         assert_approx_eq!(bbox.x(), 87.308, 0.001);
         assert_approx_eq!(bbox.y(), 0.0, 0.001);
         assert_approx_eq!(bbox.width(), 242.724, 0.001);
         assert_approx_eq!(bbox.height(), 125.140, 0.001);
 
         let quad = Quad::new((30.0, 90.0), (220.0, 200.0), (120.0, 50.0));
-        let bbox = quad.bbox();
+        let bbox = quad.bbox(None);
         assert_approx_eq!(bbox.x(), 30.0, 0.001);
         assert_approx_eq!(bbox.y(), 50.0, 0.001);
         assert_approx_eq!(bbox.width(), 124.483, 0.001);
