@@ -700,7 +700,6 @@ pub enum Segment {
     Line(Line),
     Quad(Quad),
     Cubic(Cubic),
-    ElipArc(ElipArc),
 }
 
 impl fmt::Debug for Segment {
@@ -709,7 +708,6 @@ impl fmt::Debug for Segment {
             Segment::Line(line) => line.fmt(f),
             Segment::Quad(quad) => quad.fmt(f),
             Segment::Cubic(cubic) => cubic.fmt(f),
-            Segment::ElipArc(arc) => arc.fmt(f),
         }
     }
 }
@@ -722,7 +720,6 @@ impl Curve for Segment {
             Segment::Line(line) => SegmentFlattenIter::Line(line.flatten(tr, flatness)),
             Segment::Quad(quad) => SegmentFlattenIter::Cubic(quad.flatten(tr, flatness)),
             Segment::Cubic(cubic) => SegmentFlattenIter::Cubic(cubic.flatten(tr, flatness)),
-            Segment::ElipArc(arc) => SegmentFlattenIter::ElipArc(arc.flatten(tr, flatness)),
         }
     }
 
@@ -731,7 +728,6 @@ impl Curve for Segment {
             Segment::Line(line) => line.transform(tr).into(),
             Segment::Quad(quad) => quad.transform(tr).into(),
             Segment::Cubic(cubic) => cubic.transform(tr).into(),
-            Segment::ElipArc(arc) => arc.transform(tr).into(),
         }
     }
 
@@ -740,7 +736,6 @@ impl Curve for Segment {
             Segment::Line(line) => line.start(),
             Segment::Quad(quad) => quad.start(),
             Segment::Cubic(cubic) => cubic.start(),
-            Segment::ElipArc(arc) => arc.start(),
         }
     }
 
@@ -749,7 +744,6 @@ impl Curve for Segment {
             Segment::Line(line) => line.end(),
             Segment::Quad(quad) => quad.end(),
             Segment::Cubic(cubic) => cubic.end(),
-            Segment::ElipArc(arc) => arc.end(),
         }
     }
 
@@ -758,7 +752,6 @@ impl Curve for Segment {
             Segment::Line(line) => line.at(t),
             Segment::Quad(quad) => quad.at(t),
             Segment::Cubic(cubic) => cubic.at(t),
-            Segment::ElipArc(arc) => arc.at(t),
         }
     }
 
@@ -767,7 +760,6 @@ impl Curve for Segment {
             Segment::Line(line) => line.bbox(),
             Segment::Quad(quad) => quad.bbox(),
             Segment::Cubic(cubic) => cubic.bbox(),
-            Segment::ElipArc(arc) => arc.bbox(),
         }
     }
 }
@@ -790,16 +782,9 @@ impl From<Cubic> for Segment {
     }
 }
 
-impl From<ElipArc> for Segment {
-    fn from(arc: ElipArc) -> Self {
-        Self::ElipArc(arc)
-    }
-}
-
 pub enum SegmentFlattenIter {
     Line(LineFlattenIter),
     Cubic(CubicFlattenIter),
-    ElipArc(ElipArcFlattenIter),
 }
 
 impl Iterator for SegmentFlattenIter {
@@ -809,7 +794,6 @@ impl Iterator for SegmentFlattenIter {
         match self {
             Self::Line(line) => line.next(),
             Self::Cubic(cubic) => cubic.next(),
-            Self::ElipArc(arc) => arc.next(),
         }
     }
 }
@@ -1011,9 +995,6 @@ impl PathFlattenIter {
                     Segment::Line(line) => stack.push(Ok(line.transform(tr))),
                     Segment::Quad(quad) => stack.push(Err(From::from(quad.transform(tr)))),
                     Segment::Cubic(cubic) => stack.push(Err(cubic.transform(tr))),
-                    Segment::ElipArc(arc) => {
-                        stack.extend(arc.to_cubic().map(|cubic| Err(cubic.transform(tr))))
-                    }
                 }
             }
         }
@@ -1171,7 +1152,7 @@ impl PathBuilder {
             large,
             sweep,
         );
-        self.subpath.push(arc.into());
+        self.subpath.extend(arc.to_cubic().map(Segment::from));
         self.position = p;
         self
     }
