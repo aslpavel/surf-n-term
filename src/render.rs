@@ -165,7 +165,7 @@ pub trait Curve: Sized {
     /// Parametric representation of the curve at `t` (0.0 .. 1.0)
     fn at(&self, t: Scalar) -> Point;
 
-    /// Split curve at specified parametric value
+    /// Split curve at specified parametric value `t` (0.0 .. 1.0)
     fn split_at(&self, t: Scalar) -> (Self, Self);
 
     /// Bounding box of the curve given initial bounding box.
@@ -242,10 +242,10 @@ impl fmt::Debug for Line {
 }
 
 impl Curve for Line {
-    type FlattenIter = LineFlattenIter;
+    type FlattenIter = std::option::IntoIter<Self>;
 
     fn flatten(&self, tr: Transform, _: Scalar) -> Self::FlattenIter {
-        LineFlattenIter(Some(self.transform(tr)))
+        Some(self.transform(tr)).into_iter()
     }
 
     fn transform(&self, tr: Transform) -> Self {
@@ -279,16 +279,6 @@ impl Curve for Line {
 
     fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
         out.extend(line_offset(*self, dist).map(Segment::from));
-    }
-}
-
-pub struct LineFlattenIter(Option<Line>);
-
-impl Iterator for LineFlattenIter {
-    type Item = Line;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.take()
     }
 }
 
@@ -986,8 +976,8 @@ impl From<Cubic> for Segment {
 }
 
 pub enum SegmentFlattenIter {
-    Line(LineFlattenIter),
-    Cubic(CubicFlattenIter),
+    Line(<Line as Curve>::FlattenIter),
+    Cubic(<Cubic as Curve>::FlattenIter),
 }
 
 impl Iterator for SegmentFlattenIter {
