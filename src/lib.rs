@@ -85,3 +85,65 @@ impl Color for Scalar {
         [color, color, color, 255]
     }
 }
+
+pub trait Array {
+    type Item;
+    fn size(&self) -> usize;
+    fn take(&mut self, index: usize) -> Option<Self::Item>;
+    fn put(&mut self, index: usize, value: Self::Item) -> Option<Self::Item>;
+}
+
+macro_rules! impl_array(
+    ($($size:expr),+) => {
+        $(
+            impl<T> Array for [Option<T>; $size] {
+                type Item = T;
+                fn size(&self) -> usize { $size }
+                fn take(&mut self, index: usize) -> Option<Self::Item> {
+                    self[index].take()
+                }
+                fn put(&mut self, index: usize, value: Self::Item) -> Option<Self::Item> {
+                    self[index].replace(value)
+                }
+            }
+        )+
+    }
+);
+
+impl_array!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+
+#[derive(Clone, Copy)]
+pub struct ArrayIter<A> {
+    size: usize,
+    consumed: usize,
+    array: A,
+}
+
+impl<A: Array> ArrayIter<A> {
+    pub fn new(array: A) -> Self {
+        Self {
+            consumed: 0,
+            size: 0,
+            array,
+        }
+    }
+
+    pub fn push(&mut self, item: A::Item) {
+        self.array.put(self.size, item);
+        self.size += 1;
+    }
+}
+
+impl<A: Array> Iterator for ArrayIter<A> {
+    type Item = A::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.consumed < self.size {
+            let item = self.array.take(self.consumed);
+            self.consumed += 1;
+            item
+        } else {
+            None
+        }
+    }
+}

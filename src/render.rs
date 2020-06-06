@@ -1,4 +1,4 @@
-use crate::{clamp, SurfaceMut, SurfaceOwned};
+use crate::{clamp, ArrayIter, SurfaceMut, SurfaceOwned};
 use std::{
     cmp::min,
     fmt,
@@ -509,17 +509,14 @@ impl Curve for Cubic {
         if bbox.contains(*p1) && bbox.contains(*p2) {
             return bbox;
         }
-
         // Solve for `curve'(t)_x = 0 || curve'(t)_y = 0`
         let Point([a0, a1]) = -1.0 * p0 + 3.0 * p1 - 3.0 * p2 + 1.0 * p3;
         let Point([b0, b1]) = 2.0 * p0 - 4.0 * p1 + 2.0 * p2;
         let Point([c0, c1]) = -1.0 * p0 + *p1;
         quadratic_solve(a0, b0, c0)
-            .iter()
-            .flatten()
-            .chain(quadratic_solve(a1, b1, c1).iter().flatten())
-            .filter(|t| **t >= 0.0 && **t <= 1.0)
-            .fold(bbox, |bbox, t| bbox.extend(self.at(*t)))
+            .chain(quadratic_solve(a1, b1, c1))
+            .filter(|t| *t >= 0.0 && *t <= 1.0)
+            .fold(bbox, |bbox, t| bbox.extend(self.at(t)))
     }
 
     /// Offset cubic bezier curve with a list of cubic curves
@@ -1982,21 +1979,21 @@ pub fn signed_difference_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_
     }
 }
 
-fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
-    let mut result = [None; 2];
+fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> ArrayIter<[Option<Scalar>; 2]> {
+    let mut result = ArrayIter::new([None; 2]);
     if a.abs() < EPSILON {
         if b.abs() > EPSILON {
-            result[0] = Some(-c / b);
+            result.push(-c / b);
         }
         return result;
     }
     let det = b * b - 4.0 * a * c;
     if det.abs() < EPSILON {
-        result[0] = Some(-b / (2.0 * a));
+        result.push(-b / (2.0 * a));
     } else if det > 0.0 {
         let sq = det.sqrt();
-        result[0] = Some((-b + sq) / (2.0 * a));
-        result[1] = Some((-b - sq) / (2.0 * a));
+        result.push((-b + sq) / (2.0 * a));
+        result.push((-b - sq) / (2.0 * a));
     }
     result
 }
