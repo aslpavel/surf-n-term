@@ -15,6 +15,7 @@ fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
     Ok(timeit("[parse]", || contents.parse())?)
 }
 
+// TODO: add support for "-" filenames
 fn main() -> Result<(), Error> {
     env_logger::from_env(Env::default().default_filter_or("debug")).init();
 

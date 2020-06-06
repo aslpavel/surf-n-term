@@ -2,7 +2,7 @@ use crate::{clamp, SurfaceMut, SurfaceOwned};
 use std::{
     cmp::min,
     fmt,
-    ops::{Add, Mul, Sub},
+    ops::{Add, Div, Mul, Sub},
     str::FromStr,
     usize,
 };
@@ -40,28 +40,28 @@ impl Point {
     }
 
     #[inline]
-    pub fn y(&self) -> Scalar {
+    pub fn y(self) -> Scalar {
         self.0[1]
     }
 
-    pub fn hypot(&self) -> Scalar {
+    pub fn hypot(self) -> Scalar {
         let Self([x, y]) = self;
-        x.hypot(*y)
+        x.hypot(y)
     }
 
-    pub fn dot(&self, other: &Self) -> Scalar {
+    pub fn dot(self, other: Self) -> Scalar {
         let Self([x0, y0]) = self;
         let Self([x1, y1]) = other;
         x0 * x1 + y0 * y1
     }
 
-    pub fn cross(&self, other: &Self) -> Scalar {
+    pub fn cross(self, other: Self) -> Scalar {
         let Self([x0, y0]) = self;
         let Self([x1, y1]) = other;
         x0 * y1 - y0 * x1
     }
 
-    pub fn angle_between(&self, other: &Self) -> Scalar {
+    pub fn angle_between(self, other: Self) -> Scalar {
         let angle_cos = self.dot(other) / (self.hypot() * other.hypot());
         let angle = clamp(angle_cos, -1.0, 1.0).acos();
         if self.cross(other) < 0.0 {
@@ -69,6 +69,12 @@ impl Point {
         } else {
             angle
         }
+    }
+
+    pub fn is_close_to(self, other: Point) -> bool {
+        let Self([x0, y0]) = self;
+        let Self([x1, y1]) = other;
+        (x0 - x1).abs() < EPSILON && (y0 - y1).abs() < EPSILON
     }
 }
 
@@ -95,6 +101,15 @@ impl Mul<Point> for Scalar {
     fn mul(self, other: Point) -> Self::Output {
         let Point([x, y]) = other;
         Point([self * x, self * y])
+    }
+}
+
+impl Div<Scalar> for Point {
+    type Output = Point;
+
+    fn div(self, rhs: Scalar) -> Self::Output {
+        let Point([x, y]) = self;
+        Point([x / rhs, y / rhs])
     }
 }
 
@@ -152,6 +167,9 @@ pub trait Curve {
 
     /// Bounding box of the curve given initial bounding box.
     fn bbox(&self, init: Option<BBox>) -> BBox;
+
+    /// Offset curve
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>);
 }
 
 /// Line segment curve
@@ -161,6 +179,55 @@ pub struct Line([Point; 2]);
 impl Line {
     pub fn new(p0: impl Into<Point>, p1: impl Into<Point>) -> Self {
         Self([p0.into(), p1.into()])
+    }
+
+    pub fn len(&self) -> Scalar {
+        let Self([p0, p1]) = self;
+        (*p0 - *p1).hypot()
+    }
+
+    /// Find intersection of two lines
+    ///
+    /// Returns pair of parametric `t` parameters for this line and the other.
+    /// Found by solving `self.at(t0) == self.at(t1)`. Real intersection can
+    /// be found by making sure that `0.0 <= t0 <= 1.0 && 0.0 <= t1 <= 1.0`
+    pub fn intersect(&self, other: Line) -> Option<(Scalar, Scalar)> {
+        let Line([Point([x1, y1]), Point([x2, y2])]) = *self;
+        let Line([Point([x3, y3]), Point([x4, y4])]) = other;
+        let det = (x4 - x3) * (y1 - y2) - (x1 - x2) * (y4 - y3);
+        if det.abs() < EPSILON {
+            return None;
+        }
+        let t0 = ((y3 - y4) * (x1 - x3) + (x4 - x3) * (y1 - y3)) / det;
+        let t1 = ((y1 - y2) * (x1 - x3) + (x2 - x1) * (y1 - y3)) / det;
+        Some((t0, t1))
+    }
+}
+
+fn line_offset(line: Line, dist: Scalar) -> Option<Line> {
+    let Line([p0, p1]) = line;
+    let len = line.len();
+    if len < EPSILON {
+        None
+    } else {
+        let v = p1 - p0;
+        let d = Point::new(-v.y() * dist / len, v.x() * dist / len);
+        Some(Line::new(p0 + d, p1 + d))
+    }
+}
+
+fn three_point_offset(ps: [Point; 3], dist: Scalar) -> Option<[Point; 3]> {
+    let [p0, p1, p2] = ps;
+    let l0 = line_offset(Line::new(p0, p1), dist);
+    let l1 = line_offset(Line::new(p1, p2), dist);
+    match (l0, l1) {
+        (Some(l0), None) => Some([l0.start(), l0.end(), l0.end()]),
+        (None, Some(l1)) => Some([l1.start(), l1.start(), l1.end()]),
+        (Some(l0), Some(l1)) => match l0.intersect(l1) {
+            Some((t, _)) => Some([l0.start(), l0.at(t), l1.end()]),
+            None => Some([l0.start(), l0.end(), l1.end()]),
+        },
+        _ => None,
     }
 }
 
@@ -199,6 +266,10 @@ impl Curve for Line {
     fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1]) = self;
         BBox::new(*p0, *p1).union_opt(init)
+    }
+
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        out.extend(line_offset(*self, dist).map(Segment::from));
     }
 }
 
@@ -290,6 +361,10 @@ impl Curve for Quad {
         }
 
         bbox
+    }
+
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        todo!()
     }
 }
 
@@ -414,6 +489,64 @@ impl Curve for Cubic {
             .filter(|t| **t >= 0.0 && **t <= 1.0)
             .fold(bbox, |bbox, t| bbox.extend(self.at(*t)))
     }
+
+    /// Offset cubic bezier curve with a list of cubic curves
+    ///
+    /// Offset bezier curve using Tiller-Hanson method. In short, it will just offset
+    /// line segement corresponding to control points, then find intersection of this
+    /// lines and treat them as new control points.
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        let mut queue = Vec::new();
+        queue.push(*self);
+        while let Some(cubic) = queue.pop() {
+            if cubic_offset_should_split(cubic) {
+                let (c0, c1) = cubic.split();
+                // queue in order so curves would appear in order
+                queue.push(c1);
+                queue.push(c0);
+                continue;
+            }
+            let Self([p0, p1, p2, p3]) = cubic;
+            let result = if p1.is_close_to(p2) {
+                match three_point_offset([p0, p1, p3], dist) {
+                    None => continue,
+                    Some([p0, p1, p2]) => Cubic::new(p0, p1, p1, p2),
+                }
+            } else {
+                let o0 = three_point_offset([p0, p1, p2], dist);
+                let o1 = three_point_offset([p1, p2, p3], dist);
+                match (o0, o1) {
+                    (Some([p0, p1, p2]), None) => Cubic::new(p0, p1, p2, p2),
+                    (None, Some([p0, p1, p2])) => Cubic::new(p0, p0, p1, p2),
+                    (Some([p0, p1, _]), Some([_, p2, p3])) => Cubic::new(p0, p1, p2, p3),
+                    (None, None) => continue,
+                }
+            };
+            out.extend(Some(Segment::from(result)));
+        }
+    }
+}
+
+/// Determine if cubic curve needs splitting before offsetting.
+fn cubic_offset_should_split(cubic: Cubic) -> bool {
+    let Cubic([p0, p1, p2, p3]) = cubic;
+    // angle(p3 - p0, p2 - p1) > 90 or < -90
+    if (p3 - p0).dot(p2 - p1) < 0.0 {
+        return true;
+    }
+    // control points should be on the same side of the baseline.
+    let a0 = (p3 - p0).cross(p1 - p0);
+    let a1 = (p3 - p0).cross(p2 - p0);
+    if a0 * a1 < 0.0 {
+        return true;
+    }
+    // distance between center mass and midpoint of a cruve,
+    // should be bigger then 0.1 of the bounding box diagonal
+    let c_mass = (p0 + p1 + p2 + p3) / 4.0;
+    let c_mid = cubic.at(0.5);
+    let dist = (c_mass - c_mid).hypot();
+
+    false
 }
 
 pub struct CubicFlattenIter {
@@ -522,9 +655,9 @@ impl ElipArc {
         let v1 = Point([(x1 - cx) / rx, (y1 - cy) / ry]);
         let v2 = Point([(-x1 - cx) / rx, (-y1 - cy) / ry]);
         // initial angle
-        let eta = v0.angle_between(&v1);
+        let eta = v0.angle_between(v1);
         //delta angle to be covered when t changes from 0..1
-        let eta_delta = v1.angle_between(&v2).rem_euclid(2.0 * PI);
+        let eta_delta = v1.angle_between(v2).rem_euclid(2.0 * PI);
         let eta_delta = if !sweep_flag && eta_delta > 0.0 {
             eta_delta - 2.0 * PI
         } else if sweep_flag && eta_delta < 0.0 {
@@ -581,6 +714,10 @@ impl Curve for ElipArc {
         ElipArcCubicIter::new(*self)
             .fold(init, |bbox, cubic| Some(cubic.bbox(bbox)))
             .expect("ElipArcCubicIter is empty")
+    }
+
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        todo!()
     }
 }
 
@@ -756,6 +893,14 @@ impl Curve for Segment {
             Segment::Line(line) => line.bbox(init),
             Segment::Quad(quad) => quad.bbox(init),
             Segment::Cubic(cubic) => cubic.bbox(init),
+        }
+    }
+
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        match self {
+            Segment::Line(line) => line.offset(dist, out),
+            Segment::Quad(quad) => quad.offset(dist, out),
+            Segment::Cubic(cubic) => cubic.offset(dist, out),
         }
     }
 }
@@ -1787,6 +1932,12 @@ pub fn signed_difference_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_
 
 fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> [Option<Scalar>; 2] {
     let mut result = [None; 2];
+    if a.abs() < EPSILON {
+        if b.abs() > EPSILON {
+            result[0] = Some(-c / b);
+        }
+        return result;
+    }
     let det = b * b - 4.0 * a * c;
     if det.abs() < EPSILON {
         result[0] = Some(-b / (2.0 * a));
@@ -1881,6 +2032,20 @@ mod tests {
         assert_approx_eq!(bbox.y(), 50.0, 0.001);
         assert_approx_eq!(bbox.width(), 124.483, 0.001);
         assert_approx_eq!(bbox.height(), 86.538, 0.001);
+
+        let cubic = Cubic::new((0.0, 0.0), (10.0, -3.0), (-4.0, -3.0), (6.0, 0.0));
+        let bbox = cubic.bbox(None);
+        assert_approx_eq!(bbox.x(), 0.0);
+        assert_approx_eq!(bbox.y(), -2.25);
+        assert_approx_eq!(bbox.width(), 6.0);
+        assert_approx_eq!(bbox.height(), 2.25);
+
+        let path: Path = SQUIRREL.parse().unwrap();
+        let bbox = path.bbox(Transform::default()).unwrap();
+        assert_approx_eq!(bbox.x(), 0.25);
+        assert_approx_eq!(bbox.y(), 1.0);
+        assert_approx_eq!(bbox.width(), 15.75);
+        assert_approx_eq!(bbox.height(), 14.0);
     }
 
     const SQUIRREL: &str = r#"
