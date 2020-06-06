@@ -146,7 +146,7 @@ impl Mul for Point {
     }
 }
 
-pub trait Curve {
+pub trait Curve: Sized {
     /// Iterator returned by flatten method
     type FlattenIter: Iterator<Item = Line>;
 
@@ -164,6 +164,9 @@ pub trait Curve {
 
     /// Parametric representation of the curve at `t` (0.0 .. 1.0)
     fn at(&self, t: Scalar) -> Point;
+
+    /// Split curve at specified parametric value
+    fn split_at(&self, t: Scalar) -> (Self, Self);
 
     /// Bounding box of the curve given initial bounding box.
     fn bbox(&self, init: Option<BBox>) -> BBox;
@@ -263,6 +266,12 @@ impl Curve for Line {
         (1.0 - t) * p0 + t * p1
     }
 
+    fn split_at(&self, t: Scalar) -> (Self, Self) {
+        let Self([p0, p1]) = self;
+        let mid = self.at(t);
+        (Self([*p0, mid]), Self([mid, *p1]))
+    }
+
     fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1]) = self;
         BBox::new(*p0, *p1).union_opt(init)
@@ -336,13 +345,24 @@ impl Curve for Quad {
         t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2
     }
 
+    fn split_at(&self, t: Scalar) -> (Self, Self) {
+        // https://pomax.github.io/bezierinfo/#matrixsplit
+        let Self([p0, p1, p2]) = self;
+        let (t1, t_1) = (t, 1.0 - t);
+        let (t2, t_2) = (t1 * t1, t_1 * t_1);
+        let mid = t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2;
+        (
+            Self([*p0, t_1 * p0 + t * p1, mid]),
+            Self([mid, t_1 * p1 + t * p2, *p2]),
+        )
+    }
+
     fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1, p2]) = self;
         let mut bbox = BBox::new(*p0, *p2).union_opt(init);
         if bbox.contains(*p1) {
             return bbox;
         }
-
         let Point([a0, a1]) = *p2 - 2.0 * p1 + *p0;
         let Point([b0, b1]) = *p1 - *p0;
         // curve'(t)_x = 0
@@ -363,7 +383,7 @@ impl Curve for Quad {
         bbox
     }
 
-    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+    fn offset(&self, _dist: Scalar, _out: &mut impl Extend<Segment>) {
         todo!()
     }
 }
@@ -415,23 +435,23 @@ impl Cubic {
         (u.x() * u.x()).max(v.x() * v.x()) + (u.y() * u.y()).max(v.y() * v.y())
     }
 
-    /// Split cubic curve at `t = 0.5`
+    /// Optimized version of `split_at(0.5)`
     fn split(&self) -> (Self, Self) {
         let Self([p0, p1, p2, p3]) = self;
         let mid = 0.125 * p0 + 0.375 * p1 + 0.375 * p2 + 0.125 * p3;
-        let left = Self([
+        let c0 = Self([
             *p0,
             0.5 * p0 + 0.5 * p1,
             0.25 * p0 + 0.5 * p1 + 0.25 * p2,
             mid,
         ]);
-        let right = Self([
+        let c1 = Self([
             mid,
             0.25 * p1 + 0.5 * p2 + 0.25 * p3,
             0.5 * p2 + 0.5 * p3,
             *p3,
         ]);
-        (left, right)
+        (c0, c1)
     }
 }
 
@@ -471,6 +491,28 @@ impl Curve for Cubic {
         t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3
     }
 
+    fn split_at(&self, t: Scalar) -> (Self, Self) {
+        // https://pomax.github.io/bezierinfo/#matrixsplit
+        let Self([p0, p1, p2, p3]) = self;
+        let (t1, t_1) = (t, 1.0 - t);
+        let (t2, t_2) = (t1 * t1, t_1 * t_1);
+        let (t3, t_3) = (t2 * t1, t_2 * t_1);
+        let mid = t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3;
+        let c0 = Self([
+            *p0,
+            t_1 * p0 + t * p1,
+            t_2 * p0 + 2.0 * t * t_1 * p1 + t2 * p2,
+            mid,
+        ]);
+        let c1 = Self([
+            mid,
+            t_2 * p1 + 2.0 * t * t_1 * p2 + t2 * p3,
+            t_1 * p2 + t * p3,
+            *p3,
+        ]);
+        (c0, c1)
+    }
+
     fn bbox(&self, init: Option<BBox>) -> BBox {
         let Self([p0, p1, p2, p3]) = self;
         let bbox = BBox::new(*p0, *p3).union_opt(init);
@@ -501,7 +543,7 @@ impl Curve for Cubic {
         while let Some(cubic) = queue.pop() {
             if cubic_offset_should_split(cubic) {
                 let (c0, c1) = cubic.split();
-                // queue in order so curves would appear in order
+                // queue in reverse order so curves would appear in order
                 queue.push(c1);
                 queue.push(c0);
                 continue;
@@ -544,9 +586,8 @@ fn cubic_offset_should_split(cubic: Cubic) -> bool {
     // should be bigger then 0.1 of the bounding box diagonal
     let c_mass = (p0 + p1 + p2 + p3) / 4.0;
     let c_mid = cubic.at(0.5);
-    let dist = (c_mass - c_mid).hypot();
-
-    false
+    let _dist = (c_mass - c_mid).hypot();
+    todo!()
 }
 
 pub struct CubicFlattenIter {
@@ -710,13 +751,17 @@ impl Curve for ElipArc {
         Transform::default().rotate(self.phi).apply(point) + self.center
     }
 
+    fn split_at(&self, _t: Scalar) -> (Self, Self) {
+        todo!()
+    }
+
     fn bbox(&self, init: Option<BBox>) -> BBox {
         ElipArcCubicIter::new(*self)
             .fold(init, |bbox, cubic| Some(cubic.bbox(bbox)))
             .expect("ElipArcCubicIter is empty")
     }
 
-    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+    fn offset(&self, _dist: Scalar, _out: &mut impl Extend<Segment>) {
         todo!()
     }
 }
@@ -885,6 +930,23 @@ impl Curve for Segment {
             Segment::Line(line) => line.at(t),
             Segment::Quad(quad) => quad.at(t),
             Segment::Cubic(cubic) => cubic.at(t),
+        }
+    }
+
+    fn split_at(&self, t: Scalar) -> (Self, Self) {
+        match self {
+            Segment::Line(line) => {
+                let (l0, l1) = line.split_at(t);
+                (l0.into(), l1.into())
+            }
+            Segment::Quad(quad) => {
+                let (q0, q1) = quad.split_at(t);
+                (q0.into(), q1.into())
+            }
+            Segment::Cubic(cubic) => {
+                let (c0, c1) = cubic.split_at(t);
+                (c0.into(), c1.into())
+            }
         }
     }
 
@@ -2167,5 +2229,14 @@ mod tests {
         let p2 = inv.apply(p1);
         assert_approx_eq!(p2.x(), 1.0, 1e-6);
         assert_approx_eq!(p2.y(), 1.0, 1e-6);
+    }
+
+    #[test]
+    fn test_split_at() {
+        let cubic = Cubic::new((3.0, 7.0), (2.0, 8.0), (0.0, 3.0), (6.0, 5.0));
+        assert_eq!(
+            format!("{:?}", cubic.split()),
+            format!("{:?}", cubic.split_at(0.5))
+        );
     }
 }
