@@ -12,7 +12,7 @@ const EPSILON: f64 = std::f64::EPSILON;
 const PI: f64 = std::f64::consts::PI;
 
 /// flatness of 0.05px gives good accuracy tradeoff
-const FLATNESS: Scalar = 0.05;
+pub const FLATNESS: Scalar = 0.05;
 
 #[derive(Clone, Copy)]
 pub struct Point([Scalar; 2]);
@@ -148,7 +148,7 @@ impl Mul for Point {
 
 pub trait Curve: Sized {
     /// Iterator returned by flatten method
-    type FlattenIter: Iterator<Item = Line>;
+    type FlattenIter: IntoIterator<Item = Line>;
 
     /// Convert curve to an iterator over line segments
     fn flatten(&self, tr: Transform, flatness: Scalar) -> Self::FlattenIter;
@@ -1101,7 +1101,12 @@ impl Path {
     }
 
     /// Convert path to an iterator over line segments
-    pub fn flatten(&self, tr: Transform, flatness: Scalar, close: bool) -> PathFlattenIter {
+    pub fn flatten(
+        &self,
+        tr: Transform,
+        flatness: Scalar,
+        close: bool,
+    ) -> impl Iterator<Item = Line> + '_ {
         PathFlattenIter::new(self, tr, flatness, close)
     }
 
@@ -1171,57 +1176,69 @@ impl Path {
     }
 }
 
-pub struct PathFlattenIter {
-    stack: Vec<Result<Line, Cubic>>,
+pub struct PathFlattenIter<'a> {
+    path: &'a Path,
+    transform: Transform,
     flatness: Scalar,
+    close: bool,
+    subpath: usize,
+    segment: usize,
+    stack: Vec<Cubic>,
 }
 
-impl PathFlattenIter {
-    fn new(path: &Path, tr: Transform, flatness: Scalar, close: bool) -> Self {
-        let size: usize = path
-            .subpaths
-            .iter()
-            .map(|subpath| subpath.segments.len())
-            .sum();
-        let mut stack = Vec::new();
-        stack.reserve(size * 2);
-        for subpath in path.subpaths.iter().rev() {
-            if subpath.closed || close {
-                let line = Line::new(subpath.end(), subpath.start()).transform(tr);
-                stack.push(Ok(line));
-            }
-            for segment in subpath.segments.iter().rev() {
-                match segment {
-                    Segment::Line(line) => stack.push(Ok(line.transform(tr))),
-                    Segment::Quad(quad) => stack.push(Err(From::from(quad.transform(tr)))),
-                    Segment::Cubic(cubic) => stack.push(Err(cubic.transform(tr))),
-                }
-            }
-        }
-
+impl<'a> PathFlattenIter<'a> {
+    fn new(path: &'a Path, transform: Transform, flatness: Scalar, close: bool) -> Self {
         Self {
+            path,
+            transform,
             flatness: 16.0 * flatness * flatness,
-            stack,
+            close,
+            subpath: 0,
+            segment: 0,
+            stack: Default::default(),
         }
     }
 }
 
-impl Iterator for PathFlattenIter {
+impl<'a> Iterator for PathFlattenIter<'a> {
     type Item = Line;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.stack.pop() {
-                None => return None,
-                Some(Ok(line)) => return Some(line),
-                Some(Err(cubic)) if cubic.flatness() < self.flatness => {
-                    let Cubic([p0, _p1, _p2, p3]) = cubic;
-                    return Some(Line([p0, p3]));
-                }
-                Some(Err(cubic)) => {
+                Some(cubic) => {
+                    if cubic.flatness() < self.flatness {
+                        return Some(Line::new(cubic.start(), cubic.end()));
+                    }
                     let (c0, c1) = cubic.split();
-                    self.stack.push(Err(c1));
-                    self.stack.push(Err(c0));
+                    self.stack.push(c1);
+                    self.stack.push(c0);
+                }
+                None => {
+                    let subpath = self.path.subpaths.get(self.subpath)?;
+                    match subpath.segements().get(self.segment) {
+                        None => {
+                            self.subpath += 1;
+                            self.segment = 0;
+                            if subpath.closed || self.close {
+                                let line = Line::new(subpath.end(), subpath.start())
+                                    .transform(self.transform);
+                                return Some(line);
+                            }
+                        }
+                        Some(segment) => {
+                            self.segment += 1;
+                            match segment {
+                                Segment::Line(line) => return Some(line.transform(self.transform)),
+                                Segment::Quad(quad) => {
+                                    self.stack.push(quad.transform(self.transform).into());
+                                }
+                                Segment::Cubic(cubic) => {
+                                    self.stack.push(cubic.transform(self.transform));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1979,7 +1996,7 @@ pub fn signed_difference_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_
     }
 }
 
-fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> ArrayIter<[Option<Scalar>; 2]> {
+fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> impl Iterator<Item = Scalar> {
     let mut result = ArrayIter::new([None; 2]);
     if a.abs() < EPSILON {
         if b.abs() > EPSILON {
@@ -2163,6 +2180,30 @@ mod tests {
             .unwrap(),
         ]);
         assert_eq!(format!("{:?}", path), format!("{:?}", reference));
+        Ok(())
+    }
+
+    #[test]
+    fn test_flatten() -> Result<(), PathParseError> {
+        let path: Path = SQUIRREL.parse()?;
+        let tr = Transform::default()
+            .rotate(PI / 3.0)
+            .translate(-10.0, -20.0);
+        let lines: Vec<_> = path.flatten(tr, FLATNESS, true).collect();
+        let mut reference = Vec::new();
+        for subpath in path.subpaths() {
+            let subpath_lines: Vec<_> = subpath.flatten(tr, FLATNESS, false).collect();
+            // line are connected
+            for ls in subpath_lines.windows(2) {
+                assert!(ls[0].end().is_close_to(ls[1].start()));
+            }
+            reference.extend(subpath_lines);
+        }
+        assert_eq!(reference.len(), lines.len());
+        for (l0, l1) in lines.iter().zip(reference.iter()) {
+            assert!(l0.start().is_close_to(l1.start()));
+            assert!(l0.end().is_close_to(l1.end()));
+        }
         Ok(())
     }
 
