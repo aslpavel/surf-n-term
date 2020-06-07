@@ -443,6 +443,18 @@ impl Cubic {
         ]);
         (c0, c1)
     }
+
+    pub fn extremities(&self) -> impl Iterator<Item = Scalar> {
+        let Self([p0, p1, p2, p3]) = self;
+        // Solve for `curve'(t)_x = 0 || curve'(t)_y = 0`
+        let Point([a0, a1]) = -1.0 * p0 + 3.0 * p1 - 3.0 * p2 + 1.0 * p3;
+        let Point([b0, b1]) = 2.0 * p0 - 4.0 * p1 + 2.0 * p2;
+        let Point([c0, c1]) = -1.0 * p0 + *p1;
+        quadratic_solve(a0, b0, c0)
+            .chain(quadratic_solve(a1, b1, c1))
+            .filter(|t| *t >= 0.0 && *t <= 1.0)
+            .collect::<ArrayIter<[Option<Scalar>; 6]>>()
+    }
 }
 
 impl Curve for Cubic {
@@ -509,13 +521,7 @@ impl Curve for Cubic {
         if bbox.contains(*p1) && bbox.contains(*p2) {
             return bbox;
         }
-        // Solve for `curve'(t)_x = 0 || curve'(t)_y = 0`
-        let Point([a0, a1]) = -1.0 * p0 + 3.0 * p1 - 3.0 * p2 + 1.0 * p3;
-        let Point([b0, b1]) = 2.0 * p0 - 4.0 * p1 + 2.0 * p2;
-        let Point([c0, c1]) = -1.0 * p0 + *p1;
-        quadratic_solve(a0, b0, c0)
-            .chain(quadratic_solve(a1, b1, c1))
-            .filter(|t| *t >= 0.0 && *t <= 1.0)
+        self.extremities()
             .fold(bbox, |bbox, t| bbox.extend(self.at(t)))
     }
 
@@ -1997,7 +2003,7 @@ pub fn signed_difference_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_
 }
 
 fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> impl Iterator<Item = Scalar> {
-    let mut result = ArrayIter::new([None; 2]);
+    let mut result = ArrayIter::<[Option<Scalar>; 2]>::new();
     if a.abs() < EPSILON {
         if b.abs() > EPSILON {
             result.push(-c / b);

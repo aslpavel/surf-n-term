@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, iter::FromIterator};
 
 pub mod render;
 pub mod surface;
@@ -88,6 +88,7 @@ impl Color for Scalar {
 
 pub trait Array {
     type Item;
+    fn new() -> Self;
     fn size(&self) -> usize;
     fn take(&mut self, index: usize) -> Option<Self::Item>;
     fn put(&mut self, index: usize, value: Self::Item) -> Option<Self::Item>;
@@ -96,8 +97,11 @@ pub trait Array {
 macro_rules! impl_array(
     ($($size:expr),+) => {
         $(
-            impl<T> Array for [Option<T>; $size] {
+            impl<T: Copy> Array for [Option<T>; $size] {
                 type Item = T;
+                fn new() -> Self {
+                    [None; $size]
+                }
                 fn size(&self) -> usize { $size }
                 fn take(&mut self, index: usize) -> Option<Self::Item> {
                     self[index].take()
@@ -120,17 +124,39 @@ pub struct ArrayIter<A> {
 }
 
 impl<A: Array> ArrayIter<A> {
-    pub fn new(array: A) -> Self {
+    pub fn new() -> Self {
         Self {
             consumed: 0,
             size: 0,
-            array,
+            array: A::new(),
         }
     }
 
     pub fn push(&mut self, item: A::Item) {
         self.array.put(self.size, item);
         self.size += 1;
+    }
+}
+
+impl<A: Array> Extend<A::Item> for ArrayIter<A> {
+    fn extend<T: IntoIterator<Item = A::Item>>(&mut self, iter: T) {
+        for item in iter.into_iter() {
+            self.push(item);
+        }
+    }
+}
+
+impl<A> FromIterator<A::Item> for ArrayIter<A>
+where
+    A: Array,
+    A::Item: Copy,
+{
+    fn from_iter<T: IntoIterator<Item = A::Item>>(iter: T) -> Self {
+        let mut array = ArrayIter::<A>::new();
+        for item in iter.into_iter() {
+            array.push(item);
+        }
+        array
     }
 }
 
