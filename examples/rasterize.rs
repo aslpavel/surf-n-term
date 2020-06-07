@@ -8,14 +8,17 @@ use std::{
 
 type Error = Box<dyn std::error::Error>;
 
-fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
-    let mut file = File::open(path)?;
+fn path_load(path: String) -> Result<Path, Error> {
     let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    if path != "-" {
+        let mut file = File::open(path)?;
+        file.read_to_string(&mut contents)?;
+    } else {
+        std::io::stdin().read_to_string(&mut contents)?;
+    }
     Ok(timeit("[parse]", || contents.parse())?)
 }
 
-// TODO: add support for "-" filenames
 fn main() -> Result<(), Error> {
     env_logger::from_env(Env::default().default_filter_or("debug")).init();
 
@@ -32,8 +35,12 @@ fn main() -> Result<(), Error> {
     let path = path_load(path_filename)?;
     let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
 
-    let mut image = BufWriter::new(File::create(output_filename)?);
-    timeit("[save:png]", || surf_to_png(&mask, &mut image))?;
+    if output_filename != "-" {
+        let mut image = BufWriter::new(File::create(output_filename)?);
+        timeit("[save:png]", || surf_to_png(&mask, &mut image))?;
+    } else {
+        timeit("[save:png]", || surf_to_png(&mask, std::io::stdout()))?;
+    }
 
     Ok(())
 }
