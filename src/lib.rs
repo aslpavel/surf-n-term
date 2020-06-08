@@ -1,4 +1,4 @@
-use std::{io::Write, iter::FromIterator};
+use std::{fmt, io::Write, iter::FromIterator};
 
 pub mod render;
 pub mod surface;
@@ -90,6 +90,7 @@ pub trait Array {
     type Item;
     fn new() -> Self;
     fn size(&self) -> usize;
+    fn at(&self, index: usize) -> Option<&Self::Item>;
     fn take(&mut self, index: usize) -> Option<Self::Item>;
     fn put(&mut self, index: usize, value: Self::Item) -> Option<Self::Item>;
 }
@@ -103,6 +104,9 @@ macro_rules! impl_array(
                     [None; $size]
                 }
                 fn size(&self) -> usize { $size }
+                fn at(&self, index: usize) -> Option<&Self::Item> {
+                    self.get(index).and_then(|item| item.as_ref())
+                }
                 fn take(&mut self, index: usize) -> Option<Self::Item> {
                     self[index].take()
                 }
@@ -121,6 +125,21 @@ pub struct ArrayIter<A> {
     size: usize,
     consumed: usize,
     array: A,
+}
+
+impl<A> fmt::Debug for ArrayIter<A>
+where
+    A: Array,
+    A::Item: fmt::Debug,
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = fmt.debug_list();
+        for index in self.consumed..self.size {
+            self.array.at(index).map(|item| list.entry(item));
+        }
+        list.finish()?;
+        Ok(())
+    }
 }
 
 impl<A: Array> ArrayIter<A> {

@@ -528,9 +528,10 @@ impl Curve for Cubic {
     /// Offset cubic bezier curve with a list of cubic curves
     ///
     /// Offset bezier curve using Tiller-Hanson method. In short, it will just offset
-    /// line segement corresponding to control points, then find intersection of this
+    /// line segment corresponding to control points, then find intersection of this
     /// lines and treat them as new control points.
     fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        // TODO: recurse and limit the depth?
         let mut queue = Vec::new();
         queue.push(*self);
         while let Some(cubic) = queue.pop() {
@@ -1027,7 +1028,7 @@ impl SubPath {
         self.closed
     }
 
-    pub fn segements(&self) -> &[Segment] {
+    pub fn segments(&self) -> &[Segment] {
         &self.segments
     }
 
@@ -1222,7 +1223,7 @@ impl<'a> Iterator for PathFlattenIter<'a> {
                 }
                 None => {
                     let subpath = self.path.subpaths.get(self.subpath)?;
-                    match subpath.segements().get(self.segment) {
+                    match subpath.segments().get(self.segment) {
                         None => {
                             self.subpath += 1;
                             self.segment = 0;
