@@ -44,13 +44,13 @@ impl Point {
         self.0[1]
     }
 
-    pub fn hypot(self) -> Scalar {
+    pub fn length(self) -> Scalar {
         let Self([x, y]) = self;
         x.hypot(y)
     }
 
     pub fn dist(self, other: Self) -> Scalar {
-        (self - other).hypot()
+        (self - other).length()
     }
 
     pub fn dot(self, other: Self) -> Scalar {
@@ -65,8 +65,23 @@ impl Point {
         x0 * y1 - y0 * x1
     }
 
+    pub fn normal(self) -> Point {
+        let Self([x, y]) = self;
+        Self([-y, x])
+    }
+
+    pub fn normalize(self) -> Option<Point> {
+        let Self([x, y]) = self;
+        let length = self.length();
+        if length < EPSILON {
+            None
+        } else {
+            Some(Self([x / length, y / length]))
+        }
+    }
+
     pub fn angle_between(self, other: Self) -> Scalar {
-        let angle_cos = self.dot(other) / (self.hypot() * other.hypot());
+        let angle_cos = self.dot(other) / (self.length() * other.length());
         let angle = clamp(angle_cos, -1.0, 1.0).acos();
         if self.cross(other) < 0.0 {
             -angle
@@ -177,6 +192,9 @@ pub trait Curve: Sized {
 
     /// Offset curve
     fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>);
+
+    /// Derivative with respect to t at t.
+    fn deriv_at(&self, t: Scalar) -> Point;
 }
 
 /// Line segment curve
@@ -188,7 +206,7 @@ impl Line {
         Self([p0.into(), p1.into()])
     }
 
-    pub fn len(&self) -> Scalar {
+    pub fn length(&self) -> Scalar {
         let Self([p0, p1]) = self;
         p0.dist(*p1)
     }
@@ -213,14 +231,8 @@ impl Line {
 
 fn line_offset(line: Line, dist: Scalar) -> Option<Line> {
     let Line([p0, p1]) = line;
-    let len = line.len();
-    if len < EPSILON {
-        None
-    } else {
-        let v = p1 - p0;
-        let d = Point::new(-v.y() * dist / len, v.x() * dist / len);
-        Some(Line::new(p0 + d, p1 + d))
-    }
+    let offset = dist * (p1 - p0).normal().normalize()?;
+    Some(Line::new(p0 + offset, p1 + offset))
 }
 
 fn three_point_offset(ps: [Point; 3], dist: Scalar) -> Option<[Point; 3]> {
@@ -270,6 +282,11 @@ impl Curve for Line {
         (1.0 - t) * p0 + t * p1
     }
 
+    fn deriv_at(&self, _t: Scalar) -> Point {
+        let Self([p0, p1]) = self;
+        *p1 - *p0
+    }
+
     fn split_at(&self, t: Scalar) -> (Self, Self) {
         let Self([p0, p1]) = self;
         let mid = self.at(t);
@@ -306,6 +323,11 @@ impl Quad {
         let Quad([_p0, p1, p2]) = self;
         2.0 * p2 - *p1
     }
+
+    pub fn deriv(&self) -> Line {
+        let Self([p0, p1, p2]) = *self;
+        Line::new(2.0 * (p1 - p0), 2.0 * (p2 - p1))
+    }
 }
 
 impl Curve for Quad {
@@ -337,6 +359,10 @@ impl Curve for Quad {
         let (t1, t_1) = (t, 1.0 - t);
         let (t2, t_2) = (t1 * t1, t_1 * t_1);
         t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2
+    }
+
+    fn deriv_at(&self, t: Scalar) -> Point {
+        self.deriv().at(t)
     }
 
     fn split_at(&self, t: Scalar) -> (Self, Self) {
@@ -406,6 +432,11 @@ impl Cubic {
     pub fn smooth(&self) -> Point {
         let Cubic([_p0, _p1, p2, p3]) = self;
         2.0 * p3 - *p2
+    }
+
+    pub fn deriv(&self) -> Quad {
+        let Self([p0, p1, p2, p3]) = *self;
+        Quad::new(3.0 * (p1 - p0), 3.0 * (p2 - p1), 3.0 * (p3 - p2))
     }
 
     /// Flattness criteria for a batch of bezier3 curves
@@ -497,6 +528,10 @@ impl Curve for Cubic {
         t_3 * p0 + 3.0 * t1 * t_2 * p1 + 3.0 * t2 * t_1 * p2 + t3 * p3
     }
 
+    fn deriv_at(&self, t: Scalar) -> Point {
+        self.deriv().at(t)
+    }
+
     fn split_at(&self, t: Scalar) -> (Self, Self) {
         // https://pomax.github.io/bezierinfo/#matrixsplit
         let Self([p0, p1, p2, p3]) = self;
@@ -584,8 +619,8 @@ fn cubic_offset_should_split(cubic: Cubic) -> bool {
     // should be bigger then 0.1 of the bounding box diagonal
     let c_mass = (p0 + p1 + p2 + p3) / 4.0;
     let c_mid = cubic.at(0.5);
-    let dist = (c_mass - c_mid).hypot();
-    let bbox_diag = cubic.bbox(None).diag().len();
+    let dist = (c_mass - c_mid).length();
+    let bbox_diag = cubic.bbox(None).diag().length();
     bbox_diag * 0.1 > dist
 }
 
@@ -748,6 +783,10 @@ impl Curve for ElipArc {
         let (angle_sin, angle_cos) = (self.eta + t * self.eta_delta).sin_cos();
         let point = Point([self.rx * angle_cos, self.ry * angle_sin]);
         Transform::default().rotate(self.phi).apply(point) + self.center
+    }
+
+    fn deriv_at(&self, _t: Scalar) -> Point {
+        todo!()
     }
 
     fn split_at(&self, _t: Scalar) -> (Self, Self) {
@@ -943,6 +982,14 @@ impl Curve for Segment {
             Segment::Line(line) => line.at(t),
             Segment::Quad(quad) => quad.at(t),
             Segment::Cubic(cubic) => cubic.at(t),
+        }
+    }
+
+    fn deriv_at(&self, t: Scalar) -> Point {
+        match self {
+            Segment::Line(line) => line.deriv_at(t),
+            Segment::Quad(quad) => quad.deriv_at(t),
+            Segment::Cubic(cubic) => cubic.deriv_at(t),
         }
     }
 
