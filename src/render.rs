@@ -2,6 +2,7 @@ use crate::{clamp, ArrayIter, SurfaceMut, SurfaceOwned};
 use std::{
     cmp::min,
     fmt,
+    io::{Read, Write},
     ops::{Add, Div, Mul, Sub},
     str::FromStr,
     usize,
@@ -20,11 +21,10 @@ pub struct Point([Scalar; 2]);
 impl fmt::Debug for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Point([x, y]) = self;
-        write!(f, "(")?;
         scalar_fmt(f, *x)?;
         write!(f, ", ")?;
         scalar_fmt(f, *y)?;
-        write!(f, ")")
+        Ok(())
     }
 }
 
@@ -211,6 +211,10 @@ impl Line {
         p0.dist(*p1)
     }
 
+    pub fn point(&self) -> [Point; 2] {
+        self.0
+    }
+
     /// Find intersection of two lines
     ///
     /// Returns pair of parametric `t` parameters for this line and the other.
@@ -317,6 +321,10 @@ impl fmt::Debug for Quad {
 impl Quad {
     pub fn new(p0: impl Into<Point>, p1: impl Into<Point>, p2: impl Into<Point>) -> Self {
         Self([p0.into(), p1.into(), p2.into()])
+    }
+
+    pub fn points(&self) -> [Point; 3] {
+        self.0
     }
 
     pub fn smooth(&self) -> Point {
@@ -427,6 +435,10 @@ impl Cubic {
         p3: impl Into<Point>,
     ) -> Self {
         Self([p0.into(), p1.into(), p2.into(), p3.into()])
+    }
+
+    pub fn points(&self) -> [Point; 4] {
+        self.0
     }
 
     pub fn smooth(&self) -> Point {
@@ -1247,6 +1259,50 @@ impl Path {
         let shift = Transform::default().translate(1.0 - bbox.x(), 1.0 - bbox.y());
         self.rasterize_to(shift * tr, fill_rule, surf)
     }
+
+    /// Save path in SVG path format.
+    pub fn save(&self, mut out: impl Write) -> std::io::Result<()> {
+        for subpath in self.subpaths.iter() {
+            write!(&mut out, "M{:?} ", subpath.start())?;
+            for segment in subpath.segments().iter() {
+                let mut segment_type: Option<u8> = None;
+                match segment {
+                    Segment::Line(line) => {
+                        if segment_type.replace(b'L') != Some(b'L') {
+                            out.write_all(b"L")?;
+                        }
+                        write!(&mut out, "{:?} ", line.end())?;
+                    }
+                    Segment::Quad(quad) => {
+                        let [_, p1, p2] = quad.points();
+                        if segment_type.replace(b'Q') != Some(b'Q') {
+                            out.write_all(b"Q")?;
+                        }
+                        write!(&mut out, "{:?} {:?} ", p1, p2)?;
+                    }
+                    Segment::Cubic(cubic) => {
+                        let [_, p1, p2, p3] = cubic.points();
+                        if segment_type.replace(b'C') != Some(b'C') {
+                            out.write_all(b"C")?;
+                        }
+                        write!(&mut out, "{:?} {:?} {:?} ", p1, p2, p3)?;
+                    }
+                }
+            }
+            if subpath.closed() {
+                out.write_all(b"Z")?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn load(mut input: impl Read) -> std::io::Result<Self> {
+        let mut buffer = Vec::new();
+        input.read_to_end(&mut buffer)?;
+        let parser = PathParser::new(&buffer);
+        let builder = parser.parse(PathBuilder::new())?;
+        Ok(builder.build())
+    }
 }
 
 pub struct PathFlattenIter<'a> {
@@ -1472,6 +1528,12 @@ pub struct PathParseError {
 impl fmt::Display for PathParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} at {}", self.message, self.offset)
+    }
+}
+
+impl From<PathParseError> for std::io::Error {
+    fn from(error: PathParseError) -> Self {
+        Self::new(std::io::ErrorKind::InvalidData, error)
     }
 }
 
@@ -2270,6 +2332,16 @@ mod tests {
             .unwrap(),
         ]);
         assert_eq!(format!("{:?}", path), format!("{:?}", reference));
+        Ok(())
+    }
+
+    #[test]
+    fn test_save_load() -> std::io::Result<()> {
+        let path: Path = SQUIRREL.parse()?;
+        let mut path_save = Vec::new();
+        path.save(&mut path_save)?;
+        let path_load = Path::load(std::io::Cursor::new(path_save))?;
+        assert_eq!(format!("{:?}", path), format!("{:?}", path_load));
         Ok(())
     }
 
