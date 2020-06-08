@@ -3,7 +3,9 @@ use std::{fmt, io::Write, iter::FromIterator};
 pub mod render;
 pub mod surface;
 
-pub use render::{Align, Curve, FillRule, Path, Scalar, Transform};
+pub use render::{
+    Align, Cubic, Curve, FillRule, Line, Path, Point, Quad, Scalar, Segment, SubPath, Transform,
+};
 pub use surface::{Surface, SurfaceMut, SurfaceOwned};
 
 #[inline]

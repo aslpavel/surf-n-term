@@ -49,6 +49,10 @@ impl Point {
         x.hypot(y)
     }
 
+    pub fn dist(self, other: Self) -> Scalar {
+        (self - other).hypot()
+    }
+
     pub fn dot(self, other: Self) -> Scalar {
         let Self([x0, y0]) = self;
         let Self([x1, y1]) = other;
@@ -186,14 +190,14 @@ impl Line {
 
     pub fn len(&self) -> Scalar {
         let Self([p0, p1]) = self;
-        (*p0 - *p1).hypot()
+        p0.dist(*p1)
     }
 
     /// Find intersection of two lines
     ///
     /// Returns pair of parametric `t` parameters for this line and the other.
-    /// Found by solving `self.at(t0) == self.at(t1)`. Real intersection can
-    /// be found by making sure that `0.0 <= t0 <= 1.0 && 0.0 <= t1 <= 1.0`
+    /// Found by solving `self.at(t0) == self.at(t1)`. Actual intersection of
+    /// line segments can be found by making sure that `0.0 <= t0 <= 1.0 && 0.0 <= t1 <= 1.0`
     pub fn intersect(&self, other: Line) -> Option<(Scalar, Scalar)> {
         let Line([Point([x1, y1]), Point([x2, y2])]) = *self;
         let Line([Point([x3, y3]), Point([x4, y4])]) = other;
@@ -580,8 +584,9 @@ fn cubic_offset_should_split(cubic: Cubic) -> bool {
     // should be bigger then 0.1 of the bounding box diagonal
     let c_mass = (p0 + p1 + p2 + p3) / 4.0;
     let c_mid = cubic.at(0.5);
-    let _dist = (c_mass - c_mid).hypot();
-    todo!()
+    let dist = (c_mass - c_mid).hypot();
+    let bbox_diag = cubic.bbox(None).diag().len();
+    bbox_diag * 0.1 > dist
 }
 
 pub struct CubicFlattenIter {
@@ -867,11 +872,25 @@ impl Iterator for ElipArcFlattenIter {
     }
 }
 
+pub enum LineJoin {
+    Miter(Scalar),
+    Join,
+    Round,
+}
+
 #[derive(Clone, Copy)]
 pub enum Segment {
     Line(Line),
     Quad(Quad),
     Cubic(Cubic),
+}
+
+impl Segment {
+    /// Produce iterator over segments that join to segments with the specified method.
+    pub fn join(self, _other: Segment, _linejoin: LineJoin) -> impl Iterator<Item = Self> {
+        let result = ArrayIter::<[Option<Segment>; 4]>::new();
+        result
+    }
 }
 
 impl fmt::Debug for Segment {
@@ -1780,6 +1799,10 @@ impl BBox {
     #[inline]
     pub fn height(&self) -> Scalar {
         self.max.y() - self.min.y()
+    }
+
+    pub fn diag(&self) -> Line {
+        Line::new(self.min, self.max)
     }
 
     /// Determine if the point is inside of the bounding box
