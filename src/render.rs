@@ -2081,6 +2081,19 @@ mod tests {
         assert_approx_eq!(*surf.get(1, 2).unwrap(), 0.5 - 1.0 / 8.0);
         surf.clear();
 
+        // only two pixels covered
+        signed_difference_line(&mut surf, Line::new((0.1, 0.1), (1.9, 0.9)));
+        assert_approx_eq!(*surf.get(0, 0).unwrap(), 0.18);
+        assert_approx_eq!(*surf.get(0, 1).unwrap(), 0.44);
+        assert_approx_eq!(*surf.get(0, 2).unwrap(), 0.18);
+        surf.clear();
+
+        // single pixel covered
+        signed_difference_line(&mut surf, Line::new((0.1, 0.1), (0.9, 0.9)));
+        assert_approx_eq!(*surf.get(0, 0).unwrap(), 0.4);
+        assert_approx_eq!(*surf.get(0, 1).unwrap(), 0.8 - 0.4);
+        surf.clear();
+
         // multiple rows vertical
         signed_difference_line(&mut surf, Line::new((0.5, 0.5), (0.5, 1.75)));
         assert_approx_eq!(*surf.get(0, 0).unwrap(), 1.0 / 4.0);
