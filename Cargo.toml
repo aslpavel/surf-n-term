@@ -10,3 +10,8 @@ png = "0.16.4"
 
 [dev-dependencies]
 env_logger = "0.7.1"
+criterion = "0.3"
+
+[[bench]]
+name = "rasterize_bench"
+harness = false
