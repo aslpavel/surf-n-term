@@ -22,7 +22,7 @@ impl fmt::Debug for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Point([x, y]) = self;
         scalar_fmt(f, *x)?;
-        write!(f, ", ")?;
+        write!(f, ",")?;
         scalar_fmt(f, *y)?;
         Ok(())
     }
@@ -261,6 +261,18 @@ impl fmt::Debug for Line {
     }
 }
 
+impl FromStr for Line {
+    type Err = PathParseError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let segment = Segment::from_str(text)?;
+        segment.to_line().ok_or_else(|| PathParseError {
+            message: String::from("First element of the path is not a line"),
+            offset: 0,
+        })
+    }
+}
+
 impl Curve for Line {
     type FlattenIter = std::option::IntoIter<Self>;
 
@@ -315,6 +327,18 @@ impl fmt::Debug for Quad {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Quad([p0, p1, p2]) = self;
         write!(f, "Quad {:?} {:?} {:?}", p0, p1, p2)
+    }
+}
+
+impl FromStr for Quad {
+    type Err = PathParseError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let segment = Segment::from_str(text)?;
+        segment.to_quad().ok_or_else(|| PathParseError {
+            message: String::from("First element of the path is not a quad"),
+            offset: 0,
+        })
     }
 }
 
@@ -424,6 +448,18 @@ impl fmt::Debug for Cubic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Cubic([p0, p1, p2, p3]) = self;
         write!(f, "Cubic {:?} {:?} {:?} {:?}", p0, p1, p2, p3)
+    }
+}
+
+impl FromStr for Cubic {
+    type Err = PathParseError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let segment = Segment::from_str(text)?;
+        segment.to_cubic().ok_or_else(|| PathParseError {
+            message: String::from("First element of the path is not a cubic"),
+            offset: 0,
+        })
     }
 }
 
@@ -942,6 +978,27 @@ impl Segment {
         let result = ArrayIter::<[Option<Segment>; 4]>::new();
         result
     }
+
+    pub fn to_line(&self) -> Option<Line> {
+        match self {
+            Segment::Line(line) => Some(*line),
+            _ => None,
+        }
+    }
+
+    pub fn to_quad(&self) -> Option<Quad> {
+        match self {
+            Segment::Quad(quad) => Some(*quad),
+            _ => None,
+        }
+    }
+
+    pub fn to_cubic(&self) -> Option<Cubic> {
+        match self {
+            Segment::Cubic(cubic) => Some(*cubic),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Debug for Segment {
@@ -951,6 +1008,21 @@ impl fmt::Debug for Segment {
             Segment::Quad(quad) => quad.fmt(f),
             Segment::Cubic(cubic) => cubic.fmt(f),
         }
+    }
+}
+
+impl FromStr for Segment {
+    type Err = PathParseError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let path = Path::from_str(text)?;
+        path.subpaths()
+            .get(0)
+            .map(|sp| sp.first())
+            .ok_or_else(|| PathParseError {
+                message: String::from("Path is empty"),
+                offset: 0,
+            })
     }
 }
 
@@ -1110,6 +1182,14 @@ impl SubPath {
         &self.segments
     }
 
+    pub fn first(&self) -> Segment {
+        *self.segments.first().expect("SubPath is never emtpy")
+    }
+
+    pub fn last(&self) -> Segment {
+        *self.segments.last().expect("SubPath is never empty")
+    }
+
     pub fn flatten<'a>(
         &'a self,
         tr: Transform,
@@ -1128,14 +1208,11 @@ impl SubPath {
     }
 
     fn start(&self) -> Point {
-        self.segments
-            .first()
-            .expect("SubPath is never emtpy")
-            .start()
+        self.first().start()
     }
 
     fn end(&self) -> Point {
-        self.segments.last().expect("SubPath is never empty").end()
+        self.last().end()
     }
 
     pub fn bbox(&self, init: Option<BBox>, tr: Transform) -> BBox {
@@ -2155,8 +2232,8 @@ fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> impl Iterator<Item = Scal
 }
 
 fn scalar_fmt(f: &mut fmt::Formatter<'_>, value: Scalar) -> fmt::Result {
-    if value.abs() < EPSILON {
-        write!(f, "0.0")
+    if value.fract().abs() < EPSILON {
+        write!(f, "{}", value.trunc() as i64)
     } else if value.abs() > 9999.0 || value.abs() <= 0.0001 {
         write!(f, "{:.3e}", value)
     } else {
