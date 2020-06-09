@@ -211,7 +211,7 @@ impl Line {
         p0.dist(*p1)
     }
 
-    pub fn point(&self) -> [Point; 2] {
+    pub fn points(&self) -> [Point; 2] {
         self.0
     }
 
@@ -976,6 +976,39 @@ impl Segment {
     /// Produce iterator over segments that join to segments with the specified method.
     pub fn join(self, _other: Segment, _linejoin: LineJoin) -> impl Iterator<Item = Self> {
         let result = ArrayIter::<[Option<Segment>; 4]>::new();
+        result
+    }
+
+    /// Find intersection between two segments
+    ///
+    /// This might not be the fastest method possible but works for any two curves.
+    /// Divide cuves as long as there is intersection between bounding boxes, if
+    /// the intersection is smaller then tolerance we can treat it as an intersection point.
+    pub fn intersect(self, other: impl Into<Segment>, tolerance: Scalar) -> Vec<Point> {
+        let mut queue = vec![(self, other.into())];
+        let mut result = Vec::new();
+        while let Some((s0, s1)) = queue.pop() {
+            let b0 = s0.bbox(None);
+            let b1 = s1.bbox(None);
+            match b0.intersect(b1) {
+                None => continue,
+                Some(b) => {
+                    let b0_is_small = b0.width() < tolerance && b0.height() < tolerance;
+                    let b1_is_small = b1.width() < tolerance && b1.height() < tolerance;
+                    if b0_is_small && b1_is_small {
+                        result.push(b.diag().at(0.5));
+                    } else {
+                        // TODO: can be optimized by spliting only curves with large bbox
+                        let (s00, s01) = s0.split_at(0.5);
+                        let (s10, s11) = s1.split_at(0.5);
+                        queue.push((s00, s10));
+                        queue.push((s00, s11));
+                        queue.push((s01, s10));
+                        queue.push((s01, s11));
+                    }
+                }
+            }
+        }
         result
     }
 
@@ -1912,6 +1945,19 @@ impl Transform {
         ])
     }
 
+    /// Find transformation which makes line horizontal with origin at (0, 0).
+    pub fn make_horizontal(line: Line) -> Option<Transform> {
+        let [p0, p1] = line.points();
+        let sin_cos = (p1 - p0).normalize()?;
+        let sin = sin_cos.x();
+        let cos = sin_cos.y();
+        let transform = Transform::default()
+            .matmul(Self([cos, -sin, 0.0, sin, cos, 0.0]))
+            .translate(-p0.x(), -p0.y());
+        Some(transform)
+    }
+
+    /// Find transformation that is requred to fit `src` box into `dst`.
     pub fn fit(src: BBox, dst: BBox, align: Align) -> Transform {
         let scale = (dst.height() / src.height()).min(dst.width() / src.width());
         let base = Transform::default()
