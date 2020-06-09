@@ -2033,6 +2033,30 @@ impl BBox {
             None => *self,
         }
     }
+
+    pub fn intersect(&self, other: BBox) -> Option<BBox> {
+        let (x_min, x_max) =
+            range_intersect(self.min.x(), self.max.x(), other.min.x(), other.max.x())?;
+        let (y_min, y_max) =
+            range_intersect(self.min.y(), self.max.y(), other.min.y(), other.max.y())?;
+        Some(BBox::new(
+            Point::new(x_min, y_min),
+            Point::new(x_max, y_max),
+        ))
+    }
+}
+
+fn range_intersect(
+    r0_min: Scalar,
+    r0_max: Scalar,
+    r1_min: Scalar,
+    r1_max: Scalar,
+) -> Option<(Scalar, Scalar)> {
+    if r0_min > r1_max || r1_min > r0_max {
+        None
+    } else {
+        Some((r0_min.max(r1_min), r0_max.min(r1_max)))
+    }
 }
 
 impl fmt::Debug for BBox {
