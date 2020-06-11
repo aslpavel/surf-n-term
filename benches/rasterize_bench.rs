@@ -1,16 +1,31 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rasterize::{
     render::{Cubic, FLATNESS},
-    FillRule, Path, SurfaceMut, Transform,
+    FillRule, LineCap, LineJoin, Path, StrokeStyle, SurfaceMut, Transform,
 };
 use std::{fs::File, io::Read, time::Duration};
 
 fn curve_benchmark(c: &mut Criterion) {
     let path = Cubic::new((157.0, 67.0), (35.0, 200.0), (220.0, 260.0), (175.0, 45.0));
-    c.bench_function("cubic extremities", |b| b.iter(|| path.extremities()));
+    c.bench_function("cubic extremities", |b| {
+        b.iter(|| black_box(path).extremities())
+    });
 }
 
-fn path_benchmark(c: &mut Criterion) {
+fn stroke_benchmark(c: &mut Criterion) {
+    let mut file = File::open("paths/squirrel.path").expect("failed to open path");
+    let path = Path::load(&mut file).expect("failed to load path");
+    let style = StrokeStyle {
+        width: 1.0,
+        line_join: LineJoin::Round,
+        line_cap: LineCap::Round,
+    };
+    c.bench_function("path stroke", |b| {
+        b.iter_with_large_drop(|| path.stroke(style))
+    });
+}
+
+fn large_path_benchmark(c: &mut Criterion) {
     let tr = Transform::default();
     // load path
     let mut path_str = String::new();
@@ -47,6 +62,6 @@ fn path_benchmark(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(10).warm_up_time(Duration::new(1, 0));
-    targets = curve_benchmark, path_benchmark
+    targets = curve_benchmark, large_path_benchmark, stroke_benchmark
 );
 criterion_main!(benches);
