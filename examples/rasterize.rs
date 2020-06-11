@@ -110,10 +110,12 @@ fn main() -> Result<(), Error> {
         path.transform(tr);
     }
     if let Some(stroke) = args.stroke {
-        path = path.stroke(StrokeStyle {
-            width: stroke,
-            line_join: LineJoin::Round,
-            line_cap: LineCap::Round,
+        path = timeit("[stroke]", || {
+            path.stroke(StrokeStyle {
+                width: stroke,
+                line_join: LineJoin::Round,
+                line_cap: LineCap::Round,
+            })
         });
     }
     let mask = timeit("[rasterize]", || {
