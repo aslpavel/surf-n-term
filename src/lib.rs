@@ -4,7 +4,8 @@ pub mod render;
 pub mod surface;
 
 pub use render::{
-    Align, Cubic, Curve, FillRule, Line, Path, Point, Quad, Scalar, Segment, SubPath, Transform,
+    Align, Cubic, Curve, FillRule, Line, LineCap, LineJoin, Path, Point, Quad, Scalar, Segment,
+    StrokeStyle, SubPath, Transform,
 };
 pub use surface::{Surface, SurfaceMut, SurfaceOwned};
 
@@ -192,5 +193,10 @@ impl<A: Array> Iterator for ArrayIter<A> {
         } else {
             None
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.size - self.consumed;
+        (size, Some(size))
     }
 }

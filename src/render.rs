@@ -15,7 +15,7 @@ const PI: f64 = std::f64::consts::PI;
 /// flatness of 0.05px gives good accuracy tradeoff
 pub const FLATNESS: Scalar = 0.05;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Point([Scalar; 2]);
 
 impl fmt::Debug for Point {
@@ -67,7 +67,7 @@ impl Point {
 
     pub fn normal(self) -> Point {
         let Self([x, y]) = self;
-        Self([-y, x])
+        Self([y, -x])
     }
 
     pub fn normalize(self) -> Option<Point> {
@@ -80,14 +80,27 @@ impl Point {
         }
     }
 
-    pub fn angle_between(self, other: Self) -> Scalar {
-        let angle_cos = self.dot(other) / (self.length() * other.length());
-        let angle = clamp(angle_cos, -1.0, 1.0).acos();
+    pub fn angle_between(self, other: Self) -> Option<Scalar> {
+        let angle = clamp(self.cos_between(other)?, -1.0, 1.0).acos();
         if self.cross(other) < 0.0 {
-            -angle
+            Some(-angle)
         } else {
-            angle
+            Some(angle)
         }
+    }
+
+    pub fn cos_between(self, other: Self) -> Option<Scalar> {
+        let lengths = self.length() * other.length();
+        if lengths < EPSILON {
+            None
+        } else {
+            Some(self.dot(other) / lengths)
+        }
+    }
+
+    pub fn sin_between(self, other: Self) -> Option<Scalar> {
+        let cos = self.cos_between(other)?;
+        Some((1.0 - cos * cos).sqrt())
     }
 
     pub fn is_close_to(self, other: Point) -> bool {
@@ -195,10 +208,13 @@ pub trait Curve: Sized {
 
     /// Derivative with respect to t at t.
     fn deriv_at(&self, t: Scalar) -> Point;
+
+    /// Same cruve but in reverse direction.
+    fn reverse(&self) -> Self;
 }
 
 /// Line segment curve
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Line([Point; 2]);
 
 impl Line {
@@ -213,6 +229,10 @@ impl Line {
 
     pub fn points(&self) -> [Point; 2] {
         self.0
+    }
+
+    pub fn ends(&self) -> (Line, Line) {
+        (*self, *self)
     }
 
     /// Find intersection of two lines
@@ -231,6 +251,19 @@ impl Line {
         let t1 = ((y1 - y2) * (x1 - x3) + (x2 - x1) * (y1 - y3)) / det;
         Some((t0, t1))
     }
+
+    pub fn intersect_point(&self, other: Line) -> Option<Point> {
+        let (t0, t1) = self.intersect(other)?;
+        if t0 >= 0.0 && t0 <= 1.0 && t1 >= 0.0 && t1 <= 1.0 {
+            Some(self.at(t0))
+        } else {
+            None
+        }
+    }
+
+    pub fn direction(&self) -> Point {
+        self.end() - self.start()
+    }
 }
 
 fn line_offset(line: Line, dist: Scalar) -> Option<Line> {
@@ -239,18 +272,62 @@ fn line_offset(line: Line, dist: Scalar) -> Option<Line> {
     Some(Line::new(p0 + offset, p1 + offset))
 }
 
-fn three_point_offset(ps: [Point; 3], dist: Scalar) -> Option<[Point; 3]> {
-    let [p0, p1, p2] = ps;
-    let l0 = line_offset(Line::new(p0, p1), dist);
-    let l1 = line_offset(Line::new(p1, p2), dist);
-    match (l0, l1) {
-        (Some(l0), None) => Some([l0.start(), l0.end(), l0.end()]),
-        (None, Some(l1)) => Some([l1.start(), l1.start(), l1.end()]),
-        (Some(l0), Some(l1)) => match l0.intersect(l1) {
-            Some((t, _)) => Some([l0.start(), l0.at(t), l1.end()]),
-            None => Some([l0.start(), l0.end(), l1.end()]),
-        },
-        _ => None,
+/// Offset polyline specified by points `ps`.
+///
+/// Implementation correctly handles repeated points.
+/// False result indicates that all points are close to each other
+/// and it is not possible to offset them.
+fn polyline_offset(ps: &mut [Point], dist: Scalar) -> bool {
+    if ps.is_empty() {
+        return true;
+    }
+    let mut prev: Option<Line> = None;
+    let mut index = 0;
+    loop {
+        // find identical points repeats
+        let mut repeats = 1;
+        for i in index..ps.len() - 1 {
+            if !ps[i].is_close_to(ps[i + 1]) {
+                break;
+            }
+            repeats += 1;
+        }
+        if index + repeats >= ps.len() {
+            break;
+        }
+        index += repeats;
+        // offset line
+        let next = line_offset(Line::new(ps[index - 1], ps[index]), dist)
+            .expect("polyline implementation error");
+        // find where to move repeated points
+        let point = match prev {
+            None => next.start(),
+            Some(prev) => match prev.intersect(next) {
+                Some((t, _)) => prev.at(t),
+                None => {
+                    // TODO: not sure what to do especial for up/down move
+                    next.start()
+                }
+            },
+        };
+        // move repeats
+        for i in index - repeats..index {
+            ps[i] = point;
+        }
+        prev = Some(next);
+    }
+    // handle tail points
+    match prev {
+        None => {
+            // all points are close to each other, can not offset.
+            false
+        }
+        Some(prev) => {
+            for i in index..ps.len() {
+                ps[i] = prev.end()
+            }
+            true
+        }
     }
 }
 
@@ -310,17 +387,31 @@ impl Curve for Line {
     }
 
     fn bbox(&self, init: Option<BBox>) -> BBox {
-        let Self([p0, p1]) = self;
-        BBox::new(*p0, *p1).union_opt(init)
+        let Self([p0, p1]) = *self;
+        BBox::new(p0, p1).union_opt(init)
     }
 
     fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
         out.extend(line_offset(*self, dist).map(Segment::from));
     }
+
+    fn reverse(&self) -> Self {
+        let Self([p0, p1]) = *self;
+        Self([p1, p0])
+    }
 }
 
 /// Quadratic bezier curve
-#[derive(Clone, Copy)]
+///
+/// Polynimial form:
+/// `(1 - t) ^ 2 * p0 + 2 * (1 - t) * t * p1 + t ^ 2 * p2`
+/// Matrix from:
+///             ┌          ┐ ┌    ┐
+/// ┌         ┐ │  1  0  0 │ │ p0 │
+/// │ 1 t t^2 │ │ -2  2  0 │ │ p1 │
+/// └         ┘ │  1 -2  1 │ │ p2 │
+///             └          ┘ └    ┘
+#[derive(Clone, Copy, PartialEq)]
 pub struct Quad([Point; 3]);
 
 impl fmt::Debug for Quad {
@@ -349,6 +440,19 @@ impl Quad {
 
     pub fn points(&self) -> [Point; 3] {
         self.0
+    }
+
+    pub fn ends(&self) -> (Line, Line) {
+        let Self([p0, p1, p2]) = *self;
+        let start = Line::new(p0, p1);
+        let end = Line::new(p1, p2);
+        if p0.is_close_to(p1) {
+            (end, end)
+        } else if p1.is_close_to(p2) {
+            (start, start)
+        } else {
+            (start, end)
+        }
     }
 
     pub fn smooth(&self) -> Point {
@@ -435,13 +539,57 @@ impl Curve for Quad {
         bbox
     }
 
-    fn offset(&self, _dist: Scalar, _out: &mut impl Extend<Segment>) {
-        todo!()
+    fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
+        quad_offset_rec(*self, dist, out, 0)
+    }
+
+    fn reverse(&self) -> Self {
+        let Self([p0, p1, p2]) = *self;
+        Self([p2, p1, p0])
+    }
+}
+
+fn quad_offset_should_split(quad: Quad) -> bool {
+    let Quad([p0, p1, p2]) = quad;
+    // split if angle is sharp
+    if (p0 - p1).dot(p2 - p1) > 0.0 {
+        return true;
+    }
+    // distance between center mass and midpoint of a cruve,
+    // should be bigger then 0.1 of the bounding box diagonal
+    let c_mass = (p0 + p1 + p2) / 3.0;
+    let c_mid = quad.at(0.5);
+    let dist = (c_mass - c_mid).length();
+    let bbox_diag = quad.bbox(None).diag().length();
+    bbox_diag * 0.1 < dist
+}
+
+/// Recursive quad offset.
+fn quad_offset_rec(quad: Quad, dist: Scalar, out: &mut impl Extend<Segment>, depth: usize) {
+    if quad_offset_should_split(quad) && depth < 3 {
+        let (c0, c1) = quad.split_at(0.5);
+        quad_offset_rec(c0, dist, out, depth + 1);
+        quad_offset_rec(c1, dist, out, depth + 1);
+    } else {
+        let mut points = quad.points();
+        if polyline_offset(&mut points, dist) {
+            out.extend(Some(Quad(points).into()));
+        }
     }
 }
 
 /// Cubic bezier curve
-#[derive(Clone, Copy)]
+///
+/// Polynimial form:
+/// `(1 - t) ^ 3 * p0 + 3 * (1 - t) ^ 2 * t * p1 + 3 * (1 - t) * t ^ 2 * p2 + t ^ 3 * p3`
+/// Matrix from:
+///                 ┌             ┐ ┌    ┐
+/// ┌             ┐ │  1  0  0  0 │ │ p0 │
+/// │ 1 t t^2 t^3 │ │ -3  3  0  0 │ │ p1 │
+/// └             ┘ │  3 -6  3  0 │ │ p2 │
+///                 │ -1  3 -3  1 │ │ p3 │
+///                 └             ┘ └    ┘
+#[derive(Clone, Copy, PartialEq)]
 pub struct Cubic([Point; 4]);
 
 impl fmt::Debug for Cubic {
@@ -477,6 +625,28 @@ impl Cubic {
         self.0
     }
 
+    pub fn ends(&self) -> (Line, Line) {
+        let ps = self.points();
+        let mut start = 0;
+        for i in 0..3 {
+            if !ps[i].is_close_to(ps[i + 1]) {
+                start = i;
+                break;
+            }
+        }
+        let mut end = 0;
+        for i in (1..4).rev() {
+            if !ps[i].is_close_to(ps[i - 1]) {
+                end = i;
+                break;
+            }
+        }
+        (
+            Line::new(ps[start], ps[start + 1]),
+            Line::new(ps[end - 1], ps[end]),
+        )
+    }
+
     pub fn smooth(&self) -> Point {
         let Cubic([_p0, _p1, p2, p3]) = self;
         2.0 * p3 - *p2
@@ -487,7 +657,7 @@ impl Cubic {
         Quad::new(3.0 * (p1 - p0), 3.0 * (p2 - p1), 3.0 * (p3 - p2))
     }
 
-    /// Flattness criteria for a batch of bezier3 curves
+    /// Flattness criteria for the cubic curve
     ///
     /// It is equal to `f = maxarg d(t) where d(t) = |b(t) - l(t)|, l(t) = (1 - t) * b0 + t * b3`
     /// for b(t) bezier3 curve with b{0..3} control points, in other words maximum distance
@@ -618,35 +788,47 @@ impl Curve for Cubic {
     /// line segment corresponding to control points, then find intersection of this
     /// lines and treat them as new control points.
     fn offset(&self, dist: Scalar, out: &mut impl Extend<Segment>) {
-        // TODO: recurse and limit the depth?
-        let mut queue = Vec::new();
-        queue.push(*self);
-        while let Some(cubic) = queue.pop() {
-            if cubic_offset_should_split(cubic) {
-                let (c0, c1) = cubic.split();
-                // queue in reverse order so curves would appear in order
-                queue.push(c1);
-                queue.push(c0);
-                continue;
+        cubic_offset_rec(*self, None, dist, out, 0);
+    }
+
+    fn reverse(&self) -> Self {
+        let Self([p0, p1, p2, p3]) = *self;
+        Self([p3, p2, p1, p0])
+    }
+}
+
+/// Recursive cubic offset.
+fn cubic_offset_rec(
+    cubic: Cubic,
+    last: Option<Segment>,
+    dist: Scalar,
+    out: &mut impl Extend<Segment>,
+    depth: usize,
+) -> Option<Segment> {
+    if cubic_offset_should_split(cubic) && depth < 3 {
+        let (c0, c1) = cubic.split();
+        let last = cubic_offset_rec(c0, last, dist, out, depth + 1);
+        return cubic_offset_rec(c1, last, dist, out, depth + 1);
+    }
+    let mut points = cubic.points();
+    if polyline_offset(&mut points, dist) {
+        let result: Segment = Cubic(points).into();
+        // there could a disconnect between offset curvese.
+        // For example M0,0 C10,5 0,5 10,0.
+        if let Some(last) = last {
+            if !last.end().is_close_to(result.start()) {
+                let stroke_style = StrokeStyle {
+                    width: dist * 2.0,
+                    line_join: LineJoin::Round,
+                    line_cap: LineCap::Round,
+                };
+                out.extend(last.line_join(result, stroke_style));
             }
-            let Self([p0, p1, p2, p3]) = cubic;
-            let result = if p1.is_close_to(p2) {
-                match three_point_offset([p0, p1, p3], dist) {
-                    None => continue,
-                    Some([p0, p1, p2]) => Cubic::new(p0, p1, p1, p2),
-                }
-            } else {
-                let o0 = three_point_offset([p0, p1, p2], dist);
-                let o1 = three_point_offset([p1, p2, p3], dist);
-                match (o0, o1) {
-                    (Some([p0, p1, p2]), None) => Cubic::new(p0, p1, p2, p2),
-                    (None, Some([p0, p1, p2])) => Cubic::new(p0, p0, p1, p2),
-                    (Some([p0, p1, _]), Some([_, p2, p3])) => Cubic::new(p0, p1, p2, p3),
-                    (None, None) => continue,
-                }
-            };
-            out.extend(Some(Segment::from(result)));
         }
+        out.extend(Some(result));
+        Some(result)
+    } else {
+        last
     }
 }
 
@@ -669,7 +851,7 @@ fn cubic_offset_should_split(cubic: Cubic) -> bool {
     let c_mid = cubic.at(0.5);
     let dist = (c_mass - c_mid).length();
     let bbox_diag = cubic.bbox(None).diag().length();
-    bbox_diag * 0.1 > dist
+    bbox_diag * 0.1 < dist
 }
 
 pub struct CubicFlattenIter {
@@ -712,7 +894,7 @@ impl From<Quad> for Cubic {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct ElipArc {
     center: Point,
     rx: Scalar,
@@ -749,7 +931,7 @@ impl ElipArc {
         x_axis_rot: Scalar,
         large_flag: bool,
         sweep_flag: bool,
-    ) -> Self {
+    ) -> Option<Self> {
         let rx = rx.abs();
         let ry = ry.abs();
         let phi = x_axis_rot * PI / 180.0;
@@ -778,9 +960,9 @@ impl ElipArc {
         let v1 = Point([(x1 - cx) / rx, (y1 - cy) / ry]);
         let v2 = Point([(-x1 - cx) / rx, (-y1 - cy) / ry]);
         // initial angle
-        let eta = v0.angle_between(v1);
+        let eta = v0.angle_between(v1)?;
         //delta angle to be covered when t changes from 0..1
-        let eta_delta = v1.angle_between(v2).rem_euclid(2.0 * PI);
+        let eta_delta = v1.angle_between(v2)?.rem_euclid(2.0 * PI);
         let eta_delta = if !sweep_flag && eta_delta > 0.0 {
             eta_delta - 2.0 * PI
         } else if sweep_flag && eta_delta < 0.0 {
@@ -789,14 +971,14 @@ impl ElipArc {
             eta_delta
         };
 
-        Self {
+        Some(Self {
             center,
             rx,
             ry,
             phi,
             eta,
             eta_delta,
-        }
+        })
     }
 
     pub fn to_cubic(&self) -> ElipArcCubicIter {
@@ -850,6 +1032,17 @@ impl Curve for ElipArc {
     fn offset(&self, _dist: Scalar, _out: &mut impl Extend<Segment>) {
         todo!()
     }
+
+    fn reverse(&self) -> Self {
+        Self {
+            center: self.center,
+            rx: self.rx,
+            ry: self.ry,
+            phi: self.phi,
+            eta: self.eta + self.eta_delta,
+            eta_delta: -self.eta_delta,
+        }
+    }
 }
 
 /// Approximate arc with a sequnce of cubic bezier curves
@@ -882,7 +1075,7 @@ pub struct ElipArcCubicIter {
 impl ElipArcCubicIter {
     fn new(arc: ElipArc) -> Self {
         let phi_tr = Transform::default().rotate(arc.phi);
-        let segment_max_angle = PI / 4.0; // maximum `eta_delta` of a segment
+        let segment_max_angle = PI / 2.0; // maximum `eta_delta` of a segment
         let segment_count = (arc.eta_delta.abs() / segment_max_angle).ceil();
         let segment_delta = arc.eta_delta / segment_count;
         Self {
@@ -959,13 +1152,7 @@ impl Iterator for ElipArcFlattenIter {
     }
 }
 
-pub enum LineJoin {
-    Miter(Scalar),
-    Join,
-    Round,
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Segment {
     Line(Line),
     Quad(Quad),
@@ -973,10 +1160,12 @@ pub enum Segment {
 }
 
 impl Segment {
-    /// Produce iterator over segments that join to segments with the specified method.
-    pub fn join(self, _other: Segment, _linejoin: LineJoin) -> impl Iterator<Item = Self> {
-        let result = ArrayIter::<[Option<Segment>; 4]>::new();
-        result
+    pub fn ends(&self) -> (Line, Line) {
+        match self {
+            Segment::Line(line) => line.ends(),
+            Segment::Quad(quad) => quad.ends(),
+            Segment::Cubic(cubic) => cubic.ends(),
+        }
     }
 
     /// Find intersection between two segments
@@ -1031,6 +1220,108 @@ impl Segment {
             Segment::Cubic(cubic) => Some(*cubic),
             _ => None,
         }
+    }
+
+    /// Produce iterator over segments that join to segments with the specified method.
+    pub fn line_join(
+        self,
+        other: Segment,
+        stroke_style: StrokeStyle,
+    ) -> impl Iterator<Item = Self> {
+        let mut result = ArrayIter::<[Option<Segment>; 4]>::new();
+        if self.end().is_close_to(other.start()) {
+            return result;
+        }
+        let bevel = Line::new(self.end(), other.start());
+        // https://www.w3.org/TR/SVG2/painting.html#LineJoin
+        match stroke_style.line_join {
+            LineJoin::Bevel => {
+                result.push(bevel.into());
+            }
+            LineJoin::Miter(miter_limit) => {
+                let (_, start) = self.ends();
+                let (end, _) = other.ends();
+                match start.intersect(end) {
+                    Some((t0, t1)) if t0 >= 0.0 && t0 <= 1.0 && t1 >= 0.0 && t1 <= 1.0 => {
+                        // ends intersect
+                        result.push(bevel.into());
+                    }
+                    None => result.push(bevel.into()),
+                    Some((t, _)) => {
+                        let p0 = start.end() - start.start();
+                        let p1 = end.start() - end.end();
+                        // miter_length = stroke_width / sin(a / 2)
+                        // sin(a / 2) = +/- ((1 - cos(a)) / 2).sqrt()
+                        let miter_length = p0
+                            .cos_between(p1)
+                            .map(|c| stroke_style.width / ((1.0 - c) / 2.0).sqrt());
+                        match miter_length {
+                            Some(miter_length) if miter_length < miter_limit => {
+                                let p = start.at(t);
+                                result.push(Line::new(start.end(), p).into());
+                                result.push(Line::new(p, end.start()).into());
+                            }
+                            _ => result.push(bevel.into()),
+                        }
+                    }
+                }
+            }
+            LineJoin::Round => {
+                let (_, start) = self.ends();
+                let (end, _) = other.ends();
+                match start.intersect_point(end) {
+                    Some(_) => result.push(bevel.into()),
+                    None => {
+                        let sweep_flag = start.direction().cross(bevel.direction()) >= 0.0;
+                        let radius = stroke_style.width / 2.0;
+                        let arc = ElipArc::new_param(
+                            start.end(),
+                            end.start(),
+                            radius,
+                            radius,
+                            0.0,
+                            false,
+                            sweep_flag,
+                        );
+                        match arc {
+                            Some(arc) => result.extend(arc.to_cubic().map(Segment::from)),
+                            None => result.push(bevel.into()),
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    pub fn line_cap(self, other: Segment, stroke_style: StrokeStyle) -> impl Iterator<Item = Self> {
+        let mut result = ArrayIter::<[Option<Segment>; 4]>::new();
+        if self.end().is_close_to(other.start()) {
+            return result;
+        }
+        let butt = Line::new(self.end(), other.start());
+        match stroke_style.line_cap {
+            LineCap::Butt => result.push(butt.into()),
+            LineCap::Square => {
+                let (_, from) = self.ends();
+                if let Some(tang) = from.direction().normalize() {
+                    let l0 = Line::new(self.end(), self.end() + stroke_style.width / 2.0 * tang);
+                    result.push(l0.into());
+                    let l1 = Line::new(l0.end(), l0.end() + butt.direction());
+                    result.push(l1.into());
+                    let l2 = Line::new(l1.end(), other.start());
+                    result.push(l2.into());
+                }
+            }
+            LineCap::Round => {
+                let stroke_style = StrokeStyle {
+                    line_join: LineJoin::Round,
+                    ..stroke_style
+                };
+                result.extend(self.line_join(other, stroke_style));
+            }
+        }
+        result
     }
 }
 
@@ -1142,6 +1433,14 @@ impl Curve for Segment {
             Segment::Cubic(cubic) => cubic.offset(dist, out),
         }
     }
+
+    fn reverse(&self) -> Self {
+        match self {
+            Segment::Line(line) => line.reverse().into(),
+            Segment::Quad(quad) => quad.reverse().into(),
+            Segment::Cubic(cubic) => cubic.reverse().into(),
+        }
+    }
 }
 
 impl From<Line> for Segment {
@@ -1178,7 +1477,7 @@ impl Iterator for SegmentFlattenIter {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct SubPath {
     segments: Vec<Segment>,
     closed: bool,
@@ -1256,13 +1555,13 @@ impl SubPath {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FillRule {
     NonZero,
     EvenOdd,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Path {
     subpaths: Vec<SubPath>,
 }
@@ -1293,6 +1592,47 @@ impl Path {
     /// Convenience method to create `PathBuilder`
     pub fn builder() -> PathBuilder {
         PathBuilder::new()
+    }
+
+    /// Create path that is by stroking current path
+    pub fn stroke(&self, style: StrokeStyle) -> Path {
+        let mut subpaths = Vec::new();
+        for subpath in self.subpaths.iter() {
+            let mut segments = Vec::new();
+            // forward
+            for segment in subpath.segments().iter() {
+                stroke_segment(&mut segments, *segment, style, Segment::line_join);
+            }
+            let mut backward = subpath.segments.iter().rev().map(Segment::reverse);
+            // close subpath
+            if subpath.closed() {
+                let segments = stroke_close(subpath, &mut segments, style, true);
+                subpaths.extend(SubPath::new(segments, true));
+            } else {
+                // cap
+                if let Some(segment) = backward.next() {
+                    stroke_segment(&mut segments, segment, style, Segment::line_cap);
+                }
+            }
+            // backward
+            for segment in backward {
+                stroke_segment(&mut segments, segment, style, Segment::line_join);
+            }
+            // close subpath
+            if subpath.closed() {
+                let segments = stroke_close(subpath, &mut segments, style, false);
+                subpaths.extend(SubPath::new(segments, true));
+            } else {
+                // cap
+                let last = segments.last().copied();
+                let first = segments.first().copied();
+                if let (Some(last), Some(first)) = (last, first) {
+                    segments.extend(last.line_cap(first, style));
+                }
+                subpaths.extend(SubPath::new(segments, /* closed = */ true));
+            }
+        }
+        Path::new(subpaths)
     }
 
     /// Convert path to an iterator over line segments
@@ -1406,6 +1746,12 @@ impl Path {
         Ok(())
     }
 
+    pub fn to_string(&self) -> String {
+        let mut output = Vec::new();
+        self.save(&mut output).expect("failed in memory write");
+        String::from_utf8(output).expect("path save internal error")
+    }
+
     pub fn load(mut input: impl Read) -> std::io::Result<Self> {
         let mut buffer = Vec::new();
         input.read_to_end(&mut buffer)?;
@@ -1413,6 +1759,49 @@ impl Path {
         let builder = parser.parse(PathBuilder::new())?;
         Ok(builder.build())
     }
+}
+
+/// Extend segments with the offset segment and join between those segments.
+fn stroke_segment<F, S>(segments: &mut Vec<Segment>, segment: Segment, style: StrokeStyle, join: F)
+where
+    F: Fn(Segment, Segment, StrokeStyle) -> S,
+    S: IntoIterator<Item = Segment>,
+{
+    let offset = segments.len();
+    segment.offset(style.width / 2.0, segments);
+    if offset != 0 {
+        let src = segments.get(offset - 1).copied();
+        let dst = segments.get(offset).copied();
+        if let (Some(src), Some(dst)) = (src, dst) {
+            segments.splice(offset..offset, join(src, dst, style));
+        }
+    }
+}
+
+fn stroke_close(
+    subpath: &SubPath,
+    segments: &mut Vec<Segment>,
+    style: StrokeStyle,
+    forward: bool,
+) -> Vec<Segment> {
+    let (first, last) = match (segments.first(), segments.last()) {
+        (Some(first), Some(last)) => (*first, *last),
+        _ => return Vec::new(),
+    };
+    let close = if forward {
+        Line::new(subpath.end(), subpath.start())
+    } else {
+        Line::new(subpath.start(), subpath.end())
+    };
+    if let Some(close) = line_offset(close, style.width / 2.0) {
+        let close = Segment::from(close);
+        segments.extend(last.line_join(close, style));
+        segments.push(close);
+        segments.extend(close.line_join(first, style));
+    } else {
+        segments.extend(last.line_join(first, style));
+    }
+    std::mem::replace(segments, Vec::new())
 }
 
 pub struct PathFlattenIter<'a> {
@@ -1543,9 +1932,12 @@ impl PathBuilder {
 
     /// Add line from the current position to the specified point
     pub fn line_to(mut self, p: impl Into<Point>) -> Self {
-        let line = Line::new(self.position, p);
-        self.position = line.end();
-        self.subpath.push(line.into());
+        let p = p.into();
+        if !self.position.is_close_to(p) {
+            let line = Line::new(self.position, p);
+            self.position = line.end();
+            self.subpath.push(line.into());
+        }
         self
     }
 
@@ -1608,9 +2000,14 @@ impl PathBuilder {
             large,
             sweep,
         );
-        self.subpath.extend(arc.to_cubic().map(Segment::from));
-        self.position = p;
-        self
+        match arc {
+            None => self.line_to(p),
+            Some(arc) => {
+                self.subpath.extend(arc.to_cubic().map(Segment::from));
+                self.position = p;
+                self
+            }
+        }
     }
 
     /// Current possition of the builder
@@ -1872,7 +2269,7 @@ impl<'a> PathParser<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform([Scalar; 6]);
 
 impl Default for Transform {
@@ -2200,7 +2597,7 @@ fn signed_difference_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) 
     let mut x_next = x;
     for y in y..min(shape.height, p1.y().ceil().max(0.0) as usize) {
         x = x_next;
-        let line_offset = shape.offset(y, 0); // current line offset in the data array
+        let row_offset = shape.offset(y, 0); // current line offset in the data array
         let dy = ((y + 1) as Scalar).min(p1.y()) - (y as Scalar).max(p0.y());
         // signed y difference
         let d = dir * dy;
@@ -2217,31 +2614,31 @@ fn signed_difference_line(mut surf: impl SurfaceMut<Item = Scalar>, line: Line) 
         if x1i <= x0i + 1 {
             // only goes through one pixel (with the total coverage of `d` spread over two pixels)
             let xmf = 0.5 * (x + x_next) - x0_floor; // effective height
-            data[line_offset + (x0i as usize) * stride] += d * (1.0 - xmf);
-            data[line_offset + ((x0i + 1) as usize) * stride] += d * xmf;
+            data[row_offset + (x0i as usize) * stride] += d * (1.0 - xmf);
+            data[row_offset + ((x0i + 1) as usize) * stride] += d * xmf;
         } else {
             let s = (x1 - x0).recip();
             let x0f = x0 - x0_floor; // fractional part of x0
             let x1f = x1 - x1_ceil + 1.0; // fractional part of x1
             let a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f); // fractional area of the pixel with smallest x
             let am = 0.5 * s * x1f * x1f; // fractional area of the pixel with largest x
-            data[line_offset + (x0i as usize) * stride] += d * a0;
+            data[row_offset + (x0i as usize) * stride] += d * a0;
             if x1i == x0i + 2 {
                 // only two pixels are covered
-                data[line_offset + ((x0i + 1) as usize) * stride] += d * (1.0 - a0 - am);
+                data[row_offset + ((x0i + 1) as usize) * stride] += d * (1.0 - a0 - am);
             } else {
                 // second pixel
                 let a1 = s * (1.5 - x0f);
-                data[line_offset + ((x0i + 1) as usize) * stride] += d * (a1 - a0);
+                data[row_offset + ((x0i + 1) as usize) * stride] += d * (a1 - a0);
                 // (second, last) pixels
                 for xi in x0i + 2..x1i - 1 {
-                    data[line_offset + (xi as usize) * stride] += d * s;
+                    data[row_offset + (xi as usize) * stride] += d * s;
                 }
                 // last pixel
                 let a2 = a1 + (x1i - x0i - 3) as Scalar * s;
-                data[line_offset + ((x1i - 1) as usize) * stride] += d * (1.0 - a2 - am);
+                data[row_offset + ((x1i - 1) as usize) * stride] += d * (1.0 - a2 - am);
             }
-            data[line_offset + (x1i as usize) * stride] += d * am
+            data[row_offset + (x1i as usize) * stride] += d * am
         }
     }
 }
@@ -2280,6 +2677,27 @@ pub fn signed_difference_to_mask(mut surf: impl SurfaceMut<Item = Scalar>, fill_
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum LineJoin {
+    Miter(Scalar),
+    Bevel,
+    Round,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum LineCap {
+    Butt,
+    Square,
+    Round,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct StrokeStyle {
+    pub width: Scalar,
+    pub line_join: LineJoin,
+    pub line_cap: LineCap,
 }
 
 fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> impl Iterator<Item = Scalar> {
@@ -2575,5 +2993,91 @@ mod tests {
             format!("{:?}", cubic.split()),
             format!("{:?}", cubic.split_at(0.5))
         );
+    }
+
+    #[test]
+    fn test_ends() {
+        let p0 = Point::new(1.0, 0.0);
+        let p1 = Point::new(2.0, 1.0);
+        let p2 = Point::new(3.0, 0.0);
+        let p3 = Point::new(2.0, 0.0);
+
+        let c = Cubic::new(p0, p1, p2, p3);
+        let (start, end) = c.ends();
+        assert_eq!(start, Line::new(p0, p1));
+        assert_eq!(end, Line::new(p2, p3));
+
+        let c = Cubic::new(p0, p0, p1, p2);
+        let (start, end) = c.ends();
+        assert_eq!(start, Line::new(p0, p1));
+        assert_eq!(end, Line::new(p1, p2));
+
+        let c = Cubic::new(p0, p1, p2, p2);
+        let (start, end) = c.ends();
+        assert_eq!(start, Line::new(p0, p1));
+        assert_eq!(end, Line::new(p1, p2));
+
+        let q = Quad::new(p0, p1, p2);
+        let (start, end) = q.ends();
+        assert_eq!(start, Line::new(p0, p1));
+        assert_eq!(end, Line::new(p1, p2));
+
+        let q = Quad::new(p0, p0, p1);
+        let (start, end) = q.ends();
+        assert_eq!(start, Line::new(p0, p1));
+        assert_eq!(end, Line::new(p0, p1));
+
+        let q = Quad::new(p0, p1, p1);
+        let (start, end) = q.ends();
+        assert_eq!(start, Line::new(p0, p1));
+        assert_eq!(end, Line::new(p0, p1));
+    }
+
+    #[test]
+    fn test_polyline_offset() {
+        let dist = -(2.0f64).sqrt();
+
+        let p0 = Point::new(1.0, 0.0);
+        let r0 = Point::new(0.0, 1.0);
+
+        let p1 = Point::new(2.0, 1.0);
+        let r1 = Point::new(2.0, 3.0);
+
+        let p2 = Point::new(3.0, 0.0);
+        let r2 = Point::new(4.0, 1.0);
+
+        // basic
+        let mut ps = [p0, p1, p2];
+        assert!(polyline_offset(&mut ps, dist));
+        assert_eq!(&ps, &[r0, r1, r2]);
+
+        // repeat at start
+        let mut ps = [p0, p0, p1, p2];
+        assert!(polyline_offset(&mut ps, dist));
+        assert_eq!(&ps, &[r0, r0, r1, r2]);
+
+        // repeat at start
+        let mut ps = [p0, p1, p2, p2];
+        assert!(polyline_offset(&mut ps, dist));
+        assert_eq!(&ps, &[r0, r1, r2, r2]);
+
+        // repeat in the middle
+        let mut ps = [p0, p1, p1, p2];
+        assert!(polyline_offset(&mut ps, dist));
+        assert_eq!(&ps, &[r0, r1, r1, r2]);
+
+        // all points are close to each other, can not offset
+        let mut ps = [p0, p0, p0];
+        assert!(!polyline_offset(&mut ps, dist));
+
+        // splitted single line
+        let mut ps = [p0, p1, Point::new(3.0, 2.0)];
+        assert!(polyline_offset(&mut ps, dist));
+        assert_eq!(&ps, &[r0, Point::new(1.0, 2.0), r1]);
+
+        // four points
+        let mut ps = [p0, p1, p2, Point::new(2.0, -1.0)];
+        assert!(polyline_offset(&mut ps, dist));
+        assert_eq!(&ps, &[r0, r1, Point::new(5.0, 0.0), Point::new(3.0, -2.0)]);
     }
 }

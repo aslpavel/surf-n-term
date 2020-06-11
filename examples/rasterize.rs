@@ -33,7 +33,7 @@ fn main() -> Result<(), Error> {
 
     let tr = Transform::default();
     let path = path_load(path_filename)?;
-    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::EvenOdd));
+    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::NonZero));
 
     if output_filename != "-" {
         let mut image = BufWriter::new(File::create(output_filename)?);
