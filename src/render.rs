@@ -1522,6 +1522,13 @@ impl SubPath {
         *self.segments.last().expect("SubPath is never empty")
     }
 
+    /// Apply transformation to the sub-path in place
+    pub fn transform(&mut self, tr: Transform) {
+        for segment in self.segments.iter_mut() {
+            std::mem::replace(segment, segment.transform(tr));
+        }
+    }
+
     pub fn flatten<'a>(
         &'a self,
         tr: Transform,
@@ -1592,6 +1599,13 @@ impl Path {
     /// Convenience method to create `PathBuilder`
     pub fn builder() -> PathBuilder {
         PathBuilder::new()
+    }
+
+    /// Apply transformation to the path in place
+    pub fn transform(&mut self, tr: Transform) {
+        for subpath in self.subpaths.iter_mut() {
+            subpath.transform(tr);
+        }
     }
 
     /// Create path that is by stroking current path
