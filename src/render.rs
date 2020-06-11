@@ -1714,8 +1714,8 @@ impl Path {
     pub fn save(&self, mut out: impl Write) -> std::io::Result<()> {
         for subpath in self.subpaths.iter() {
             write!(&mut out, "M{:?} ", subpath.start())?;
+            let mut segment_type: Option<u8> = None;
             for segment in subpath.segments().iter() {
-                let mut segment_type: Option<u8> = None;
                 match segment {
                     Segment::Line(line) => {
                         if segment_type.replace(b'L') != Some(b'L') {
@@ -1793,13 +1793,14 @@ fn stroke_close(
     } else {
         Line::new(subpath.start(), subpath.end())
     };
-    if let Some(close) = line_offset(close, style.width / 2.0) {
-        let close = Segment::from(close);
-        segments.extend(last.line_join(close, style));
-        segments.push(close);
-        segments.extend(close.line_join(first, style));
-    } else {
-        segments.extend(last.line_join(first, style));
+    match line_offset(close, style.width / 2.0) {
+        Some(close) if close.length() * 100.0 > style.width => {
+            let close = Segment::from(close);
+            segments.extend(last.line_join(close, style));
+            segments.push(close);
+            segments.extend(close.line_join(first, style));
+        }
+        _ => segments.extend(last.line_join(first, style)),
     }
     std::mem::replace(segments, Vec::new())
 }
