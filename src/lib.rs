@@ -4,8 +4,8 @@ pub mod render;
 pub mod surface;
 
 pub use render::{
-    Align, Cubic, Curve, FillRule, Line, LineCap, LineJoin, Path, Point, Quad, Scalar, Segment,
-    StrokeStyle, SubPath, Transform,
+    Align, BBox, Cubic, Curve, FillRule, Line, LineCap, LineJoin, Path, Point, Quad, Scalar,
+    Segment, StrokeStyle, SubPath, Transform,
 };
 pub use surface::{Surface, SurfaceMut, SurfaceOwned};
 
