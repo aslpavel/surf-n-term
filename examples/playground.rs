@@ -10,23 +10,14 @@ use std::{
     io::{BufWriter, Read},
 };
 
-type Error = Box<dyn std::error::Error>;
-
-fn path_load<P: AsRef<std::path::Path>>(path: P) -> Result<Path, Error> {
-    let mut file = File::open(path)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
-    Ok(timeit("[parse]", || contents.parse())?)
-}
-
-// TODO: add support for "-" filenames
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::from_env(Env::default().default_filter_or("debug")).init();
-    let path = path_load("./paths/squirrel.path")?;
+    let path = Path::load(File::open("./paths/squirrel.path")?)?;
+    // let path: Path = "M 0 0 L 5 8 L 9 0z".parse()?;
 
     let stroke_style = StrokeStyle {
         width: 1.0,
-        line_join: LineJoin::Miter(4.0),
+        line_join: LineJoin::Round,
         line_cap: LineCap::Round,
     };
     let stroke = path.stroke(stroke_style);
