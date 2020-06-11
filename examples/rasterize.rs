@@ -1,5 +1,8 @@
 use env_logger::Env;
-use rasterize::{surf_to_png, timeit, Align, BBox, FillRule, Path, Point, Scalar, Transform};
+use rasterize::{
+    surf_to_png, timeit, Align, BBox, FillRule, LineCap, LineJoin, Path, Point, Scalar,
+    StrokeStyle, Transform,
+};
 use std::{
     env, fmt,
     fs::File,
@@ -29,6 +32,7 @@ struct Args {
     input_file: String,
     output_file: String,
     width: Option<usize>,
+    stroke: Option<Scalar>,
 }
 
 fn parse_args() -> Result<Args, Error> {
@@ -36,6 +40,7 @@ fn parse_args() -> Result<Args, Error> {
         input_file: String::new(),
         output_file: String::new(),
         width: None,
+        stroke: None,
     };
     let mut postional = 0;
     let mut args = env::args();
@@ -48,6 +53,12 @@ fn parse_args() -> Result<Args, Error> {
                     .ok_or_else(|| ArgsError::new("-w requires argument"))?;
                 result.width = Some(width.parse()?);
             }
+            "-s" => {
+                let stroke = args
+                    .next()
+                    .ok_or_else(|| ArgsError::new("-s requres argument"))?;
+                result.stroke = Some(stroke.parse()?);
+            }
             _ => {
                 postional += 1;
                 match postional {
@@ -59,7 +70,10 @@ fn parse_args() -> Result<Args, Error> {
         }
     }
     if postional < 2 {
-        return Err(ArgsError::new("Usage: rasterize [-w <width>] <file.path> <out.png>").into());
+        return Err(ArgsError::new(
+            "Usage: rasterize [-w <width>] [-s <stroke>] <file.path> <out.png>",
+        )
+        .into());
     }
     Ok(result)
 }
@@ -79,7 +93,7 @@ fn main() -> Result<(), Error> {
     env_logger::from_env(Env::default().default_filter_or("debug")).init();
     let args = parse_args()?;
 
-    let path = path_load(args.input_file)?;
+    let mut path = path_load(args.input_file)?;
     let tr = match args.width {
         Some(width) if width > 2 => {
             let src_bbox = path
@@ -88,11 +102,23 @@ fn main() -> Result<(), Error> {
             let width = width as Scalar;
             let height = src_bbox.height() * width / src_bbox.width();
             let dst_bbox = BBox::new(Point::new(1.0, 1.0), Point::new(width - 1.0, height - 1.0));
-            Transform::fit(src_bbox, dst_bbox, Align::Mid)
+            Some(Transform::fit(src_bbox, dst_bbox, Align::Mid))
         }
-        _ => Transform::default(),
+        _ => None,
     };
-    let mask = timeit("[rasterize]", || path.rasterize(tr, FillRule::NonZero));
+    if let Some(tr) = tr {
+        path.transform(tr);
+    }
+    if let Some(stroke) = args.stroke {
+        path = path.stroke(StrokeStyle {
+            width: stroke,
+            line_join: LineJoin::Round,
+            line_cap: LineCap::Round,
+        });
+    }
+    let mask = timeit("[rasterize]", || {
+        path.rasterize(Transform::default(), FillRule::NonZero)
+    });
 
     if args.output_file != "-" {
         let mut image = BufWriter::new(File::create(args.output_file)?);
