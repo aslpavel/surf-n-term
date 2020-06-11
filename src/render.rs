@@ -2721,12 +2721,15 @@ fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> impl Iterator<Item = Scal
 }
 
 fn scalar_fmt(f: &mut fmt::Formatter<'_>, value: Scalar) -> fmt::Result {
-    if value.fract().abs() < EPSILON {
+    let value_abs = value.abs();
+    if value_abs.fract() < EPSILON {
         write!(f, "{}", value.trunc() as i64)
-    } else if value.abs() > 9999.0 || value.abs() <= 0.0001 {
+    } else if value_abs > 9999.0 || value_abs <= 0.0001 {
         write!(f, "{:.3e}", value)
     } else {
-        write!(f, "{:.3}", value)
+        let ten: Scalar = 10.0;
+        let round = ten.powi(4 - (value_abs.trunc() + 1.0).log10().ceil() as i32);
+        write!(f, "{}", (value * round).round() / round)
     }
 }
 
