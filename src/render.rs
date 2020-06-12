@@ -2734,8 +2734,17 @@ fn quadratic_solve(a: Scalar, b: Scalar, c: Scalar) -> impl Iterator<Item = Scal
         result.push(-b / (2.0 * a));
     } else if det > 0.0 {
         let sq = det.sqrt();
-        result.push((-b + sq) / (2.0 * a));
-        result.push((-b - sq) / (2.0 * a));
+        // More stable solution then generic formula:
+        // https://people.csail.mit.edu/bkph/articles/Quadratics.pdf
+        if b >= 0.0 {
+            let mul = -b - sq;
+            result.push(mul / (2.0 * a));
+            result.push(2.0 * c / mul);
+        } else {
+            let mul = -b + sq;
+            result.push(2.0 * c / mul);
+            result.push(mul / (2.0 * a));
+        }
     }
     result
 }
