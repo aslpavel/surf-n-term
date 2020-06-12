@@ -1,4 +1,4 @@
-use crate::common::clamp;
+#![allow(clippy::iter_nth_zero)]
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -609,6 +609,19 @@ where
             start: 0,
             end: 0,
         },
+    }
+}
+
+fn clamp<T>(val: T, min: T, max: T) -> T
+where
+    T: PartialOrd,
+{
+    if val < min {
+        min
+    } else if val > max {
+        max
+    } else {
+        val
     }
 }
 

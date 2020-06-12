@@ -504,7 +504,12 @@ dependencies = [
  "miniz_oxide",
  "nix",
  "signal-hook",
+ "surface",
 ]
+
+[[package]]
+name = "surface"
+version = "0.1.0"
 
 [[package]]
 name = "syn"

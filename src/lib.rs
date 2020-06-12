@@ -9,7 +9,6 @@ pub mod error;
 pub mod image;
 pub mod render;
 pub mod style;
-mod surface;
 pub mod terminal;
 mod unix;
 
