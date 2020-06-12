@@ -1608,6 +1608,12 @@ impl Path {
         }
     }
 
+    pub fn segments_count(&self) -> usize {
+        self.subpaths
+            .iter()
+            .fold(0usize, |acc, subpath| acc + subpath.segments().len())
+    }
+
     /// Create path that is by stroking current path
     pub fn stroke(&self, style: StrokeStyle) -> Path {
         let mut subpaths = Vec::new();

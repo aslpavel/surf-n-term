@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rasterize::{
     render::{Cubic, FLATNESS},
     FillRule, LineCap, LineJoin, Path, StrokeStyle, SurfaceMut, Transform,
@@ -15,14 +15,24 @@ fn curve_benchmark(c: &mut Criterion) {
 fn stroke_benchmark(c: &mut Criterion) {
     let mut file = File::open("paths/squirrel.path").expect("failed to open path");
     let path = Path::load(&mut file).expect("failed to load path");
+    let tr = Transform::default();
     let style = StrokeStyle {
         width: 1.0,
         line_join: LineJoin::Round,
         line_cap: LineCap::Round,
     };
-    c.bench_function("path stroke", |b| {
-        b.iter_with_large_drop(|| path.stroke(style))
+    let stroke = path.stroke(style);
+
+    let mut group = c.benchmark_group("squirrel");
+    group.throughput(Throughput::Elements(path.segments_count() as u64));
+    group.bench_function("stroke", |b| b.iter_with_large_drop(|| path.stroke(style)));
+    group.bench_function("resterize stroked", |b| {
+        b.iter_with_large_drop(|| stroke.rasterize(tr, FillRule::EvenOdd))
     });
+    group.bench_function("resterize fill", |b| {
+        b.iter_with_large_drop(|| path.rasterize(tr, FillRule::EvenOdd))
+    });
+    group.finish()
 }
 
 fn large_path_benchmark(c: &mut Criterion) {
@@ -37,26 +47,25 @@ fn large_path_benchmark(c: &mut Criterion) {
     // rasterize path
     let mut surf = path.rasterize(tr, FillRule::EvenOdd);
 
-    c.bench_function("path parse", |b| {
+    let mut group = c.benchmark_group("material-big");
+    group.throughput(Throughput::Elements(path.segments_count() as u64));
+    group.bench_function("parse", |b| {
         b.iter_with_large_drop(|| path_str.parse::<Path>())
     });
-
-    c.bench_function("path flatten", |b| {
+    group.bench_function("flatten", |b| {
         b.iter(|| path.flatten(tr, FLATNESS, true).count())
     });
-
-    c.bench_function("path bbox", |b| b.iter(|| path.bbox(tr)));
-
-    c.bench_function("path rasterize", |b| {
+    group.bench_function("bbox", |b| b.iter(|| path.bbox(tr)));
+    group.bench_function("rasterize", |b| {
         b.iter_with_large_drop(|| path.rasterize(tr, FillRule::EvenOdd))
     });
-
-    c.bench_function("path rasterize to", |b| {
+    group.bench_function("rasterize to", |b| {
         b.iter(|| {
             surf.clear();
             path.rasterize_to(tr, FillRule::EvenOdd, &mut surf);
         })
     });
+    group.finish()
 }
 
 criterion_group!(
