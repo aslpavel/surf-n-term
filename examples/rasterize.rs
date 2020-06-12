@@ -116,6 +116,7 @@ fn main() -> Result<(), Error> {
             })
         });
     }
+    log::info!("[segments_count] {}", path.segments_count());
     let mask = timeit("[rasterize]", || {
         path.rasterize(Transform::default(), FillRule::NonZero)
     });
