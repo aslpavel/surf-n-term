@@ -37,14 +37,11 @@ fn stroke_benchmark(c: &mut Criterion) {
 
 fn large_path_benchmark(c: &mut Criterion) {
     let tr = Transform::default();
-    // load path
     let mut path_str = String::new();
     let mut file = File::open("paths/material-big.path").expect("failed to open a path");
     file.read_to_string(&mut path_str)
         .expect("failed to read path");
-    // parse path
     let path: Path = path_str.parse().unwrap();
-    // rasterize path
     let mut surf = path.rasterize(tr, FillRule::EvenOdd);
 
     let mut group = c.benchmark_group("material-big");
