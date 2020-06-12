@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 log = "0.4.8"
 png = "0.16.4"
+surface = { path = "../surf-n-term/surface" }
 
 [dev-dependencies]
 env_logger = "0.7.1"
