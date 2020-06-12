@@ -70,10 +70,8 @@ fn parse_args() -> Result<Args, Error> {
         }
     }
     if postional < 2 {
-        return Err(ArgsError::new(
-            "Usage: rasterize [-w <width>] [-s <stroke>] <file.path> <out.png>",
-        )
-        .into());
+        eprintln!("Usage: rasterize [-w <width>] [-s <stroke>] <file.path> <out.png>");
+        std::process::exit(1);
     }
     Ok(result)
 }

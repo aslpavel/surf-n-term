@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-cargo run --release --example rasterize -- "${@}"
+cd $(dirname "${BASH_SOURCE[0]}")
+exec cargo run --release --example rasterize -- "${@}"

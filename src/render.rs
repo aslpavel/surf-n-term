@@ -1615,6 +1615,8 @@ impl Path {
     }
 
     /// Create path that is by stroking current path
+    ///
+    /// Resource usefull for debugging: https://yqnn.github.io/svg-path-editor/
     pub fn stroke(&self, style: StrokeStyle) -> Path {
         let mut subpaths = Vec::new();
         for subpath in self.subpaths.iter() {
