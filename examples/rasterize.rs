@@ -1,7 +1,7 @@
 use env_logger::Env;
 use rasterize::{
     surf_to_png, timeit, Align, BBox, FillRule, LineCap, LineJoin, Path, Point, Scalar,
-    StrokeStyle, Transform,
+    StrokeStyle, Surface, Transform,
 };
 use std::{
     env, fmt,
@@ -120,6 +120,11 @@ fn main() -> Result<(), Error> {
     let mask = timeit("[rasterize]", || {
         path.rasterize(Transform::default(), FillRule::NonZero)
     });
+    log::info!(
+        "[dimension] width: {} height: {}",
+        mask.width(),
+        mask.height()
+    );
 
     if args.output_file != "-" {
         let mut image = BufWriter::new(File::create(args.output_file)?);
