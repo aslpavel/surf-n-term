@@ -1572,11 +1572,11 @@ impl SubPath {
             .chain(last)
     }
 
-    fn start(&self) -> Point {
+    pub fn start(&self) -> Point {
         self.first().start()
     }
 
-    fn end(&self) -> Point {
+    pub fn end(&self) -> Point {
         self.last().end()
     }
 
@@ -1625,6 +1625,10 @@ impl Path {
     /// Convenience method to create `PathBuilder`
     pub fn builder() -> PathBuilder {
         PathBuilder::new()
+    }
+
+    pub fn into_builder(self) -> PathBuilder {
+        PathBuilder::from_path(self)
     }
 
     /// Apply transformation to the path in place
@@ -1809,6 +1813,30 @@ impl Path {
     }
 }
 
+impl IntoIterator for Path {
+    type Item = SubPath;
+    type IntoIter = <Vec<SubPath> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.subpaths.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Path {
+    type Item = &'a SubPath;
+    type IntoIter = <&'a Vec<SubPath> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.subpaths.iter()
+    }
+}
+
+impl Extend<SubPath> for Path {
+    fn extend<T: IntoIterator<Item = SubPath>>(&mut self, iter: T) {
+        self.subpaths.extend(iter)
+    }
+}
+
 /// Extend segments with the offset segment and join between those segments.
 fn stroke_segment<F, S>(segments: &mut Vec<Segment>, segment: Segment, style: StrokeStyle, join: F)
 where
@@ -1952,6 +1980,12 @@ impl PathBuilder {
         }
     }
 
+    pub fn from_path(path: Path) -> Self {
+        let mut builder = Self::new();
+        builder.subpaths = path.subpaths;
+        builder
+    }
+
     /// Build path
     pub fn build(self) -> Path {
         let PathBuilder {
@@ -2065,6 +2099,27 @@ impl PathBuilder {
                 self
             }
         }
+    }
+
+    pub fn circle(self, radius: Scalar) -> Self {
+        // https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves
+        // (4/3)*tan(pi/8) = 4*(sqrt(2)-1)/3 = 0.5522847498307935
+        let offset = 0.5522847498307935 * radius;
+        let x_offset = Point::new(offset, 0.0);
+        let y_offset = Point::new(0.0, offset);
+        let center = self.position();
+        let p0 = center - Point::new(radius, 0.0);
+        let p1 = center - Point::new(0.0, radius);
+        let p2 = center + Point::new(radius, 0.0);
+        let p3 = center + Point::new(0.0, radius);
+
+        self.move_to(p0)
+            .cubic_to(p0 - y_offset, p1 - x_offset, p1)
+            .cubic_to(p1 + x_offset, p2 - y_offset, p2)
+            .cubic_to(p2 + y_offset, p3 + x_offset, p3)
+            .cubic_to(p3 - x_offset, p0 + y_offset, p0)
+            .close()
+            .move_to(center)
     }
 
     /// Current possition of the builder

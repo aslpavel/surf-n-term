@@ -1,7 +1,7 @@
 use env_logger::Env;
 use rasterize::{
-    surf_to_png, timeit, Align, BBox, FillRule, LineCap, LineJoin, Path, Point, Scalar,
-    StrokeStyle, Surface, Transform,
+    surf_to_png, timeit, Align, BBox, Curve, FillRule, LineCap, LineJoin, Path, Point, Scalar,
+    Segment, StrokeStyle, Surface, Transform,
 };
 use std::{
     env, fmt,
@@ -31,6 +31,7 @@ impl std::error::Error for ArgsError {}
 struct Args {
     input_file: String,
     output_file: String,
+    outline: bool,
     width: Option<usize>,
     stroke: Option<Scalar>,
 }
@@ -39,6 +40,7 @@ fn parse_args() -> Result<Args, Error> {
     let mut result = Args {
         input_file: String::new(),
         output_file: String::new(),
+        outline: false,
         width: None,
         stroke: None,
     };
@@ -59,6 +61,9 @@ fn parse_args() -> Result<Args, Error> {
                     .ok_or_else(|| ArgsError::new("-s requres argument"))?;
                 result.stroke = Some(stroke.parse()?);
             }
+            "-o" => {
+                result.outline = true;
+            }
             _ => {
                 postional += 1;
                 match postional {
@@ -70,7 +75,7 @@ fn parse_args() -> Result<Args, Error> {
         }
     }
     if postional < 2 {
-        eprintln!("Usage: rasterize [-w <width>] [-s <stroke>] <file.path> <out.png>");
+        eprintln!("Usage: rasterize [-w <width>] [-s <stroke>] [-o] <file.path> <out.png>");
         std::process::exit(1);
     }
     Ok(result)
@@ -87,12 +92,62 @@ fn path_load(path: String) -> Result<Path, Error> {
     Ok(timeit("[parse]", || contents.parse())?)
 }
 
+fn outline(path: &Path) -> Path {
+    let stroke_style = StrokeStyle {
+        width: 2.0,
+        line_join: LineJoin::Round,
+        line_cap: LineCap::Round,
+    };
+    let control_style = StrokeStyle {
+        width: 1.0,
+        ..stroke_style
+    };
+    let control_radius = 3.0;
+    let mut output = path.stroke(stroke_style);
+    for subpath in path.subpaths().iter() {
+        for segment in subpath.segments() {
+            let control = match segment {
+                Segment::Line(line) => Path::builder().move_to(line.start()).circle(control_radius),
+                Segment::Quad(quad) => {
+                    let [p0, p1, p2] = quad.points();
+                    Path::builder()
+                        .move_to(p0)
+                        .circle(control_radius)
+                        .line_to(p1)
+                        .circle(control_radius)
+                        .line_to(p2)
+                }
+                Segment::Cubic(cubic) => {
+                    let [p0, p1, p2, p3] = cubic.points();
+                    Path::builder()
+                        .move_to(p0)
+                        .circle(control_radius)
+                        .line_to(p1)
+                        .circle(control_radius)
+                        .move_to(p3)
+                        .line_to(p2)
+                        .circle(control_radius)
+                }
+            };
+            output.extend(control.build().stroke(control_style));
+        }
+        output.extend(
+            Path::builder()
+                .move_to(subpath.end())
+                .circle(control_radius)
+                .build()
+                .stroke(control_style),
+        );
+    }
+    output
+}
+
 fn main() -> Result<(), Error> {
     env_logger::from_env(Env::default().default_filter_or("debug")).init();
     let args = parse_args()?;
 
     let mut path = path_load(args.input_file)?;
-    let tr = match args.width {
+    match args.width {
         Some(width) if width > 2 => {
             let src_bbox = path
                 .bbox(Transform::default())
@@ -100,12 +155,9 @@ fn main() -> Result<(), Error> {
             let width = width as Scalar;
             let height = src_bbox.height() * width / src_bbox.width();
             let dst_bbox = BBox::new(Point::new(1.0, 1.0), Point::new(width - 1.0, height - 1.0));
-            Some(Transform::fit(src_bbox, dst_bbox, Align::Mid))
+            path.transform(Transform::fit(src_bbox, dst_bbox, Align::Mid));
         }
-        _ => None,
-    };
-    if let Some(tr) = tr {
-        path.transform(tr);
+        _ => (),
     }
     if let Some(stroke) = args.stroke {
         path = timeit("[stroke]", || {
@@ -116,6 +168,10 @@ fn main() -> Result<(), Error> {
             })
         });
     }
+    if args.outline {
+        path = outline(&path);
+    }
+
     log::info!("[segments_count] {}", path.segments_count());
     let mask = timeit("[rasterize]", || {
         path.rasterize(Transform::default(), FillRule::NonZero)
