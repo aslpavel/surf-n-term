@@ -464,6 +464,32 @@ impl Quad {
         let Self([p0, p1, p2]) = *self;
         Line::new(2.0 * (p1 - p0), 2.0 * (p2 - p1))
     }
+
+    /// Flattness criteria for the cubic curve
+    ///
+    /// It is equal to `f = maxarg d(t) where d(t) = |q(t) - l(t)|, l(t) = (1 - t) * p0 + t * p2`
+    /// for q(t) bezier2 curve with p{0..2} control points, in other words maximum distance
+    /// from parametric line to bezier2 curve for the same parameter t.
+    ///
+    /// Bezier2 curive is equal to line if `p1 = (p0 + p2) / 2.0`. Then grouping polynom coofficients.
+    ///     d(t) = |q(t) - l(t)| = (1 - t) t |2 * p1 - p0 - p2|
+    ///     f^2 <= 1/16 |2 * p1 - p0 - p1|^2
+    ///
+    fn flatness(&self) -> Scalar {
+        let Self([p0, p1, p2]) = *self;
+        let Point([x, y]) = 2.0 * p1 - p0 - p2;
+        x * x + y * y
+    }
+
+    /// Optimized version of `split_at(0.5)`
+    fn split(&self) -> (Self, Self) {
+        let Self([p0, p1, p2]) = *self;
+        let mid = 0.25 * (p0 + 2.0 * p1 + p2);
+        (
+            Self([p0, 0.5 * (p0 + p1), mid]),
+            Self([mid, 0.5 * (p1 + p2), p2]),
+        )
+    }
 }
 
 impl Curve for Quad {
@@ -503,13 +529,13 @@ impl Curve for Quad {
 
     fn split_at(&self, t: Scalar) -> (Self, Self) {
         // https://pomax.github.io/bezierinfo/#matrixsplit
-        let Self([p0, p1, p2]) = self;
+        let Self([p0, p1, p2]) = *self;
         let (t1, t_1) = (t, 1.0 - t);
         let (t2, t_2) = (t1 * t1, t_1 * t_1);
         let mid = t_2 * p0 + 2.0 * t1 * t_1 * p1 + t2 * p2;
         (
-            Self([*p0, t_1 * p0 + t * p1, mid]),
-            Self([mid, t_1 * p1 + t * p2, *p2]),
+            Self([p0, t_1 * p0 + t * p1, mid]),
+            Self([mid, t_1 * p1 + t * p2, p2]),
         )
     }
 
@@ -672,18 +698,18 @@ impl Cubic {
     ///
     /// [Linear Approximation of Bezier Curve](https://hcklbrrfnn.files.wordpress.com/2012/08/bez.pdf)
     fn flatness(&self) -> Scalar {
-        let Self([p0, p1, p2, p3]) = self;
-        let u = 3.0 * p1 - 2.0 * p0 - *p3;
-        let v = 3.0 * p2 - *p0 - 2.0 * p3;
+        let Self([p0, p1, p2, p3]) = *self;
+        let u = 3.0 * p1 - 2.0 * p0 - p3;
+        let v = 3.0 * p2 - p0 - 2.0 * p3;
         (u.x() * u.x()).max(v.x() * v.x()) + (u.y() * u.y()).max(v.y() * v.y())
     }
 
     /// Optimized version of `split_at(0.5)`
     fn split(&self) -> (Self, Self) {
-        let Self([p0, p1, p2, p3]) = self;
+        let Self([p0, p1, p2, p3]) = *self;
         let mid = 0.125 * p0 + 0.375 * p1 + 0.375 * p2 + 0.125 * p3;
         let c0 = Self([
-            *p0,
+            p0,
             0.5 * p0 + 0.5 * p1,
             0.25 * p0 + 0.5 * p1 + 0.25 * p2,
             mid,
@@ -692,17 +718,17 @@ impl Cubic {
             mid,
             0.25 * p1 + 0.5 * p2 + 0.25 * p3,
             0.5 * p2 + 0.5 * p3,
-            *p3,
+            p3,
         ]);
         (c0, c1)
     }
 
     pub fn extremities(&self) -> impl Iterator<Item = Scalar> {
-        let Self([p0, p1, p2, p3]) = self;
+        let Self([p0, p1, p2, p3]) = *self;
         // Solve for `curve'(t)_x = 0 || curve'(t)_y = 0`
         let Point([a0, a1]) = -1.0 * p0 + 3.0 * p1 - 3.0 * p2 + 1.0 * p3;
         let Point([b0, b1]) = 2.0 * p0 - 4.0 * p1 + 2.0 * p2;
-        let Point([c0, c1]) = -1.0 * p0 + *p1;
+        let Point([c0, c1]) = -1.0 * p0 + p1;
         quadratic_solve(a0, b0, c0)
             .chain(quadratic_solve(a1, b1, c1))
             .filter(|t| *t >= 0.0 && *t <= 1.0)
@@ -1834,7 +1860,7 @@ pub struct PathFlattenIter<'a> {
     close: bool,
     subpath: usize,
     segment: usize,
-    stack: Vec<Cubic>,
+    stack: Vec<Result<Cubic, Quad>>,
 }
 
 impl<'a> PathFlattenIter<'a> {
@@ -1857,13 +1883,21 @@ impl<'a> Iterator for PathFlattenIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.stack.pop() {
-                Some(cubic) => {
+                Some(Ok(cubic)) => {
                     if cubic.flatness() < self.flatness {
                         return Some(Line::new(cubic.start(), cubic.end()));
                     }
                     let (c0, c1) = cubic.split();
-                    self.stack.push(c1);
-                    self.stack.push(c0);
+                    self.stack.push(Ok(c1));
+                    self.stack.push(Ok(c0));
+                }
+                Some(Err(quad)) => {
+                    if quad.flatness() < self.flatness {
+                        return Some(Line::new(quad.start(), quad.end()));
+                    }
+                    let (q0, q1) = quad.split();
+                    self.stack.push(Err(q1));
+                    self.stack.push(Err(q0));
                 }
                 None => {
                     let subpath = self.path.subpaths.get(self.subpath)?;
@@ -1882,10 +1916,10 @@ impl<'a> Iterator for PathFlattenIter<'a> {
                             match segment {
                                 Segment::Line(line) => return Some(line.transform(self.transform)),
                                 Segment::Quad(quad) => {
-                                    self.stack.push(quad.transform(self.transform).into());
+                                    self.stack.push(Err(quad.transform(self.transform)));
                                 }
                                 Segment::Cubic(cubic) => {
-                                    self.stack.push(cubic.transform(self.transform));
+                                    self.stack.push(Ok(cubic.transform(self.transform)));
                                 }
                             }
                         }
@@ -3024,10 +3058,9 @@ mod tests {
     #[test]
     fn test_split_at() {
         let cubic = Cubic::new((3.0, 7.0), (2.0, 8.0), (0.0, 3.0), (6.0, 5.0));
-        assert_eq!(
-            format!("{:?}", cubic.split()),
-            format!("{:?}", cubic.split_at(0.5))
-        );
+        assert_eq!(cubic.split(), cubic.split_at(0.5));
+        let quad = Quad::new((0.0, 0.0), (8.0, 5.0), (4.0, 0.0));
+        assert_eq!(quad.split(), quad.split_at(0.5));
     }
 
     #[test]
