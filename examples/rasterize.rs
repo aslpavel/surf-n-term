@@ -131,13 +131,15 @@ fn outline(path: &Path) -> Path {
             };
             output.extend(control.build().stroke(control_style));
         }
-        output.extend(
-            Path::builder()
-                .move_to(subpath.end())
-                .circle(control_radius)
-                .build()
-                .stroke(control_style),
-        );
+        if (subpath.start() - subpath.end()).length() < control_radius {
+            output.extend(
+                Path::builder()
+                    .move_to(subpath.end())
+                    .circle(control_radius)
+                    .build()
+                    .stroke(control_style),
+            );
+        }
     }
     output
 }
@@ -159,6 +161,7 @@ fn main() -> Result<(), Error> {
         }
         _ => (),
     }
+    log::info!("[path::segments_count] {}", path.segments_count());
     if let Some(stroke) = args.stroke {
         path = timeit("[stroke]", || {
             path.stroke(StrokeStyle {
@@ -167,12 +170,12 @@ fn main() -> Result<(), Error> {
                 line_cap: LineCap::Round,
             })
         });
+        log::info!("[stroke::segments_count] {}", path.segments_count());
     }
     if args.outline {
         path = outline(&path);
     }
 
-    log::info!("[segments_count] {}", path.segments_count());
     let mask = timeit("[rasterize]", || {
         path.rasterize(Transform::default(), FillRule::NonZero)
     });
