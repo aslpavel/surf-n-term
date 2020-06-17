@@ -1618,6 +1618,12 @@ impl Path {
         Self { subpaths }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            subpaths: Default::default(),
+        }
+    }
+
     pub fn subpaths(&self) -> &[SubPath] {
         &self.subpaths
     }

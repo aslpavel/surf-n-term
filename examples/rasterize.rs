@@ -107,12 +107,11 @@ fn outline(path: &Path) -> Path {
     for subpath in path.subpaths().iter() {
         for segment in subpath.segments() {
             let control = match segment {
-                Segment::Line(line) => Path::builder().move_to(line.start()).circle(control_radius),
+                Segment::Line(_) => Path::builder(),
                 Segment::Quad(quad) => {
                     let [p0, p1, p2] = quad.points();
                     Path::builder()
                         .move_to(p0)
-                        .circle(control_radius)
                         .line_to(p1)
                         .circle(control_radius)
                         .line_to(p2)
@@ -121,7 +120,6 @@ fn outline(path: &Path) -> Path {
                     let [p0, p1, p2, p3] = cubic.points();
                     Path::builder()
                         .move_to(p0)
-                        .circle(control_radius)
                         .line_to(p1)
                         .circle(control_radius)
                         .move_to(p3)
@@ -129,15 +127,20 @@ fn outline(path: &Path) -> Path {
                         .circle(control_radius)
                 }
             };
+            output.extend(
+                Path::builder()
+                    .move_to(segment.start())
+                    .circle(control_radius)
+                    .build(),
+            );
             output.extend(control.build().stroke(control_style));
         }
-        if (subpath.start() - subpath.end()).length() < control_radius {
+        if (subpath.start() - subpath.end()).length() > control_radius {
             output.extend(
                 Path::builder()
                     .move_to(subpath.end())
                     .circle(control_radius)
-                    .build()
-                    .stroke(control_style),
+                    .build(),
             );
         }
     }
