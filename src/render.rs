@@ -339,13 +339,12 @@ impl fmt::Debug for Line {
 }
 
 impl FromStr for Line {
-    type Err = PathParseError;
+    type Err = Error;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let segment = Segment::from_str(text)?;
-        segment.to_line().ok_or_else(|| PathParseError {
-            message: String::from("First element of the path is not a line"),
-            offset: 0,
+        segment.to_line().ok_or_else(|| Error::ConvertionError {
+            reason: "first element of the path is not a line".to_string(),
         })
     }
 }
@@ -422,13 +421,12 @@ impl fmt::Debug for Quad {
 }
 
 impl FromStr for Quad {
-    type Err = PathParseError;
+    type Err = Error;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let segment = Segment::from_str(text)?;
-        segment.to_quad().ok_or_else(|| PathParseError {
-            message: String::from("First element of the path is not a quad"),
-            offset: 0,
+        segment.to_quad().ok_or_else(|| Error::ConvertionError {
+            reason: "first element of the path is not a quad".to_string(),
         })
     }
 }
@@ -626,13 +624,12 @@ impl fmt::Debug for Cubic {
 }
 
 impl FromStr for Cubic {
-    type Err = PathParseError;
+    type Err = Error;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let segment = Segment::from_str(text)?;
-        segment.to_cubic().ok_or_else(|| PathParseError {
-            message: String::from("First element of the path is not a cubic"),
-            offset: 0,
+        segment.to_cubic().ok_or_else(|| Error::ConvertionError {
+            reason: "first element of the path is not a cubic".to_string(),
         })
     }
 }
@@ -1362,16 +1359,15 @@ impl fmt::Debug for Segment {
 }
 
 impl FromStr for Segment {
-    type Err = PathParseError;
+    type Err = Error;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let path = Path::from_str(text)?;
         path.subpaths()
             .get(0)
             .map(|sp| sp.first())
-            .ok_or_else(|| PathParseError {
-                message: String::from("Path is empty"),
-                offset: 0,
+            .ok_or_else(|| Error::ConvertionError {
+                reason: "Empty path can not be converted to a segment".to_string(),
             })
     }
 }
@@ -2004,7 +2000,7 @@ impl PathBuilder {
     }
 
     /// Extend path from string, which is specified in the same format as SVGs path element.
-    pub fn from_str(self, string: impl AsRef<[u8]>) -> Result<Self, PathParseError> {
+    pub fn from_str(self, string: impl AsRef<[u8]>) -> Result<Self, Error> {
         let parser = PathParser::new(string.as_ref());
         parser.parse(self)
     }
@@ -2135,7 +2131,7 @@ impl PathBuilder {
 }
 
 impl FromStr for Path {
-    type Err = PathParseError;
+    type Err = Error;
 
     fn from_str(text: &str) -> Result<Path, Self::Err> {
         let parser = PathParser::new(text.as_ref());
@@ -2144,25 +2140,25 @@ impl FromStr for Path {
     }
 }
 
-#[derive(Debug)]
-pub struct PathParseError {
-    message: String,
-    offset: usize,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Error {
+    ParseError { reason: String, offset: usize },
+    ConvertionError { reason: String },
 }
 
-impl fmt::Display for PathParseError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.message, self.offset)
+        write!(f, "{:?}", self)
     }
 }
 
-impl From<PathParseError> for std::io::Error {
-    fn from(error: PathParseError) -> Self {
+impl From<Error> for std::io::Error {
+    fn from(error: Error) -> Self {
         Self::new(std::io::ErrorKind::InvalidData, error)
     }
 }
 
-impl std::error::Error for PathParseError {}
+impl std::error::Error for Error {}
 
 #[derive(Debug)]
 pub struct PathParser<'a> {
@@ -2186,17 +2182,17 @@ impl<'a> PathParser<'a> {
         }
     }
 
-    fn error<S: Into<String>>(&self, message: S) -> PathParseError {
-        PathParseError {
-            message: message.into(),
+    fn error<S: Into<String>>(&self, reason: S) -> Error {
+        Error::ParseError {
             offset: self.offset,
+            reason: reason.into(),
         }
     }
 
-    fn current(&self) -> Result<u8, PathParseError> {
+    fn current(&self) -> Result<u8, Error> {
         match self.text.get(self.offset) {
             Some(byte) => Ok(*byte),
-            None => Err(self.error("current: end of input is reached")),
+            None => Err(self.error("unexpected end of input")),
         }
     }
 
@@ -2208,7 +2204,7 @@ impl<'a> PathParser<'a> {
         self.offset >= self.text.len()
     }
 
-    fn parse_separators(&mut self) -> Result<(), PathParseError> {
+    fn parse_separators(&mut self) -> Result<(), Error> {
         while !self.is_eof() {
             match self.text[self.offset] {
                 b' ' | b'\t' | b'\r' | b'\n' | b',' => {
@@ -2220,7 +2216,7 @@ impl<'a> PathParser<'a> {
         Ok(())
     }
 
-    fn parse_digits(&mut self) -> Result<bool, PathParseError> {
+    fn parse_digits(&mut self) -> Result<bool, Error> {
         let mut found = false;
         loop {
             match self.current() {
@@ -2233,7 +2229,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
-    fn parse_sign(&mut self) -> Result<(), PathParseError> {
+    fn parse_sign(&mut self) -> Result<(), Error> {
         match self.current()? {
             b'-' | b'+' => {
                 self.advance(1);
@@ -2243,7 +2239,7 @@ impl<'a> PathParser<'a> {
         Ok(())
     }
 
-    fn parse_scalar(&mut self) -> Result<Scalar, PathParseError> {
+    fn parse_scalar(&mut self) -> Result<Scalar, Error> {
         self.parse_separators()?;
         let start = self.offset;
         self.parse_sign()?;
@@ -2257,14 +2253,14 @@ impl<'a> PathParser<'a> {
                 _ => false,
             };
             if !whole && !fraction {
-                return Err(self.error("parse_scalar: missing whole and fractional value"));
+                return Err(self.error("failed to parse scalar"));
             }
             match self.current()? {
                 b'e' | b'E' => {
                     self.advance(1);
                     self.parse_sign()?;
                     if !self.parse_digits()? {
-                        return Err(self.error("parse_scalar: missing exponent value"));
+                        return Err(self.error("failed to parse scalar"));
                     }
                 }
                 _ => (),
@@ -2276,7 +2272,7 @@ impl<'a> PathParser<'a> {
         Ok(scalar)
     }
 
-    fn parse_point(&mut self) -> Result<Point, PathParseError> {
+    fn parse_point(&mut self) -> Result<Point, Error> {
         let x = self.parse_scalar()?;
         let y = self.parse_scalar()?;
         let is_relative = match self.prev_cmd {
@@ -2290,7 +2286,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
-    fn parse_flag(&mut self) -> Result<bool, PathParseError> {
+    fn parse_flag(&mut self) -> Result<bool, Error> {
         self.parse_separators()?;
         match self.current()? {
             b'0' => {
@@ -2301,11 +2297,11 @@ impl<'a> PathParser<'a> {
                 self.advance(1);
                 Ok(true)
             }
-            flag => Err(self.error(format!("parse_flag: invalid flag `{}`", flag))),
+            _ => Err(self.error("failed to parse flag")),
         }
     }
 
-    fn parse_cmd(&mut self) -> Result<u8, PathParseError> {
+    fn parse_cmd(&mut self) -> Result<u8, Error> {
         let cmd = self.current()?;
         match cmd {
             b'M' | b'm' | b'L' | b'l' | b'V' | b'v' | b'H' | b'h' | b'C' | b'c' | b'S' | b's'
@@ -2324,14 +2320,12 @@ impl<'a> PathParser<'a> {
             }
             _ => match self.prev_cmd {
                 Some(cmd) => Ok(cmd),
-                None => {
-                    Err(self.error(format!("parse_cmd: command expected `{}`", char::from(cmd))))
-                }
+                None => Err(self.error("failed to parse path cmd")),
             },
         }
     }
 
-    fn parse(mut self, mut builder: PathBuilder) -> Result<PathBuilder, PathParseError> {
+    fn parse(mut self, mut builder: PathBuilder) -> Result<PathBuilder, Error> {
         loop {
             self.parse_separators()?;
             if self.is_eof() {
@@ -2971,7 +2965,7 @@ mod tests {
     "#;
 
     #[test]
-    fn test_path_parse() -> Result<(), PathParseError> {
+    fn test_path_parse() -> Result<(), Error> {
         let path: Path = SQUIRREL.parse()?;
         let reference = Path::builder()
             .move_to((12.0, 1.0))
@@ -3041,7 +3035,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flatten() -> Result<(), PathParseError> {
+    fn test_flatten() -> Result<(), Error> {
         let path: Path = SQUIRREL.parse()?;
         let tr = Transform::default()
             .rotate(PI / 3.0)
@@ -3065,7 +3059,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_rule() -> Result<(), PathParseError> {
+    fn test_fill_rule() -> Result<(), Error> {
         let tr = Transform::default();
         let path: Path = r#"
             M50,0 21,90 98,35 2,35 79,90z

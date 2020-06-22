@@ -1,7 +1,7 @@
 use std::{fmt, io::Write, iter::FromIterator};
 pub mod render;
 pub use render::{
-    Align, BBox, Cubic, Curve, FillRule, Line, LineCap, LineJoin, Path, Point, Quad, Scalar,
+    Align, BBox, Cubic, Curve, Error, FillRule, Line, LineCap, LineJoin, Path, Point, Quad, Scalar,
     Segment, StrokeStyle, SubPath, Transform,
 };
 pub use surface::{Surface, SurfaceMut, SurfaceOwned};
