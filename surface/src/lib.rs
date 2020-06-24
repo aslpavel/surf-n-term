@@ -273,6 +273,12 @@ pub struct SurfaceIter<'a, T> {
     data: &'a [T],
 }
 
+impl<'a, T> SurfaceIter<'a, T> {
+    pub fn position(&self) -> (usize, usize){
+        self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
+    }
+}
+
 impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
     type Item = &'a T;
 
@@ -291,6 +297,12 @@ pub struct SurfaceMutIter<'a, T> {
     index: usize,
     shape: Shape,
     data: &'a mut [T],
+}
+
+impl<'a, T> SurfaceMutIter<'a, T> {
+    pub fn position(&self) -> (usize, usize) {
+        self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
+    }
 }
 
 impl<'a, T: 'a> Iterator for SurfaceMutIter<'a, T> {
@@ -721,17 +733,26 @@ mod tests {
         // 4 5 | 6 7 8 9 | 1
         let mut view = surf.view_mut(.., 2..-1);
         let mut iter = view.iter_mut();
+        assert_eq!(iter.position(), (0, 0));
         assert_eq!(iter.next().cloned(), Some(2));
+        assert_eq!(iter.position(), (0, 1));
         assert_eq!(iter.nth(1).cloned(), Some(4));
+        assert_eq!(iter.position(), (0, 3));
         assert_eq!(iter.nth(6).cloned(), Some(7));
+        assert_eq!(iter.position(), (2, 2));
         assert_eq!(iter.nth(1).cloned(), Some(9));
+        assert_eq!(iter.position(), (3, 0));
         assert_eq!(iter.next(), None);
+        assert_eq!(iter.position(), (3, 0));
 
         let view = surf.view(1..2, 2..4);
         let mut iter = view.iter();
         assert_eq!(iter.next().cloned(), Some(9));
+        assert_eq!(iter.position(), (0, 1));
         assert_eq!(iter.next().cloned(), Some(0));
+        assert_eq!(iter.position(), (1, 0));
         assert_eq!(iter.next().cloned(), None);
+        assert_eq!(iter.position(), (1, 0));
     }
 
     #[test]
