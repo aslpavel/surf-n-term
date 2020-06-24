@@ -1,4 +1,6 @@
 #![allow(clippy::iter_nth_zero)]
+#![deny(warnings)]
+
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
