@@ -10,14 +10,11 @@ const SMALL_SET: &str = "\x1bOR\x1b[15~\x1b[97;15R\x1b[4;3104;1482t\x1b[8;101;20
 fn main() -> Result<(), Box<dyn Error>> {
     let mut decoder = TTYDecoder::new();
     let mut cursor = Cursor::new(Vec::new());
-    cursor.write_all(SMALL_SET.as_ref())?;
+    cursor.get_mut().write_all(SMALL_SET.as_ref())?;
 
-    for _ in 0..2 {
-        cursor.seek(SeekFrom::Start(0)).unwrap();
-        while let Some(event) = decoder.decode(&mut cursor).unwrap() {
-            println!("{:?}", event);
-        }
-        println!();
+    cursor.seek(SeekFrom::Start(0)).unwrap();
+    while let Some(event) = decoder.decode(&mut cursor).unwrap() {
+        println!("{:?}", event);
     }
 
     Ok(())

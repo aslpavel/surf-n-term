@@ -77,6 +77,11 @@ impl TerminalRenderer {
         })
     }
 
+    /// View associated with the current frame
+    pub fn view(&mut self) -> TerminalSurface<'_> {
+        self.front.view_mut(.., ..)
+    }
+
     /// Render the current frame
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // we have to issue erase commands first since images can overlap and
@@ -155,11 +160,6 @@ impl TerminalRenderer {
         Ok(())
     }
 
-    /// View associated with the current frame
-    pub fn view(&mut self) -> TerminalSurface<'_> {
-        self.front.view_mut(.., ..)
-    }
-
     fn find_repeats(&self, row: usize, col: usize) -> usize {
         let first = self.front.get(row, col);
         if first.is_none() {
@@ -179,11 +179,11 @@ impl TerminalRenderer {
     }
 }
 
-pub trait TerminalSurfaceExt {
+pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn draw_box(&mut self, face: Option<Face>);
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
     fn draw_image(&mut self, img: ImageHandle);
-    fn erase(&mut self, color: RGBA);
+    fn erase(&mut self, color: Option<RGBA>);
     fn writer(&mut self) -> TerminalWriter<'_>;
 }
 
@@ -228,13 +228,26 @@ where
         }
     }
 
-    fn erase(&mut self, color: RGBA) {
-        let face = Face::default().with_bg(Some(color));
+    fn erase(&mut self, color: Option<RGBA>) {
+        let face = Face::default().with_bg(color);
         self.fill_with(|_, _, _| Cell::new(face, None));
     }
 
     fn writer(&mut self) -> TerminalWriter<'_> {
         TerminalWriter::new(self)
+    }
+}
+
+pub trait TerminalWritable {
+    fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()>;
+}
+
+impl<'a, T> TerminalWritable for &'a T
+where
+    T: TerminalWritable + ?Sized,
+{
+    fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()> {
+        (*self).fmt(writer)
     }
 }
 
@@ -265,6 +278,20 @@ impl<'a> TerminalWriter<'a> {
             self.iter.nth(offset - 1);
         }
         self
+    }
+
+    pub fn position(&self) -> (usize, usize) {
+        self.iter.position()
+    }
+
+    pub fn display(&mut self, value: impl TerminalWritable) -> std::io::Result<()> {
+        value.fmt(self)
+    }
+
+    pub fn put(&mut self, cell: Cell) {
+        if let Some(cell_ref) = self.iter.next() {
+            *cell_ref = cell;
+        }
     }
 }
 

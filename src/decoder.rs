@@ -235,6 +235,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     // but it does not always match real behaviour
 
     cmds.push(basic_key("\x1b", KeyName::Esc));
+    cmds.push(basic_key("\x7f", KeyName::Backspace));
 
     for byte in (0..=255u8).filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
         let c = char::from(byte);
@@ -250,6 +251,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
 
     for (name, code) in [
         (KeyName::Home, "1"),
+        (KeyName::Delete, "3"),
         (KeyName::End, "4"),
         (KeyName::PageUp, "5"),
         (KeyName::PageDown, "6"),
