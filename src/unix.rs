@@ -4,7 +4,9 @@ use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    terminal::{Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats},
+    terminal::{
+        Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
+    },
     DecMode, ImageHandle, ImageStorage, KittyImageStorage, Surface, RGBA,
 };
 use std::os::unix::io::AsRawFd;
@@ -13,6 +15,7 @@ use std::{
     fs::File,
     io::{BufWriter, Cursor, Read, Write},
     path::Path,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -40,6 +43,8 @@ pub struct UnixTerminal {
     read_handle: IOHandle,
     decoder: TTYDecoder,
     events_queue: VecDeque<TerminalEvent>,
+    waker_read: nix::UnixStream,
+    waker: TerminalWaker,
     termios_saved: nix::Termios,
     sigwinch_read: nix::UnixStream,
     sigwinch_id: signal_hook::SigId,
@@ -72,12 +77,22 @@ impl UnixTerminal {
         let (sigwinch_read, sigwinch_write) = nix::UnixStream::pair()?;
         let sigwinch_id = signal_hook::pipe::register(signal_hook::SIGWINCH, sigwinch_write)?;
 
+        // self-pipe trick to implement waker
+        let (waker_read, waker_write) = nix::UnixStream::pair()?;
+        let waker_write_mutex = Mutex::new(waker_write);
+        let waker = TerminalWaker::new(move || {
+            const WAKE: &[u8] = b"\x00";
+            let mut waker_write = waker_write_mutex.lock().expect("lock posioned");
+            Ok(waker_write.write_all(WAKE)?)
+        });
+
         let write_handle = IOHandle::new(write_fd);
         let read_handle = IOHandle::new(read_fd);
 
         read_handle.set_blocking(false)?;
         write_handle.set_blocking(false)?;
         set_blocking(sigwinch_read.as_raw_fd(), false)?;
+        set_blocking(waker_read.as_raw_fd(), false)?;
 
         Ok(Self {
             write_handle,
@@ -86,6 +101,8 @@ impl UnixTerminal {
             read_handle,
             decoder: TTYDecoder::new(),
             events_queue: Default::default(),
+            waker_read,
+            waker,
             termios_saved,
             sigwinch_read,
             sigwinch_id,
@@ -184,6 +201,7 @@ impl Terminal for UnixTerminal {
         let write_fd = self.write_handle.as_raw_fd();
         let read_fd = self.read_handle.as_raw_fd();
         let sigwinch_fd = self.sigwinch_read.as_raw_fd();
+        let waker_fd = self.waker_read.as_raw_fd();
 
         let timeout_instant = timeout.map(|dur| Instant::now() + dur);
         let mut first_loop = true; // execute first loop even if timeout is 0
@@ -192,6 +210,7 @@ impl Terminal for UnixTerminal {
             read_set.clear();
             read_set.insert(read_fd);
             read_set.insert(sigwinch_fd);
+            read_set.insert(waker_fd);
             write_set.clear();
             if !self.write_queue.is_empty() {
                 write_set.insert(write_fd);
@@ -235,6 +254,13 @@ impl Terminal for UnixTerminal {
                 if guard_io(self.sigwinch_read.read(&mut buf), 0)? != 0 {
                     self.events_queue
                         .push_back(TerminalEvent::Resize(self.size()?));
+                }
+            }
+            // process waker
+            if read_set.contains(waker_fd) {
+                let mut buf = [0u8; 1];
+                if guard_io(self.waker_read.read(&mut buf), 0)? != 0 {
+                    self.events_queue.push_back(TerminalEvent::Wake);
                 }
             }
             // process pending input
@@ -299,6 +325,10 @@ impl Terminal for UnixTerminal {
             None => Err(Error::FeatureNotSupported),
             Some(storage) => storage.register(&img),
         }
+    }
+
+    fn waker(&self) -> TerminalWaker {
+        self.waker.clone()
     }
 }
 

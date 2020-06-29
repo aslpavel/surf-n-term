@@ -3,7 +3,7 @@ use crate::{
     render::{TerminalRenderer, TerminalSurface},
     Face, ImageHandle, Surface, RGBA,
 };
-use std::{fmt, io::Write, time::Duration};
+use std::{fmt, io::Write, sync::Arc, time::Duration};
 
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
@@ -11,6 +11,12 @@ pub trait Terminal: Write {
     ///
     /// Command will be submitted on the next call to poll `Terminal::poll`
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error>;
+
+    /// Waker object
+    ///
+    /// Waker object is a thread safe object that can be called to wake terminal
+    /// with TerminalEvent::Wake event
+    fn waker(&self) -> TerminalWaker;
 
     /// Poll the Terminal
     ///
@@ -60,6 +66,23 @@ pub trait Terminal: Write {
             renderer.frame(term)?;
             Ok(result)
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct TerminalWaker {
+    wake: Arc<dyn Fn() -> Result<(), Error> + Sync + Send + 'static>,
+}
+
+impl TerminalWaker {
+    pub fn new(wake: impl Fn() -> Result<(), Error> + Sync + Send + 'static) -> Self {
+        Self {
+            wake: Arc::new(wake),
+        }
+    }
+
+    pub fn wake(&self) -> Result<(), Error> {
+        (self.wake)()
     }
 }
 
@@ -209,6 +232,8 @@ pub enum TerminalEvent {
         id: usize,
         success: bool,
     },
+    // Terminal have been woken by waker object
+    Wake,
     // Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
 }

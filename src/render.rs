@@ -321,7 +321,7 @@ mod tests {
     use super::*;
     use crate::{
         encoder::{Encoder, TTYEncoder},
-        terminal::{TerminalEvent, TerminalSize},
+        terminal::{TerminalEvent, TerminalSize, TerminalWaker},
         ImageHandle,
     };
     use std::io::Write;
@@ -406,6 +406,10 @@ mod tests {
 
         fn size(&self) -> Result<TerminalSize, Error> {
             Ok(self.size)
+        }
+
+        fn waker(&self) -> TerminalWaker {
+            TerminalWaker::new(|| Ok(()))
         }
 
         fn image_register(
