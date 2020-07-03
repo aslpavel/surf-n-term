@@ -26,7 +26,10 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
             [r, g, b]
         } else {
             let alpha = a as f32 / 255.0;
-            ColorLinear([0.0, 0.0, 0.0, 1.0]).lerp(self, alpha).rgb_u8()
+            let [r, g, b, _] = ColorLinear([0.0, 0.0, 0.0, 1.0])
+                .lerp(self, alpha)
+                .rgba_u8();
+            [r, g, b]
         }
     }
 
@@ -131,6 +134,12 @@ impl Default for RGBA {
 impl RGBA {
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         RGBA([r, g, b, a])
+    }
+
+    pub fn with_alpha(self, alpha: f32) -> Self {
+        let Self([r, g, b, _]) = self;
+        let a = (clamp(alpha, 0.0, 1.0) * 255.0).round() as u8;
+        Self([r, g, b, a])
     }
 
     pub fn from_str_opt(rgba: &str) -> Option<Self> {

@@ -82,15 +82,25 @@ impl Face {
         Face { fg, ..*self }
     }
 
+    pub fn invert(&self) -> Self {
+        Face {
+            fg: self.bg,
+            bg: self.fg,
+            ..*self
+        }
+    }
+
     /// Overlay `other` face on top of `self`
     pub fn overlay(&self, other: &Self) -> Self {
         let fg = match (self.fg, other.fg) {
             (Some(dst), Some(src)) => Some(dst.blend(src, Blend::Over)),
-            (_, src) => src,
+            (fg, None) => fg,
+            (None, fg) => fg,
         };
         let bg = match (self.bg, other.bg) {
             (Some(dst), Some(src)) => Some(dst.blend(src, Blend::Over)),
-            (_, src) => src,
+            (bg, None) => bg,
+            (None, bg) => bg,
         };
         Face { fg, bg, ..*other }
     }

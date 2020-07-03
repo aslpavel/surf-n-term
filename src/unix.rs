@@ -258,7 +258,7 @@ impl Terminal for UnixTerminal {
             }
             // process waker
             if read_set.contains(waker_fd) {
-                let mut buf = [0u8; 1];
+                let mut buf = [0u8; 1024];
                 if guard_io(self.waker_read.read(&mut buf), 0)? != 0 {
                     self.events_queue.push_back(TerminalEvent::Wake);
                 }

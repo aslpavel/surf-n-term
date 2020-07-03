@@ -3,7 +3,7 @@ use crate::{
     SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, RGBA,
 };
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cell {
     face: Face,
     glyph: Option<char>,
@@ -291,6 +291,13 @@ impl<'a> TerminalWriter<'a> {
     pub fn put(&mut self, cell: Cell) {
         if let Some(cell_ref) = self.iter.next() {
             *cell_ref = cell;
+        }
+    }
+
+    pub fn put_char(&mut self, c: char, face: Face) {
+        if let Some(cell) = self.iter.next() {
+            let face = cell.face.overlay(&face);
+            *cell = Cell::new(face, Some(c));
         }
     }
 }

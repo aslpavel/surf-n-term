@@ -18,7 +18,7 @@ pub mod widgets;
 pub use color::{Blend, Color, ColorLinear, RGBA};
 pub use error::Error;
 pub use image::{ImageHandle, ImageStorage, KittyImageStorage};
-pub use render::{Cell, TerminalSurface, TerminalSurfaceExt};
+pub use render::{Cell, TerminalSurface, TerminalSurfaceExt, TerminalWritable, TerminalWriter};
 pub use style::{Face, FaceAttrs};
 pub use surface::{
     Shape, Surface, SurfaceIter, SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned,
@@ -26,7 +26,7 @@ pub use surface::{
 };
 pub use terminal::{
     DecMode, DecModeStatus, Key, KeyMod, KeyName, Position, Terminal, TerminalAction,
-    TerminalCommand, TerminalEvent,
+    TerminalCommand, TerminalEvent, TerminalWaker,
 };
 
 pub type SystemTerminal = unix::UnixTerminal;
