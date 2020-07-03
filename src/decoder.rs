@@ -414,8 +414,8 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             // "\x1b[{row};{col}R"
             let mut nums = numbers_decode(&data[2..data.len() - 1]);
             TerminalEvent::CursorPosition {
-                row: nums.next()?,
-                col: nums.next()?,
+                row: nums.next()? - 1,
+                col: nums.next()? - 1,
             }
         }
         TerminalSizeCells | TerminalSizePixels => {
@@ -679,7 +679,7 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::CursorPosition { row: 97, col: 15 }),
+            Some(TerminalEvent::CursorPosition { row: 96, col: 14 }),
         );
 
         Ok(())

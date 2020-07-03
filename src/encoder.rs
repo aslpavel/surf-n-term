@@ -73,6 +73,13 @@ impl Encoder for TTYEncoder {
             }
             Reset => out.write_all(b"\x1bc")?,
             Char(c) => write!(out, "{}", c)?,
+            Scroll(count) => {
+                if count > 0 {
+                    write!(out, "\x1b[{}S", count)?;
+                } else if count < 0 {
+                    write!(out, "\x1b[{}T", -count)?;
+                }
+            }
             Image(_) | ImageErase(_) => {
                 // image is ignored and must be handled by image storage
             }

@@ -118,6 +118,8 @@ pub enum TerminalCommand {
     EraseLine,
     /// Erase specified ammount of characters to the right from current cursor position
     EraseChars(usize),
+    /// Scroll, positive is up and negative is down
+    Scroll(i32),
     /// Full reset of the terminal
     Reset,
     /// Draw image

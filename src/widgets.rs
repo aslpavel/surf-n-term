@@ -227,7 +227,7 @@ impl<T: ListItems> List<T> {
     pub fn handle(&mut self, event: &TerminalEvent) {
         match *event {
             TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::EMPTY => {
-                if name == KeyName::Down && self.cursor < self.items.len() {
+                if name == KeyName::Down && self.cursor + 1 < self.items.len() {
                     self.cursor += 1;
                 } else if name == KeyName::Up && self.cursor > 0 {
                     self.cursor -= 1;
@@ -276,7 +276,7 @@ impl<T: ListItems> List<T> {
         // scroll bar
         let (sb_offset, sb_filled) = if self.items.len() != 0 {
             let sb_filled = clamp(surf.height().pow(2) / self.items.len(), 1, surf.height());
-            let sb_offset = (surf.height() - sb_filled) * self.cursor / self.items.len();
+            let sb_offset = (surf.height() - sb_filled) * (self.cursor + 1) / self.items.len();
             (sb_offset, sb_filled + sb_offset)
         } else {
             (0, surf.height())
