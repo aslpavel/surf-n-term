@@ -2,7 +2,7 @@ use crate::automata::{DFAState, DFA, NFA};
 use crate::error::Error;
 use crate::terminal::{DecModeStatus, Key, KeyMod, KeyName, Mouse, TerminalEvent, TerminalSize};
 use lazy_static::lazy_static;
-use std::{fmt, io::BufRead};
+use std::{collections::BTreeMap, fmt, io::BufRead};
 
 pub trait Decoder {
     type Item;
@@ -393,6 +393,31 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     };
     cmds.push(kitty_image_response.tag(TTYTag::KittyImage));
 
+    // Termcap/Terminfo response to XTGETTCAP
+    let terminfo_response = {
+        let hex = NFA::predicate(|b| match b {
+            b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9' => true,
+            _ => false,
+        });
+        let hex = hex.clone() + hex;
+        let key_value = NFA::sequence(vec![hex.clone().some(), NFA::from("="), hex.clone().some()]);
+        NFA::choice(vec![
+            // success
+            NFA::sequence(vec![
+                NFA::from("\x1bP1+r"),
+                key_value.clone(),
+                NFA::sequence(vec![NFA::from(";"), key_value]).many(),
+            ]),
+            // failure
+            NFA::sequence(vec![
+                NFA::from("\x1bP0+r"),
+                hex.clone().some(),
+                NFA::sequence(vec![NFA::from(";"), hex.some()]).many(),
+            ]),
+        ]) + NFA::from("\x1b\\")
+    };
+    cmds.push(terminfo_response.tag(TTYTag::Terminfo));
+
     NFA::choice(cmds).compile()
 }
 
@@ -481,7 +506,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         KittyImage => {
             // "\x1b_Gkey=value(,key=value)*;response\x1b\\"
             let mut iter = (&data[3..data.len() - 2]).splitn(2, |b| *b == b';');
-            let mut key_values = key_value_decode(iter.next()?);
+            let mut key_values = key_value_decode(b',', iter.next()?);
             let mut id = 0; // id can not be zero according to the spec
             while let Some((key, value)) = key_values.next() {
                 if key == b"i" {
@@ -490,6 +515,23 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             }
             let success = iter.next()? == b"OK";
             TerminalEvent::KittyImage { id, success }
+        }
+        Terminfo => {
+            // "\x1bP(0|1)+rkey=value(;key=value)\x1b\\"
+            let mut termcap = BTreeMap::new();
+            if data[2] == b'1' {
+                for (key, value) in key_value_decode(b';', &data[5..data.len() - 2]) {
+                    termcap.insert(
+                        hex_decode(key).map(char::from).collect(),
+                        Some(hex_decode(value).map(char::from).collect()),
+                    );
+                }
+            } else {
+                for key in data[5..data.len() - 2].split(|b| *b == b';') {
+                    termcap.insert(hex_decode(key).map(char::from).collect(), None);
+                }
+            }
+            TerminalEvent::Termcap(termcap)
         }
     };
     Some(event)
@@ -505,6 +547,7 @@ enum TTYTag {
     MouseSGR,
     DecMode,
     KittyImage,
+    Terminfo,
 }
 
 impl fmt::Debug for TTYTag {
@@ -519,6 +562,7 @@ impl fmt::Debug for TTYTag {
             Char => write!(f, "CHR")?,
             DecMode => write!(f, "DCM")?,
             KittyImage => write!(f, "KI")?,
+            Terminfo => write!(f, "CAP")?,
         }
         Ok(())
     }
@@ -531,8 +575,8 @@ impl From<TerminalEvent> for TTYTag {
 }
 
 /// key=value(,key=value)*
-fn key_value_decode(data: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> + '_ {
-    data.split(|b| *b == b',').filter_map(|kv| {
+fn key_value_decode(sep: u8, data: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> + '_ {
+    data.split(move |b| *b == sep).filter_map(|kv| {
         let mut iter = kv.splitn(2, |b| *b == b'=');
         let key = iter.next()?;
         let value = iter.next()?;
@@ -854,7 +898,7 @@ mod tests {
     }
 
     #[test]
-    fn tert_kitty() -> Result<(), Error> {
+    fn test_kitty() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
@@ -877,6 +921,50 @@ mod tests {
                     id: 31,
                     success: false
                 },
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_terminfo() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(
+            cursor.get_mut(),
+            "\x1bP1+r62656c=5e47;626f6c64=1b5b316d\x1b\\"
+        )?;
+        write!(
+            cursor.get_mut(),
+            "\x1bP1+r736d637570=1b5b3f3130343968\x1b\\",
+        )?;
+        write!(cursor.get_mut(), "\x1bP0+r73757266;7465726d\x1b\\")?;
+
+        let mut result = Vec::new();
+        decoder.decode_into(&mut cursor, &mut result)?;
+        assert_eq!(
+            result,
+            vec![
+                TerminalEvent::Termcap(
+                    vec![("bel", "^G"), ("bold", "\u{1b}[1m")]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), Some(v.to_string())))
+                        .collect()
+                ),
+                TerminalEvent::Termcap(
+                    Some(("smcup", "\u{1b}[?1049h"))
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), Some(v.to_string())))
+                        .collect()
+                ),
+                TerminalEvent::Termcap(
+                    vec!["surf", "term"]
+                        .into_iter()
+                        .map(|k| (k.to_string(), None))
+                        .collect()
+                ),
             ]
         );
 

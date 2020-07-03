@@ -83,6 +83,18 @@ impl Encoder for TTYEncoder {
             Image(_) | ImageErase(_) => {
                 // image is ignored and must be handled by image storage
             }
+            Termcap(caps) => {
+                write!(out, "\x1bP+q")?;
+                for (index, cap) in caps.iter().enumerate() {
+                    if index != 0 {
+                        out.write_all(b";")?;
+                    }
+                    for b in cap.as_bytes() {
+                        write!(out, "{:x}", b)?;
+                    }
+                }
+                write!(out, "\x1b\\")?;
+            }
         }
 
         Ok(())

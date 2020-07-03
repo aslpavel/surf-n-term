@@ -3,7 +3,7 @@ use crate::{
     render::{TerminalRenderer, TerminalSurface},
     Face, ImageHandle, Surface, RGBA,
 };
-use std::{fmt, io::Write, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, fmt, io::Write, sync::Arc, time::Duration};
 
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
@@ -126,6 +126,8 @@ pub enum TerminalCommand {
     Image(ImageHandle),
     /// Erase image
     ImageErase(Position),
+    /// Request Termcap/Terminfo XTGETTCAP
+    Termcap(Vec<String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -236,6 +238,8 @@ pub enum TerminalEvent {
     },
     // Terminal have been woken by waker object
     Wake,
+    // Termcap/Terminfo repsponse to XTGETTCAP
+    Termcap(BTreeMap<String, Option<String>>),
     // Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
 }
