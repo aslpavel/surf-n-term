@@ -276,7 +276,7 @@ pub struct SurfaceIter<'a, T> {
 }
 
 impl<'a, T> SurfaceIter<'a, T> {
-    pub fn position(&self) -> (usize, usize){
+    pub fn position(&self) -> (usize, usize) {
         self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
     }
 }
@@ -568,6 +568,9 @@ fn range_bounds(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usi
     //  0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5  6  7  8  9
     //-10 -9 -8 -7 -6 -5 -4 -3 -2 -1  0  1  2  3  4  5  6  7  8  9
     let size = size as i32;
+    if size == 0 {
+        return None;
+    }
 
     let (start, offset) = match bound.start_bound() {
         Bound::Unbounded => (0, 0),
@@ -659,6 +662,7 @@ mod tests {
         assert_eq!((-10).view_bounds(10), Some((0, 1)));
         assert_eq!((-11).view_bounds(10), None);
         assert_eq!(10.view_bounds(10), None);
+        assert_eq!(10.view_bounds(0), None);
     }
 
     #[test]
