@@ -36,7 +36,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     })?;
 
     use std::io::Write;
-    // term.write_all(b"\x1bP+q62656c\x1b\\")?;
+    term.execute(TerminalCommand::Termcap(vec![
+        "bel".to_string(),
+        "smcup".to_string(),
+        "TN".to_string(),
+        "Co".to_string(),
+    ]))?;
     term.write_all(b"\x1b[14t")?;
 
     // read terminal events
@@ -49,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let q = Key::from(KeyName::Char('q'));
 
     let waker = term.waker();
-    let wake = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(2));
         waker.wake().expect("wake failed");
     });
