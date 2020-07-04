@@ -197,8 +197,9 @@ pub trait ListItems {
 
 pub struct List<T> {
     items: T,
-    offset: usize,
-    cursor: usize,
+    offset: i32,
+    cursor: i32,
+    height_hint: i32,
 }
 
 impl<T: ListItems> List<T> {
@@ -207,6 +208,7 @@ impl<T: ListItems> List<T> {
             items,
             offset: 0,
             cursor: 0,
+            height_hint: 1,
         }
     }
 
@@ -221,17 +223,22 @@ impl<T: ListItems> List<T> {
     }
 
     pub fn current(&self) -> Option<T::Item> {
-        self.items.get(self.cursor)
+        self.items.get(self.cursor as usize)
     }
 
     pub fn handle(&mut self, event: &TerminalEvent) {
         match *event {
             TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::EMPTY => {
-                if name == KeyName::Down && self.cursor + 1 < self.items.len() {
+                if name == KeyName::Down {
                     self.cursor += 1;
-                } else if name == KeyName::Up && self.cursor > 0 {
+                } else if name == KeyName::Up {
                     self.cursor -= 1;
+                } else if name == KeyName::PageDown {
+                    self.cursor += self.height_hint;
+                } else if name == KeyName::PageUp {
+                    self.cursor -= self.height_hint;
                 }
+                self.cursor = clamp(self.cursor, 0, self.items.len() as i32 - 1);
             }
             _ => (),
         }
@@ -242,22 +249,23 @@ impl<T: ListItems> List<T> {
         theme: &Theme,
         mut surf: impl SurfaceMut<Item = Cell>,
     ) -> Result<(), Error> {
+        self.height_hint = surf.height() as i32;
         surf.erase(theme.list_default.bg);
         if surf.height() < 1 || surf.width() < 5 {
             return Ok(());
         }
         if self.offset > self.cursor {
             self.offset = self.cursor;
-        } else if self.offset + surf.height() - 1 < self.cursor {
-            self.offset = self.cursor - surf.height() + 1;
+        } else if self.offset + surf.height() as i32 - 1 < self.cursor {
+            self.offset = self.cursor - surf.height() as i32 + 1;
         }
 
-        for row in 0..surf.height() {
-            let item = match self.items.get(self.offset + row) {
+        for row in 0..(surf.height() as i32) {
+            let item = match self.items.get((self.offset + row) as usize) {
                 Some(item) => item,
                 None => break,
             };
-            let mut line = surf.view_mut(row as i32, ..-1);
+            let mut line = surf.view_mut(row, ..-1);
             let mut writer = if row + self.offset == self.cursor {
                 line.erase(theme.list_selected.bg);
                 let mut writer = line
@@ -275,13 +283,14 @@ impl<T: ListItems> List<T> {
 
         // scroll bar
         let (sb_offset, sb_filled) = if self.items.len() != 0 {
-            let sb_filled = clamp(surf.height().pow(2) / self.items.len(), 1, surf.height());
-            let sb_offset = (surf.height() - sb_filled) * (self.cursor + 1) / self.items.len();
+            let sb_filled = clamp(surf.height().pow(2) / self.items.len(), 1, surf.height()) as i32;
+            let sb_offset =
+                (surf.height() as i32 - sb_filled) * (self.cursor + 1) / self.items.len() as i32;
             (sb_offset, sb_filled + sb_offset)
         } else {
-            (0, surf.height())
+            (0, surf.height() as i32)
         };
-        let range = 0..surf.height();
+        let range = 0..(surf.height() as i32);
         let mut sb = surf.view_mut(.., -1);
         let mut sb_writer = sb.writer();
         for i in range {
