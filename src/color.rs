@@ -143,6 +143,7 @@ impl RGBA {
     }
 
     pub fn from_str_opt(rgba: &str) -> Option<Self> {
+        let rgba = rgba.trim_matches('"');
         if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
             return None;
         }
