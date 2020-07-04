@@ -2,9 +2,9 @@ use crate::{
     common::clamp, Blend, Cell, Color, Error, Face, FaceAttrs, Key, KeyMod, KeyName, SurfaceMut,
     TerminalEvent, TerminalSurfaceExt, TerminalWritable, RGBA,
 };
-use std::io::Write;
+use std::{io::Write, str::FromStr};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Theme {
     pub fg: RGBA,
     pub bg: RGBA,
@@ -48,6 +48,43 @@ impl Theme {
             scrollbar_on,
             scrollbar_off,
         }
+    }
+
+    pub fn light() -> Self {
+        Self::from_palette(
+            "#3c3836".parse().unwrap(),
+            "#fbf1c7".parse().unwrap(),
+            "#8f3f71".parse().unwrap(),
+        )
+    }
+
+    pub fn dark() -> Self {
+        Self::from_palette(
+            "#ebdbb2".parse().unwrap(),
+            "#282828".parse().unwrap(),
+            "#d3869b".parse().unwrap(),
+        )
+    }
+}
+
+impl FromStr for Theme {
+    type Err = Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        string.split(',').try_fold(Theme::light(), |theme, attrs| {
+            let mut iter = attrs.splitn(2, '=');
+            let key = iter.next().unwrap_or_default().trim().to_lowercase();
+            let value = iter.next().unwrap_or_default().trim();
+            let theme = match key.as_str() {
+                "fg" => Theme::from_palette(value.parse()?, theme.bg, theme.accent),
+                "bg" => Theme::from_palette(theme.fg, value.parse()?, theme.accent),
+                "accent" | "base" => Theme::from_palette(theme.fg, theme.bg, value.parse()?),
+                "light" => Theme::light(),
+                "dark" => Theme::dark(),
+                _ => return Err(Error::ParseFaceError),
+            };
+            Ok(theme)
+        })
     }
 }
 
