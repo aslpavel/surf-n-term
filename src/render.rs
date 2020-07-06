@@ -273,6 +273,10 @@ impl<'a> TerminalWriter<'a> {
         Self { face, ..self }
     }
 
+    pub fn face_set(&mut self, face: Face) {
+        self.face = face;
+    }
+
     pub fn skip(mut self, offset: usize) -> Self {
         if offset > 0 {
             self.iter.nth(offset - 1);
