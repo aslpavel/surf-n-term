@@ -275,10 +275,17 @@ impl<T: ListItems> List<T> {
                 } else if name == KeyName::PageUp {
                     self.cursor -= self.height_hint;
                 }
-                self.cursor = clamp(self.cursor, 0, self.items.len() as i32 - 1);
+            }
+            TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::CTRL => {
+                if name == KeyName::Char('n') {
+                    self.cursor += 1;
+                } else if name == KeyName::Char('p') {
+                    self.cursor -= 1;
+                }
             }
             _ => (),
         }
+        self.cursor = clamp(self.cursor, 0, self.items.len() as i32 - 1);
     }
 
     pub fn render(
