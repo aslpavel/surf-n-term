@@ -310,13 +310,25 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut cur = std::io::Cursor::new(buf);
         while let Some(glyph) = self.decoder.decode(&mut cur)? {
-            let glyph = if glyph == ' ' { None } else { Some(glyph) };
-            match self.iter.next() {
-                Some(cell) => {
-                    let face = cell.face.overlay(&self.face);
-                    *cell = Cell::new(face, glyph)
+            match glyph {
+                '\r' => continue,
+                '\n' => {
+                    let index = self.iter.index();
+                    let shape = self.iter.shape();
+                    let (row, col) = self.position();
+                    if col != 0 {
+                        let offset = shape.index(row, shape.width - 1) - index;
+                        self.iter.nth(offset);
+                    }
                 }
-                None => return Ok(buf.len()),
+                _ => match self.iter.next() {
+                    Some(cell) => {
+                        let glyph = if glyph == ' ' { None } else { Some(glyph) };
+                        let face = cell.face.overlay(&self.face);
+                        *cell = Cell::new(face, glyph)
+                    }
+                    None => return Ok(buf.len()),
+                },
             }
         }
         Ok(cur.position() as usize)
@@ -473,21 +485,27 @@ mod tests {
             vec![
                 Face(Default::default()),
                 // erase is not used as we only need to remove two spaces
-                CursorTo(Position { row: 0, col: 5 }),
+                CursorTo(Position::new(0, 5)),
                 Char(' '),
                 Char(' '),
                 // erase is used
                 Face(red),
-                CursorTo(Position { row: 1, col: 1 }),
+                CursorTo(Position::new(1, 1)),
                 EraseChars(5)
             ]
         );
         term.clear();
 
         let mut img = SurfaceOwned::new(3, 3);
-        let purple = "#d3869b".parse()?;
-        let green = "#b8bb26".parse()?;
-        img.fill_with(|r, c, _| if (r + c) % 2 == 0 { purple } else { green });
+        let purple_color = "#d3869b".parse()?;
+        let green_color = "#b8bb26".parse()?;
+        img.fill_with(|r, c, _| {
+            if (r + c) % 2 == 0 {
+                purple_color
+            } else {
+                green_color
+            }
+        });
         render.view().view_mut(1.., 2..).draw_image_ascii(&img);
         println!("ascii image: {}", debug(render.view())?);
         render.frame(&mut term)?;
@@ -511,6 +529,54 @@ mod tests {
                 Char('▀'),
                 Face("fg=#d3869b".parse()?),
                 Char('▀')
+            ]
+        );
+        term.clear();
+
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+        let mut view = render.view().view_owned(.., 1..-1);
+        let mut writer = view.writer().face(purple);
+        write!(&mut writer, "one\ntwo")?;
+        println!("writer new line:{}", debug(render.view())?);
+        render.frame(&mut term)?;
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(Default::default()),
+                CursorTo(Position::new(0, 0)),
+                Face(purple),
+                CursorTo(Position::new(0, 1)),
+                Char('o'),
+                Char('n'),
+                Char('e'),
+                CursorTo(Position::new(1, 1)),
+                Char('t'),
+                Char('w'),
+                Char('o')
+            ]
+        );
+        term.clear();
+
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+        let mut view = render.view().view_owned(.., 1..-1);
+        let mut writer = view.writer().face(purple);
+        write!(&mut writer, "  one\nx")?;
+        println!("writer new line:{}", debug(render.view())?);
+        render.frame(&mut term)?;
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(Default::default()),
+                CursorTo(Position::new(0, 0)),
+                Face(purple),
+                CursorTo(Position::new(0, 1)),
+                Char(' '),
+                Char(' '),
+                Char('o'),
+                Char('n'),
+                Char('e'),
+                CursorTo(Position::new(1, 1)),
+                Char('x'),
             ]
         );
         term.clear();

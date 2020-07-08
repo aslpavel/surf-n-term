@@ -33,6 +33,13 @@ impl Shape {
         self.start + row * self.row_stride + col * self.col_stride
     }
 
+    /// Get current index of the in row-major order coressponding
+    /// to provided row and column.
+    #[inline]
+    pub fn index(&self, row: usize, col: usize) -> usize {
+        row * self.width + col
+    }
+
     /// Get row and column corresonding to nth element in row-major order
     #[inline]
     pub fn nth(&self, n: usize) -> Option<(usize, usize)> {
@@ -279,6 +286,14 @@ impl<'a, T> SurfaceIter<'a, T> {
     pub fn position(&self) -> (usize, usize) {
         self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
     }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn shape(&self) -> Shape {
+        self.shape
+    }
 }
 
 impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
@@ -304,6 +319,14 @@ pub struct SurfaceMutIter<'a, T> {
 impl<'a, T> SurfaceMutIter<'a, T> {
     pub fn position(&self) -> (usize, usize) {
         self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn shape(&self) -> Shape {
+        self.shape
     }
 }
 
