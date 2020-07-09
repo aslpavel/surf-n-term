@@ -350,7 +350,7 @@ mod tests {
     use std::io::Write;
 
     fn debug(view: impl Surface<Item = Cell>) -> Result<String, Error> {
-        let mut encoder = TTYEncoder::new();
+        let mut encoder = TTYEncoder::default();
         let mut out = Vec::new();
         write!(&mut out, "\n┌")?;
         for _ in 0..view.width() {

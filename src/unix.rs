@@ -96,7 +96,7 @@ impl UnixTerminal {
 
         Ok(Self {
             write_handle,
-            encoder: TTYEncoder::new(),
+            encoder: TTYEncoder::default(),
             write_queue: Default::default(),
             read_handle,
             decoder: TTYDecoder::new(),

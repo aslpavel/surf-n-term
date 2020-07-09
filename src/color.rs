@@ -87,7 +87,7 @@ fn linear_to_srgb(value: f32) -> f32 {
 
 /// Color in linear RGB color space with premultiplied alpha
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct ColorLinear([f32; 4]);
+pub struct ColorLinear(pub [f32; 4]);
 
 impl Mul<f32> for ColorLinear {
     type Output = Self;
@@ -113,6 +113,12 @@ impl Add<Self> for ColorLinear {
 impl ColorLinear {
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self([r, g, b, a])
+    }
+
+    pub fn distance(&self, other: &Self) -> f32 {
+        let Self([r0, g0, b0, _]) = *self;
+        let Self([r1, g1, b1, _]) = *other;
+        ((r0 - r1).powi(2) + (g0 - g1).powi(2) + (b0 - b1).powi(2)).sqrt()
     }
 }
 

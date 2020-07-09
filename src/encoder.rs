@@ -1,4 +1,4 @@
-use crate::{error::Error, Color, FaceAttrs, TerminalCommand};
+use crate::{error::Error, Color, ColorLinear, FaceAttrs, TerminalCommand};
 use std::io::Write;
 
 pub trait Encoder {
@@ -9,17 +9,34 @@ pub trait Encoder {
 }
 
 #[derive(Debug)]
-pub struct TTYEncoder;
+pub struct TTYCaps {
+    pub depth: ColorDepth,
+}
+
+impl Default for TTYCaps {
+    fn default() -> Self {
+        let depth = match std::env::var("COLORTERM") {
+            Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
+            _ => ColorDepth::EightBit,
+        };
+        Self { depth }
+    }
+}
+
+#[derive(Debug)]
+pub struct TTYEncoder {
+    caps: TTYCaps,
+}
 
 impl Default for TTYEncoder {
     fn default() -> Self {
-        Self::new()
+        Self::new(Default::default())
     }
 }
 
 impl TTYEncoder {
-    pub fn new() -> Self {
-        TTYEncoder
+    pub fn new(caps: TTYCaps) -> Self {
+        Self { caps }
     }
 }
 
@@ -49,12 +66,10 @@ impl Encoder for TTYEncoder {
             Face(face) => {
                 out.write_all(b"\x1b[00")?;
                 if let Some(fg) = face.fg {
-                    let [r, g, b] = fg.rgb_u8();
-                    write!(out, ";38;2;{};{};{}", r, g, b)?;
+                    color_sgr_encode(&mut out, fg, self.caps.depth, true)?;
                 }
                 if let Some(bg) = face.bg {
-                    let [r, g, b] = bg.rgb_u8();
-                    write!(out, ";48;2;{};{};{}", r, g, b)?;
+                    color_sgr_encode(&mut out, bg, self.caps.depth, false)?;
                 }
                 if !face.attrs.is_empty() {
                     for (flag, code) in &[
@@ -127,6 +142,89 @@ pub fn base64_encode(
             out.write_all(&dst)?;
         } else {
             break;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ColorDepth {
+    TrueColor,
+    EightBit,
+}
+
+/// Color cube grid [0, 95, 135, 175, 215, 255] converted to linear RGB colors space.
+const CUBE: &[f32] = &[0.0, 0.114435, 0.242281, 0.42869, 0.679542, 1.0];
+
+/// Grey colors available in 256 color mode converted to linear RGB color space.
+const GREYS: &[f32] = &[
+    0.002428, 0.006049, 0.011612, 0.019382, 0.029557, 0.042311, 0.057805, 0.076185, 0.097587,
+    0.122139, 0.14996, 0.181164, 0.215861, 0.254152, 0.296138, 0.341914, 0.391572, 0.445201,
+    0.502886, 0.564712, 0.630757, 0.701102, 0.775822, 0.854993,
+];
+
+fn nearest(v: f32, vs: &[f32]) -> usize {
+    match vs.binary_search_by(|c| c.partial_cmp(&v).unwrap()) {
+        Ok(index) => index,
+        Err(index) => {
+            if index == 0 {
+                0
+            } else if index >= vs.len() {
+                vs.len() - 1
+            } else {
+                if (v - vs[index - 1]) < (vs[index] - v) {
+                    index - 1
+                } else {
+                    index
+                }
+            }
+        }
+    }
+}
+
+pub fn color_sgr_encode<C: Color, W: Write>(
+    mut out: W,
+    color: C,
+    depth: ColorDepth,
+    foreground: bool,
+) -> Result<(), Error> {
+    match depth {
+        ColorDepth::TrueColor => {
+            let [r, g, b] = color.rgb_u8();
+            if foreground {
+                out.write_all(b";38")?;
+            } else {
+                out.write_all(b";48")?;
+            }
+            write!(out, ";2;{};{};{}", r, g, b)?;
+        }
+        ColorDepth::EightBit => {
+            let color: ColorLinear = color.into();
+            let ColorLinear([r, g, b, _]) = color;
+
+            // color in the color cube
+            let c_red = nearest(r, CUBE);
+            let c_green = nearest(g, CUBE);
+            let c_blue = nearest(b, CUBE);
+            let c_color = ColorLinear::new(CUBE[c_red], CUBE[c_green], CUBE[c_blue], 1.0);
+
+            // nearest grey color
+            let g_index = nearest((r + g + b) / 3.0, GREYS);
+            let g_color = ColorLinear::new(GREYS[g_index], GREYS[g_index], GREYS[g_index], 1.0);
+
+            // pick grey or cube based on the distance
+            let index = if color.distance(&g_color) < color.distance(&c_color) {
+                232 + g_index
+            } else {
+                16 + 36 * c_red + 6 * c_green + c_blue
+            };
+
+            if foreground {
+                out.write_all(b";38")?;
+            } else {
+                out.write_all(b";48")?;
+            }
+            write!(out, ";5;{}", index)?;
         }
     }
     Ok(())
