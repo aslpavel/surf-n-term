@@ -1,6 +1,6 @@
 use crate::{
-    common::clamp, Blend, Cell, Color, Error, Face, FaceAttrs, Key, KeyMod, KeyName, SurfaceMut,
-    TerminalEvent, TerminalSurfaceExt, TerminalWritable, RGBA,
+    common::clamp, Blend, Cell, Color, Error, Face, FaceAttrs, Key, KeyMod, KeyName, Surface,
+    SurfaceMut, TerminalEvent, TerminalSurfaceExt, TerminalWritable, RGBA,
 };
 use std::{io::Write, str::FromStr};
 
@@ -32,7 +32,7 @@ impl Theme {
         );
         let list_selected = Face::new(
             Some(bg.blend(fg.with_alpha(0.8), Blend::Over)),
-            Some(bg.blend(fg.with_alpha(0.05), Blend::Over)),
+            Some(bg.blend(fg.with_alpha(0.1), Blend::Over)),
             FaceAttrs::EMPTY,
         );
         let scrollbar_on = Face::new(None, Some(accent.with_alpha(0.8)), FaceAttrs::EMPTY);
@@ -293,7 +293,6 @@ impl<T: ListItems> List<T> {
         theme: &Theme,
         mut surf: impl SurfaceMut<Item = Cell>,
     ) -> Result<(), Error> {
-        self.height_hint = surf.height() as i32;
         surf.erase(theme.list_default.bg);
         if surf.height() < 1 || surf.width() < 5 {
             return Ok(());
@@ -305,30 +304,67 @@ impl<T: ListItems> List<T> {
         }
 
         // items
-        for row in 0..(surf.height() as i32) {
-            let item = match self.items.get((self.offset + row) as usize) {
-                Some(item) => item,
-                None => break,
-            };
-            let mut line = surf.view_mut(row, ..-1);
-            let mut writer = if row + self.offset == self.cursor {
-                line.erase(theme.list_selected.bg);
-                let mut writer = line
+        let width = surf.width() - 4; // exclude left border and scroll bar
+        let items: Vec<_> = (self.offset..self.offset + surf.height() as i32)
+            .filter_map(|index| {
+                let item = self.items.get(index as usize)?;
+                let height = item.length_hint().unwrap_or(0) / width + 1;
+                Some((index, height, item))
+            })
+            .collect();
+        // make sure items will fit
+        let mut cursor_found = false;
+        let mut items_height = 0;
+        let mut first = 0;
+        for (index, height, _item) in items.iter() {
+            items_height += height;
+            if items_height > surf.height() {
+                if cursor_found {
+                    break;
+                }
+                while items_height > surf.height() {
+                    items_height -= items[first].1;
+                    first += 1;
+                }
+            }
+            cursor_found = cursor_found || *index == self.cursor;
+        }
+        self.height_hint = items.len() as i32;
+        self.offset += first as i32;
+        // render items
+        let mut row = 0;
+        for (index, height, item) in items[first..].iter() {
+            let mut item_surf = surf.view_mut((row as i32)..((row + height) as i32), ..-1);
+            row += height;
+            if item_surf.is_empty() {
+                break;
+            }
+            if *index == self.cursor {
+                item_surf.erase(theme.list_selected.bg);
+                let mut writer = item_surf
                     .writer()
                     .face(theme.list_selected.with_fg(Some(theme.accent)));
                 writer.write_all(" ● ".as_ref())?;
-                writer.face(theme.list_selected)
             } else {
-                let mut writer = line.writer().face(theme.list_default);
+                let mut writer = item_surf.writer().face(theme.list_default);
                 writer.write_all("   ".as_ref())?;
-                writer
             };
-            writer.display(item)?;
+            let mut text_surf = item_surf.view_mut(.., 3..);
+            let writer = text_surf.writer();
+            if *index == self.cursor {
+                writer.face(theme.list_selected).display(item)?;
+            } else {
+                writer.face(theme.list_default).display(item)?;
+            }
         }
 
         // scroll bar
         let (sb_offset, sb_filled) = if self.items.len() != 0 {
-            let sb_filled = clamp(surf.height().pow(2) / self.items.len(), 1, surf.height()) as i32;
+            let sb_filled = clamp(
+                surf.height() * items.len() / self.items.len(),
+                1,
+                surf.height(),
+            ) as i32;
             let sb_offset =
                 (surf.height() as i32 - sb_filled) * (self.cursor + 1) / self.items.len() as i32;
             (sb_offset, sb_filled + sb_offset)

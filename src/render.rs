@@ -240,6 +240,11 @@ where
 
 pub trait TerminalWritable {
     fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()>;
+
+    /// Approximate number of cells taken by formated content
+    fn length_hint(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl<'a, T> TerminalWritable for &'a T
@@ -248,6 +253,10 @@ where
 {
     fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()> {
         (*self).fmt(writer)
+    }
+
+    fn length_hint(&self) -> Option<usize> {
+        (*self).length_hint()
     }
 }
 
