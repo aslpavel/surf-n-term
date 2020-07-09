@@ -304,6 +304,7 @@ impl<T: ListItems> List<T> {
             self.offset = self.cursor - surf.height() as i32 + 1;
         }
 
+        // items
         for row in 0..(surf.height() as i32) {
             let item = match self.items.get((self.offset + row) as usize) {
                 Some(item) => item,
