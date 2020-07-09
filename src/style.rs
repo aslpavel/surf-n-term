@@ -82,6 +82,10 @@ impl Face {
         Face { fg, ..*self }
     }
 
+    pub fn with_attrs(&self, attrs: FaceAttrs) -> Self {
+        Face { attrs, ..*self }
+    }
+
     pub fn invert(&self) -> Self {
         Face {
             fg: self.bg,

@@ -34,7 +34,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     }
 
     /// Blend current color with the other color, with the specified blend method.
-    fn blend(self, other: impl Into<ColorLinear>, method: Blend) -> Self {
+    fn blend(self, other: impl Color, method: Blend) -> Self {
         // Reference:
         // https://ciechanow.ski/alpha-compositing/
         // http://ssp.impulsetrain.com/porterduff.html
@@ -53,7 +53,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     }
 
     /// Linear interpolation between self and other colors.
-    fn lerp(self, other: impl Into<ColorLinear>, t: f32) -> Self {
+    fn lerp(self, other: impl Color, t: f32) -> Self {
         let start = self.into();
         let end = other.into();
         let color = start * (1.0 - t) + end * t;
@@ -63,7 +63,19 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     /// Calculate luma of the color.
     fn luma(self) -> f32 {
         let ColorLinear([r, g, b, _]) = self.into();
-        r * 0.2126 + g * 0.7152 + b * 0.0722
+        linear_to_srgb(r) * 0.2126 + linear_to_srgb(g) * 0.7152 + linear_to_srgb(b) * 0.0722
+    }
+
+    /// Pick color that produces the best contrast with self
+    fn best_contrast(self, c0: impl Color, c1: impl Color) -> Self {
+        let luma = self.luma();
+        let c0: ColorLinear = c0.into();
+        let c1: ColorLinear = c1.into();
+        if (luma - c0.luma()).abs() < (luma - c1.luma()).abs() {
+            c1.into()
+        } else {
+            c0.into()
+        }
     }
 }
 

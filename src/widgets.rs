@@ -19,20 +19,20 @@ pub struct Theme {
 
 impl Theme {
     pub fn from_palette(fg: RGBA, bg: RGBA, accent: RGBA) -> Self {
-        let cursor = Face::new(
-            Some(bg),
-            Some(bg.blend(accent.with_alpha(0.8), Blend::Over)),
-            FaceAttrs::EMPTY,
-        );
+        let cursor = {
+            let cursor_bg = bg.blend(accent.with_alpha(0.8), Blend::Over);
+            let cursor_fg = cursor_bg.best_contrast(bg, fg);
+            Face::new(Some(cursor_fg), Some(cursor_bg), FaceAttrs::EMPTY)
+        };
         let input = Face::new(Some(fg), Some(bg), FaceAttrs::EMPTY);
         let list_default = Face::new(
-            Some(bg.blend(fg.with_alpha(0.9), Blend::Over)),
+            Some(bg.blend(fg.with_alpha(0.8), Blend::Over)),
             Some(bg),
             FaceAttrs::EMPTY,
         );
         let list_selected = Face::new(
-            Some(bg.blend(fg.with_alpha(0.9), Blend::Over)),
-            Some(bg.blend(fg.with_alpha(0.1), Blend::Over)),
+            Some(bg.blend(fg.with_alpha(0.8), Blend::Over)),
+            Some(bg.blend(fg.with_alpha(0.05), Blend::Over)),
             FaceAttrs::EMPTY,
         );
         let scrollbar_on = Face::new(None, Some(accent.with_alpha(0.8)), FaceAttrs::EMPTY);
@@ -346,5 +346,17 @@ impl<T: ListItems> List<T> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_theme() {
+        println!("{:?}", Theme::dark());
+        println!("{:?}", Theme::light());
+        assert!(false);
     }
 }
