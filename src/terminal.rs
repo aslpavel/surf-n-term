@@ -47,6 +47,13 @@ pub trait Terminal: Write {
     }
 
     /// Run terminal with render event handler
+    ///
+    /// Handler accepts mutable reference to the terminal, event that
+    /// trigered handler and terminal surface that should be used to
+    /// render current frame (on each frame, it operates in immediate mode).
+    /// Renderer will calculcate the difference between new terminal surface
+    /// and terminal surface on the previous frame and will issue appropirate
+    /// terminal commands to produce the desired result.
     fn run_render<H, E>(&mut self, mut handler: H) -> Result<(), E>
     where
         H: for<'a> FnMut(
