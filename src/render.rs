@@ -305,14 +305,14 @@ fn polyline_offset(ps: &mut [Point], dist: Scalar) -> bool {
             Some(prev) => match prev.intersect(next) {
                 Some((t, _)) => prev.at(t),
                 None => {
-                    // TODO: not sure what to do especial for up/down move
+                    // TODO: not sure what to do especially for up/down move
                     next.start()
                 }
             },
         };
         // move repeats
-        for i in index - repeats..index {
-            ps[i] = point;
+        for p in ps.iter_mut().take(index).skip(index - repeats) {
+            *p = point;
         }
         prev = Some(next);
     }
@@ -323,8 +323,8 @@ fn polyline_offset(ps: &mut [Point], dist: Scalar) -> bool {
             false
         }
         Some(prev) => {
-            for i in index..ps.len() {
-                ps[i] = prev.end()
+            for p in ps.iter_mut().skip(index) {
+                *p = prev.end();
             }
             true
         }
@@ -1547,7 +1547,7 @@ impl SubPath {
     /// Apply transformation to the sub-path in place
     pub fn transform(&mut self, tr: Transform) {
         for segment in self.segments.iter_mut() {
-            std::mem::replace(segment, segment.transform(tr));
+            *segment = segment.transform(tr);
         }
     }
 
@@ -1800,7 +1800,7 @@ impl Path {
         Ok(())
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_svg_path(&self) -> String {
         let mut output = Vec::new();
         self.save(&mut output).expect("failed in memory write");
         String::from_utf8(output).expect("path save internal error")
@@ -2000,7 +2000,7 @@ impl PathBuilder {
     }
 
     /// Extend path from string, which is specified in the same format as SVGs path element.
-    pub fn from_str(self, string: impl AsRef<[u8]>) -> Result<Self, Error> {
+    pub fn append_svg_path(self, string: impl AsRef<[u8]>) -> Result<Self, Error> {
         let parser = PathParser::new(string.as_ref());
         parser.parse(self)
     }

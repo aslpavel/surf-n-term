@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use std::{fmt, io::Write, iter::FromIterator};
 pub mod render;
 pub use render::{
@@ -139,6 +141,12 @@ where
         }
         list.finish()?;
         Ok(())
+    }
+}
+
+impl<A: Array> Default for ArrayIter<A> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

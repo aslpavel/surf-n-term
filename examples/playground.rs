@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         line_cap: LineCap::Round,
     };
     let stroke = path.stroke(stroke_style);
-    println!("{}", stroke.to_string());
+    println!("{}", stroke.to_svg_path());
 
     Ok(())
 }
