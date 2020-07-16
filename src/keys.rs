@@ -1,5 +1,5 @@
 use crate::Error;
-use std::{fmt, str::FromStr};
+use std::{collections::HashMap, fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key {
@@ -10,6 +10,20 @@ pub struct Key {
 impl Key {
     pub fn new(name: KeyName, mode: KeyMod) -> Self {
         Self { name, mode }
+    }
+
+    pub fn chord(keys: impl AsRef<str>) -> Result<Vec<Key>, Error> {
+        let chord = keys
+            .as_ref()
+            .split(' ')
+            .filter(|k| !k.is_empty())
+            .map(Key::from_str)
+            .collect::<Result<Vec<Key>, Error>>()?;
+        if chord.is_empty() {
+            Err(Error::ParseError("Key", keys.as_ref().to_string()))
+        } else {
+            Ok(chord)
+        }
     }
 }
 
@@ -39,6 +53,12 @@ impl fmt::Debug for Key {
             write!(f, "{:?}+{:?}", self.mode, self.name)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -147,6 +167,12 @@ impl fmt::Debug for KeyName {
                 _ => write!(f, "\"{}\"", c),
             },
         }
+    }
+}
+
+impl fmt::Display for KeyName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -259,6 +285,129 @@ impl fmt::Debug for KeyMod {
                 }
             }
         }
+        Ok(())
+    }
+}
+
+impl fmt::Display for KeyMod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum KeyMapResult<V> {
+    Success(V),
+    Failure,
+    Continue,
+}
+
+pub struct KeyMap<V> {
+    mapping: HashMap<Key, Result<V, KeyMap<V>>>,
+}
+
+impl<V> Default for KeyMap<V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<V> KeyMap<V> {
+    pub fn new() -> Self {
+        Self {
+            mapping: Default::default(),
+        }
+    }
+
+    pub fn register(&mut self, chord: &[Key], value: V) {
+        if let Some((key, chord)) = chord.split_last() {
+            self.register_rec(chord).mapping.insert(*key, Ok(value));
+        }
+    }
+
+    fn register_rec(&mut self, chord: &[Key]) -> &mut Self {
+        match chord.split_first() {
+            None => self,
+            Some((key, chord)) => {
+                let next = self
+                    .mapping
+                    .entry(*key)
+                    .and_modify(|r| {
+                        if r.is_ok() {
+                            *r = Err(Self::new())
+                        }
+                    })
+                    .or_insert_with(|| Err(Self::new()))
+                    .as_mut()
+                    .err()
+                    .unwrap();
+                next.register_rec(chord)
+            }
+        }
+    }
+
+    pub fn lookup(&self, chord: &[Key]) -> KeyMapResult<&V> {
+        let result = chord
+            .iter()
+            .enumerate()
+            .try_fold(&self.mapping, |mapping, (index, key)| {
+                match mapping.get(&key) {
+                    None => Err(None),
+                    Some(Err(mapping)) => Ok(&mapping.mapping),
+                    Some(Ok(value)) => Err(Some((index, value))),
+                }
+            });
+        match result {
+            Err(Some((index, value))) => {
+                if chord.len() == index + 1 {
+                    KeyMapResult::Success(value)
+                } else {
+                    KeyMapResult::Failure
+                }
+            }
+            Err(None) => KeyMapResult::Failure,
+            _ => KeyMapResult::Continue,
+        }
+    }
+
+    pub fn lookup_state(&self, chord: &mut Vec<Key>, key: Key) -> Option<&V> {
+        chord.push(key);
+        match self.lookup(chord.as_ref()) {
+            KeyMapResult::Continue => None,
+            KeyMapResult::Failure => {
+                chord.clear();
+                None
+            }
+            KeyMapResult::Success(value) => {
+                chord.clear();
+                Some(value)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_map() -> Result<(), Error> {
+        let c0 = Key::chord("ctrl+x")?;
+        let c1 = Key::chord("ctrl+x f")?;
+        let c2 = Key::chord("ctrl+x a b")?;
+
+        let mut key_map = KeyMap::new();
+
+        key_map.register(c0.as_ref(), 0);
+        assert_eq!(key_map.lookup(c0.as_ref()), KeyMapResult::Success(&0));
+        assert_eq!(key_map.lookup(c1.as_ref()), KeyMapResult::Failure);
+
+        key_map.register(c1.as_ref(), 1);
+        key_map.register(c2.as_ref(), 2);
+        assert_eq!(key_map.lookup(c0.as_ref()), KeyMapResult::Continue);
+        assert_eq!(key_map.lookup(c1.as_ref()), KeyMapResult::Success(&1));
+        assert_eq!(key_map.lookup(c2.as_ref()), KeyMapResult::Success(&2));
+
         Ok(())
     }
 }
