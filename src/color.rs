@@ -105,9 +105,9 @@ impl Mul<f32> for ColorLinear {
     type Output = Self;
 
     #[inline]
-    fn mul(self, v: f32) -> Self::Output {
+    fn mul(self, val: f32) -> Self::Output {
         let Self([r, g, b, a]) = self;
-        Self([r * v, g * v, b * v, a * v])
+        Self([r * val, g * val, b * val, a * val])
     }
 }
 
@@ -224,11 +224,11 @@ impl FromStr for ColorLinear {
 }
 
 impl fmt::Debug for RGBA {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [r, g, b, a] = self.rgba_u8();
-        write!(f, "#{:02x}{:02x}{:02x}", r, g, b)?;
+        write!(fmt, "#{:02x}{:02x}{:02x}", r, g, b)?;
         if a != 255 {
-            write!(f, "{:02x}", a)?;
+            write!(fmt, "{:02x}", a)?;
         }
         Ok(())
     }

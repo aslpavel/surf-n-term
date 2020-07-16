@@ -47,6 +47,12 @@ pub struct Utf8Decoder {
     buffer: [u8; 4],
 }
 
+impl Default for Utf8Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Utf8Decoder {
     pub fn new() -> Self {
         Self {
@@ -515,9 +521,8 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
         KittyImage => {
             // "\x1b_Gkey=value(,key=value)*;response\x1b\\"
             let mut iter = (&data[3..data.len() - 2]).splitn(2, |b| *b == b';');
-            let mut key_values = key_value_decode(b',', iter.next()?);
             let mut id = 0; // id can not be zero according to the spec
-            while let Some((key, value)) = key_values.next() {
+            for (key, value) in key_value_decode(b',', iter.next()?) {
                 if key == b"i" {
                     id = number_decode(value)?;
                 }

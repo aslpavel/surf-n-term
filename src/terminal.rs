@@ -274,6 +274,12 @@ pub struct TerminalStats {
     pub recv: usize,
 }
 
+impl Default for TerminalStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalStats {
     pub fn new() -> Self {
         Self { send: 0, recv: 0 }

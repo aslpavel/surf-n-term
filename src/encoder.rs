@@ -1,5 +1,5 @@
 use crate::{error::Error, Color, ColorLinear, FaceAttrs, TerminalCommand};
-use std::io::Write;
+use std::{cmp::Ordering, io::Write};
 
 pub trait Encoder {
     type Item;
@@ -88,13 +88,11 @@ impl Encoder for TTYEncoder {
             }
             Reset => out.write_all(b"\x1bc")?,
             Char(c) => write!(out, "{}", c)?,
-            Scroll(count) => {
-                if count > 0 {
-                    write!(out, "\x1b[{}S", count)?;
-                } else if count < 0 {
-                    write!(out, "\x1b[{}T", -count)?;
-                }
-            }
+            Scroll(count) => match count.cmp(&0) {
+                Ordering::Less => write!(out, "\x1b[{}T", -count)?,
+                Ordering::Greater => write!(out, "\x1b[{}S", count)?,
+                _ => (),
+            },
             Image(_) | ImageErase(_) => {
                 // image is ignored and must be handled by image storage
             }
@@ -171,12 +169,10 @@ fn nearest(v: f32, vs: &[f32]) -> usize {
                 0
             } else if index >= vs.len() {
                 vs.len() - 1
+            } else if (v - vs[index - 1]) < (vs[index] - v) {
+                index - 1
             } else {
-                if (v - vs[index - 1]) < (vs[index] - v) {
-                    index - 1
-                } else {
-                    index
-                }
+                index
             }
         }
     }

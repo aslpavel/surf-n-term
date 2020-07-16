@@ -95,7 +95,7 @@ impl ImageStorage for KittyImageStorage {
         match self.imgs.get_mut(&handle).and_then(|data| data.take()) {
             Some(data) => {
                 // data has not been send yet.
-                out.write(&data)?;
+                out.write_all(&data)?;
             }
             None => {
                 // data has already been send and we can just use an id.

@@ -97,6 +97,12 @@ pub struct Input {
     offset: usize,
 }
 
+impl Default for Input {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Input {
     pub fn new() -> Self {
         Self {
@@ -230,6 +236,9 @@ pub trait ListItems {
     type Item: TerminalWritable;
     fn len(&self) -> usize;
     fn get(&self, index: usize) -> Option<Self::Item>;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 pub struct List<T> {

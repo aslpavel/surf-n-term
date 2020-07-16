@@ -200,9 +200,9 @@ where
         let h = Cell::new(face, Some('─'));
         let v = Cell::new(face, Some('│'));
         self.view_mut(0, 1..-1).fill(h.clone());
-        self.view_mut(-1, 1..-1).fill(h.clone());
+        self.view_mut(-1, 1..-1).fill(h);
         self.view_mut(1..-1, 0).fill(v.clone());
-        self.view_mut(1..-1, -1).fill(v.clone());
+        self.view_mut(1..-1, -1).fill(v);
 
         self.view_mut(0, 0).fill(Cell::new(face, Some('┌')));
         self.view_mut(0, -1).fill(Cell::new(face, Some('┐')));
@@ -224,7 +224,7 @@ where
 
     fn draw_image(&mut self, img: ImageHandle) {
         if let Some(cell) = self.get_mut(0, 0) {
-            std::mem::replace(cell, Cell::new_image(img));
+            *cell = Cell::new_image(img);
         }
     }
 
