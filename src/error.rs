@@ -5,8 +5,7 @@ pub enum Error {
     IOError(std::io::Error),
     NixError(nix::Error),
     NotATTY,
-    ParseColorError,
-    ParseFaceError,
+    ParseError(&'static str, String),
     FeatureNotSupported,
 }
 

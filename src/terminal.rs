@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     render::{TerminalRenderer, TerminalSurface},
-    Face, ImageHandle, Surface, RGBA,
+    Face, ImageHandle, Key, KeyMod, KeyName, Surface, RGBA,
 };
 use std::{collections::BTreeMap, fmt, io::Write, sync::Arc, time::Duration};
 
@@ -301,146 +301,9 @@ impl fmt::Debug for Mouse {
         } else {
             write!(
                 f,
-                "{:?}-{:?} [{},{}]",
+                "{:?}+{:?} [{},{}]",
                 self.name, self.mode, self.row, self.col
             )?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Key {
-    pub name: KeyName,
-    pub mode: KeyMod,
-}
-
-impl Key {
-    pub fn new(name: KeyName, mode: KeyMod) -> Self {
-        Self { name, mode }
-    }
-}
-
-impl From<KeyName> for Key {
-    fn from(name: KeyName) -> Self {
-        Self {
-            name,
-            mode: KeyMod::EMPTY,
-        }
-    }
-}
-
-impl From<(KeyName, KeyMod)> for Key {
-    fn from(pair: (KeyName, KeyMod)) -> Self {
-        Self {
-            name: pair.0,
-            mode: pair.1,
-        }
-    }
-}
-
-impl fmt::Debug for Key {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.mode.is_empty() {
-            write!(f, "{:?}", self.name)?;
-        } else {
-            write!(f, "{:?}-{:?}", self.name, self.mode)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum KeyName {
-    F1,
-    F2,
-    F3,
-    F4,
-    F5,
-    F6,
-    F7,
-    F8,
-    F9,
-    F10,
-    F11,
-    F12,
-    Backspace,
-    Char(char),
-    Delete,
-    Down,
-    End,
-    Esc,
-    Home,
-    Left,
-    MouseLeft,
-    MouseMiddle,
-    MouseMove,
-    MouseRight,
-    MouseWheelDown,
-    MouseWheelUp,
-    PageDown,
-    PageUp,
-    Right,
-    Up,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct KeyMod {
-    bits: u8,
-}
-
-impl KeyMod {
-    // order of bits is significant used by TTYDecoder
-    pub const EMPTY: Self = KeyMod { bits: 0 };
-    pub const SHIFT: Self = KeyMod { bits: 1 };
-    pub const ALT: Self = KeyMod { bits: 2 };
-    pub const CTRL: Self = KeyMod { bits: 4 };
-    pub const PRESS: Self = KeyMod { bits: 8 };
-
-    pub fn is_empty(self) -> bool {
-        self == Self::EMPTY
-    }
-
-    pub fn contains(self, other: Self) -> bool {
-        self.bits & other.bits == other.bits
-    }
-
-    pub fn from_bits(bits: u8) -> Self {
-        Self { bits }
-    }
-}
-
-impl std::ops::BitOr for KeyMod {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self {
-        Self {
-            bits: self.bits | rhs.bits,
-        }
-    }
-}
-
-impl fmt::Debug for KeyMod {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_empty() {
-            write!(f, "None")?;
-        } else {
-            let mut first = true;
-            for (flag, name) in &[
-                (Self::ALT, "Alt"),
-                (Self::CTRL, "Ctrl"),
-                (Self::SHIFT, "Shift"),
-                (Self::PRESS, "Press"),
-            ] {
-                if self.contains(*flag) {
-                    if first {
-                        first = false;
-                        write!(f, "{}", name)?;
-                    } else {
-                        write!(f, "-{}", name)?;
-                    }
-                }
-            }
         }
         Ok(())
     }

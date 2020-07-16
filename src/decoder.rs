@@ -1,6 +1,9 @@
-use crate::automata::{DFAState, DFA, NFA};
-use crate::error::Error;
-use crate::terminal::{DecModeStatus, Key, KeyMod, KeyName, Mouse, TerminalEvent, TerminalSize};
+use crate::{
+    automata::{DFAState, DFA, NFA},
+    error::Error,
+    terminal::{DecModeStatus, Mouse, TerminalEvent, TerminalSize},
+    Key, KeyMod, KeyName,
+};
 use lazy_static::lazy_static;
 use std::{collections::BTreeMap, fmt, io::BufRead};
 

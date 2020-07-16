@@ -81,7 +81,7 @@ impl FromStr for Theme {
                 "accent" | "base" => Theme::from_palette(theme.fg, theme.bg, value.parse()?),
                 "light" => Theme::light(),
                 "dark" => Theme::dark(),
-                _ => return Err(Error::ParseFaceError),
+                _ => return Err(Error::ParseError("Theme", string.to_string())),
             };
             Ok(theme)
         })

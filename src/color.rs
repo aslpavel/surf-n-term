@@ -211,7 +211,7 @@ impl FromStr for RGBA {
     type Err = Error;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        Self::from_str_opt(string).ok_or(Error::ParseColorError)
+        Self::from_str_opt(string).ok_or_else(|| Error::ParseError("RGBA", string.to_string()))
     }
 }
 

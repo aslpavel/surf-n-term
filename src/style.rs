@@ -138,7 +138,7 @@ impl FromStr for Face {
                     "underline" => face.attrs = face.attrs | FaceAttrs::UNDERLINE,
                     "blink" => face.attrs = face.attrs | FaceAttrs::BLINK,
                     "reverse" => face.attrs = face.attrs | FaceAttrs::REVERSE,
-                    _ => return Err(Error::ParseFaceError),
+                    _ => return Err(Error::ParseError("Face", string.to_string())),
                 }
                 Ok(face)
             })
