@@ -56,8 +56,12 @@ pub struct UnixTerminal {
 impl UnixTerminal {
     /// Create new terminal by opening `/dev/tty` device.
     pub fn new() -> Result<Self, Error> {
-        let tty = nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty())?;
-        Self::new_from_fd(tty, tty)
+        Self::open("/dev/tty")
+    }
+
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
+        Self::new_from_fd(fd, fd)
     }
 
     /// Create new terminal from raw file descriptors.

@@ -31,15 +31,15 @@ pub trait Terminal: Write {
     fn image_register(&mut self, img: impl Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
 
     /// Run terminal with event handler
-    fn run<H, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<(), E>
+    fn run<H, R, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<R, E>
     where
-        H: FnMut(&mut Self, Option<TerminalEvent>) -> Result<TerminalAction, E>,
+        H: FnMut(&mut Self, Option<TerminalEvent>) -> Result<TerminalAction<R>, E>,
         E: From<Error>,
     {
         loop {
             let event = self.poll(timeout)?;
             timeout = match handler(self, event)? {
-                TerminalAction::Quit => return Ok(()),
+                TerminalAction::Quit(result) => return Ok(result),
                 TerminalAction::Wait => None,
                 TerminalAction::Sleep(timeout) => Some(timeout),
             };
@@ -49,18 +49,18 @@ pub trait Terminal: Write {
     /// Run terminal with render event handler
     ///
     /// Handler accepts mutable reference to the terminal, event that
-    /// trigered handler and terminal surface that should be used to
+    /// trigered the handler and terminal surface that should be used to
     /// render current frame (on each frame, it operates in immediate mode).
     /// Renderer will calculcate the difference between new terminal surface
     /// and terminal surface on the previous frame and will issue appropirate
     /// terminal commands to produce the desired result.
-    fn run_render<H, E>(&mut self, mut handler: H) -> Result<(), E>
+    fn run_render<H, R, E>(&mut self, mut handler: H) -> Result<R, E>
     where
         H: for<'a> FnMut(
             &'a mut Self,
             Option<TerminalEvent>,
             TerminalSurface<'a>,
-        ) -> Result<TerminalAction, E>,
+        ) -> Result<TerminalAction<R>, E>,
         E: From<Error>,
     {
         let mut renderer = TerminalRenderer::new(self, false)?;
@@ -93,8 +93,8 @@ impl TerminalWaker {
     }
 }
 
-pub enum TerminalAction {
-    Quit,
+pub enum TerminalAction<R> {
+    Quit(R),
     Wait,
     Sleep(Duration),
 }

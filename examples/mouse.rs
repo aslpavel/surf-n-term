@@ -41,7 +41,7 @@ fn main() -> Result<(), Error> {
         // quit
         let event = match event {
             None => return Ok(TerminalAction::Wait),
-            Some(event) if &event == &q => return Ok(TerminalAction::Quit),
+            Some(event) if &event == &q => return Ok(TerminalAction::Quit(())),
             Some(event) => event,
         };
 

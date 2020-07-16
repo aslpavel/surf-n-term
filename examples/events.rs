@@ -63,8 +63,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     term.run(None, |mut term, event| -> Result<_, Box<dyn Error>> {
         use surf_n_term::terminal::TerminalAction::*;
         match event {
-            None => Ok(Quit),
-            Some(TerminalEvent::Key(key)) if key == q => Ok(Quit),
+            None => Ok(Quit(())),
+            Some(TerminalEvent::Key(key)) if key == q => Ok(Quit(())),
             Some(event) => {
                 write!(&mut term, "{:?}\r\n", event)?;
                 Ok(Sleep(timeout))

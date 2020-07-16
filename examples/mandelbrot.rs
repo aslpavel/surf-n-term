@@ -73,7 +73,7 @@ fn main() -> Result<(), Error> {
 
         // quit
         match event {
-            Some(event) if &event == &q || &event == &ctrl_c => Ok(TerminalAction::Quit),
+            Some(event) if &event == &q || &event == &ctrl_c => Ok(TerminalAction::Quit(())),
             _ => Ok(TerminalAction::Sleep(delay)),
         }
     })?;

@@ -385,15 +385,3 @@ impl<T: ListItems> List<T> {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_theme() {
-        println!("{:?}", Theme::dark());
-        println!("{:?}", Theme::light());
-        assert!(false);
-    }
-}
