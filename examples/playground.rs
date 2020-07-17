@@ -1,7 +1,7 @@
 #![allow(unused_imports, dead_code)]
 use env_logger::Env;
 use rasterize::{
-    surf_to_png, timeit, Cubic, Curve, FillRule, Line, LineCap, LineJoin, Path, Quad, StrokeStyle,
+    surf_to_ppm, timeit, Cubic, Curve, FillRule, Line, LineCap, LineJoin, Path, Quad, StrokeStyle,
     SubPath, Transform,
 };
 use std::{

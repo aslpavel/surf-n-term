@@ -1,6 +1,6 @@
 use env_logger::Env;
 use rasterize::{
-    surf_to_png, timeit, Align, BBox, Curve, FillRule, LineCap, LineJoin, Path, Point, Scalar,
+    surf_to_ppm, timeit, Align, BBox, Curve, FillRule, LineCap, LineJoin, Path, Point, Scalar,
     Segment, StrokeStyle, Surface, Transform,
 };
 use std::{
@@ -75,7 +75,7 @@ fn parse_args() -> Result<Args, Error> {
         }
     }
     if postional < 2 {
-        eprintln!("Usage: rasterize [-w <width>] [-s <stroke>] [-o] <file.path> <out.png>");
+        eprintln!("Usage: rasterize [-w <width>] [-s <stroke>] [-o] <file.path> <out.ppm>");
         std::process::exit(1);
     }
     Ok(result)
@@ -190,9 +190,9 @@ fn main() -> Result<(), Error> {
 
     if args.output_file != "-" {
         let mut image = BufWriter::new(File::create(args.output_file)?);
-        timeit("[save:png]", || surf_to_png(&mask, &mut image))?;
+        timeit("[save:ppm]", || surf_to_ppm(&mask, &mut image))?;
     } else {
-        timeit("[save:png]", || surf_to_png(&mask, std::io::stdout()))?;
+        timeit("[save:ppm]", || surf_to_ppm(&mask, std::io::stdout()))?;
     }
 
     Ok(())

@@ -44,6 +44,7 @@ where
 }
 
 /// Save surface as PNG
+#[cfg(feature = "png")]
 pub fn surf_to_png<S, W>(surf: S, w: W) -> Result<(), png::EncodingError>
 where
     S: Surface,
