@@ -15,6 +15,7 @@ const PI: f64 = std::f64::consts::PI;
 /// flatness of 0.05px gives good accuracy tradeoff
 pub const FLATNESS: Scalar = 0.05;
 
+/// Value representing a point or a 2D vector.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Point([Scalar; 2]);
 
@@ -34,42 +35,50 @@ impl Point {
         Self([x, y])
     }
 
+    /// Get `x` component of the point
     #[inline]
     pub fn x(&self) -> Scalar {
         self.0[0]
     }
 
+    /// Get `y` compenent of the point
     #[inline]
     pub fn y(self) -> Scalar {
         self.0[1]
     }
 
+    /// Get length of the vector (distance from the origin)
     pub fn length(self) -> Scalar {
         let Self([x, y]) = self;
         x.hypot(y)
     }
 
+    /// Distance between two points
     pub fn dist(self, other: Self) -> Scalar {
         (self - other).length()
     }
 
+    /// Dot product between two vectors
     pub fn dot(self, other: Self) -> Scalar {
         let Self([x0, y0]) = self;
         let Self([x1, y1]) = other;
         x0 * x1 + y0 * y1
     }
 
+    /// Cross product between two vectors
     pub fn cross(self, other: Self) -> Scalar {
         let Self([x0, y0]) = self;
         let Self([x1, y1]) = other;
         x0 * y1 - y0 * x1
     }
 
+    /// Get vector normal (not a unit sized)
     pub fn normal(self) -> Point {
         let Self([x, y]) = self;
         Self([y, -x])
     }
 
+    /// Convert vector to a unit size vector, if length is not zero
     pub fn normalize(self) -> Option<Point> {
         let Self([x, y]) = self;
         let length = self.length();
@@ -80,6 +89,7 @@ impl Point {
         }
     }
 
+    /// Calculate angle (from self to the other) between two vectors
     pub fn angle_between(self, other: Self) -> Option<Scalar> {
         let angle = clamp(self.cos_between(other)?, -1.0, 1.0).acos();
         if self.cross(other) < 0.0 {
@@ -89,6 +99,7 @@ impl Point {
         }
     }
 
+    /// Cosine of the angle (from self to the other) between to vectors
     pub fn cos_between(self, other: Self) -> Option<Scalar> {
         let lengths = self.length() * other.length();
         if lengths < EPSILON {
@@ -98,11 +109,13 @@ impl Point {
         }
     }
 
+    /// Sine of the angle (from self to the other) between to vectors
     pub fn sin_between(self, other: Self) -> Option<Scalar> {
         let cos = self.cos_between(other)?;
         Some((1.0 - cos * cos).sqrt())
     }
 
+    /// Determine if self is close to the other within the marging of error (EPSILON)
     pub fn is_close_to(self, other: Point) -> bool {
         let Self([x0, y0]) = self;
         let Self([x1, y1]) = other;
@@ -182,7 +195,7 @@ pub trait Curve: Sized {
     /// Iterator returned by flatten method
     type FlattenIter: IntoIterator<Item = Line>;
 
-    /// Convert curve to an iterator over line segments
+    /// Convert curve to an iterator over line segments with desired flatness
     fn flatten(&self, tr: Transform, flatness: Scalar) -> Self::FlattenIter;
 
     /// Apply affine transformation to the curve
@@ -222,11 +235,13 @@ impl Line {
         Self([p0.into(), p1.into()])
     }
 
+    /// Length of the line
     pub fn length(&self) -> Scalar {
         let Self([p0, p1]) = self;
         p0.dist(*p1)
     }
 
+    /// Start and end points of the line
     pub fn points(&self) -> [Point; 2] {
         self.0
     }
@@ -252,6 +267,7 @@ impl Line {
         Some((t0, t1))
     }
 
+    /// Find intersection point between two line segments
     pub fn intersect_point(&self, other: Line) -> Option<Point> {
         let (t0, t1) = self.intersect(other)?;
         if t0 >= 0.0 && t0 <= 1.0 && t1 >= 0.0 && t1 <= 1.0 {
@@ -261,11 +277,13 @@ impl Line {
         }
     }
 
+    /// Direction vector associated with the line segment
     pub fn direction(&self) -> Point {
         self.end() - self.start()
     }
 }
 
+/// Offset line to the distance.
 fn line_offset(line: Line, dist: Scalar) -> Option<Line> {
     let Line([p0, p1]) = line;
     let offset = dist * (p1 - p0).normal().normalize()?;
@@ -453,11 +471,13 @@ impl Quad {
         }
     }
 
+    /// Find smooth point used by SVG parser
     pub fn smooth(&self) -> Point {
         let Quad([_p0, p1, p2]) = self;
         2.0 * p2 - *p1
     }
 
+    /// Derivative of the curve `deriv(t) = [curve'(t)_x, curve'(t)_y]`, which will be a Line
     pub fn deriv(&self) -> Line {
         let Self([p0, p1, p2]) = *self;
         Line::new(2.0 * (p1 - p0), 2.0 * (p2 - p1))
@@ -573,6 +593,7 @@ impl Curve for Quad {
     }
 }
 
+/// Determine if quad curve needs splitting before offsetting.
 fn quad_offset_should_split(quad: Quad) -> bool {
     let Quad([p0, p1, p2]) = quad;
     // split if angle is sharp
@@ -670,11 +691,13 @@ impl Cubic {
         )
     }
 
+    /// Find smooth point used by SVG parser
     pub fn smooth(&self) -> Point {
         let Cubic([_p0, _p1, p2, p3]) = self;
         2.0 * p3 - *p2
     }
 
+    /// Derivative of the curve `deriv(t) = [curve'(t)_x, curve'(t)_y]` which will be a Quad curve
     pub fn deriv(&self) -> Quad {
         let Self([p0, p1, p2, p3]) = *self;
         Quad::new(3.0 * (p1 - p0), 3.0 * (p2 - p1), 3.0 * (p3 - p2))
@@ -720,6 +743,7 @@ impl Cubic {
         (c0, c1)
     }
 
+    /// Find extermities `curve'(t)_x == 0 || curve'(t)_y == 0`
     pub fn extremities(&self) -> impl Iterator<Item = Scalar> {
         let Self([p0, p1, p2, p3]) = *self;
         // Solve for `curve'(t)_x = 0 || curve'(t)_y = 0`
@@ -918,7 +942,7 @@ impl From<Quad> for Cubic {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct ElipArc {
+pub struct EllipArc {
     center: Point,
     rx: Scalar,
     ry: Scalar,
@@ -927,7 +951,7 @@ pub struct ElipArc {
     eta_delta: Scalar,
 }
 
-impl fmt::Debug for ElipArc {
+impl fmt::Debug for EllipArc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -941,7 +965,7 @@ impl fmt::Debug for ElipArc {
     }
 }
 
-impl ElipArc {
+impl EllipArc {
     /// Convert arc from SVG arguments to parametric curve
     ///
     /// This code mostly comes from arc implementation notes from svg sepc
@@ -1004,23 +1028,25 @@ impl ElipArc {
         })
     }
 
-    pub fn to_cubic(&self) -> ElipArcCubicIter {
-        ElipArcCubicIter::new(*self)
+    /// Convert elliptic arc to an iterator over Cubic segments
+    pub fn to_cubic(&self) -> EllipArcCubicIter {
+        EllipArcCubicIter::new(*self)
     }
 
-    pub fn flatten(&self, tr: Transform, flatness: Scalar) -> ElipArcFlattenIter {
-        ElipArcFlattenIter::new(*self, tr, flatness)
+    /// Convert elliptic arc to an iterator over line segments with desired flatness
+    pub fn flatten(&self, tr: Transform, flatness: Scalar) -> EllipArcFlattenIter {
+        EllipArcFlattenIter::new(*self, tr, flatness)
     }
 }
 
-impl Curve for ElipArc {
-    type FlattenIter = ElipArcFlattenIter;
+impl Curve for EllipArc {
+    type FlattenIter = EllipArcFlattenIter;
 
-    fn flatten(&self, tr: Transform, flatness: Scalar) -> ElipArcFlattenIter {
-        ElipArcFlattenIter::new(*self, tr, flatness)
+    fn flatten(&self, tr: Transform, flatness: Scalar) -> EllipArcFlattenIter {
+        EllipArcFlattenIter::new(*self, tr, flatness)
     }
 
-    fn transform(&self, _tr: Transform) -> ElipArc {
+    fn transform(&self, _tr: Transform) -> EllipArc {
         todo!()
     }
 
@@ -1047,9 +1073,9 @@ impl Curve for ElipArc {
     }
 
     fn bbox(&self, init: Option<BBox>) -> BBox {
-        ElipArcCubicIter::new(*self)
+        EllipArcCubicIter::new(*self)
             .fold(init, |bbox, cubic| Some(cubic.bbox(bbox)))
-            .expect("ElipArcCubicIter is empty")
+            .expect("EllipArcCubicIter is empty")
     }
 
     fn offset(&self, _dist: Scalar, _out: &mut impl Extend<Segment>) {
@@ -1087,16 +1113,16 @@ impl Curve for ElipArc {
 ///     eta_1 = eta
 ///     eta_2 = eta + eta_delta
 ///     alpha = sin(eta_2 - eta_1) * (sqrt(4 + 3 * tan((eta_2 - eta_1) / 2) ** 2) - 1) / 3
-pub struct ElipArcCubicIter {
-    arc: ElipArc,
+pub struct EllipArcCubicIter {
+    arc: EllipArc,
     phi_tr: Transform,
     segment_delta: Scalar,
     segment_index: Scalar,
     segment_count: Scalar,
 }
 
-impl ElipArcCubicIter {
-    fn new(arc: ElipArc) -> Self {
+impl EllipArcCubicIter {
+    fn new(arc: EllipArc) -> Self {
         let phi_tr = Transform::default().rotate(arc.phi);
         let segment_max_angle = PI / 2.0; // maximum `eta_delta` of a segment
         let segment_count = (arc.eta_delta.abs() / segment_max_angle).ceil();
@@ -1123,7 +1149,7 @@ impl ElipArcCubicIter {
     }
 }
 
-impl Iterator for ElipArcCubicIter {
+impl Iterator for EllipArcCubicIter {
     type Item = Cubic;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1144,15 +1170,15 @@ impl Iterator for ElipArcCubicIter {
     }
 }
 
-pub struct ElipArcFlattenIter {
+pub struct EllipArcFlattenIter {
     tr: Transform,
     flatness: Scalar,
-    cubics: ElipArcCubicIter,
+    cubics: EllipArcCubicIter,
     cubic: Option<CubicFlattenIter>,
 }
 
-impl ElipArcFlattenIter {
-    fn new(arc: ElipArc, tr: Transform, flatness: Scalar) -> Self {
+impl EllipArcFlattenIter {
+    fn new(arc: EllipArc, tr: Transform, flatness: Scalar) -> Self {
         Self {
             tr,
             flatness,
@@ -1162,7 +1188,7 @@ impl ElipArcFlattenIter {
     }
 }
 
-impl Iterator for ElipArcFlattenIter {
+impl Iterator for EllipArcFlattenIter {
     type Item = Line;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1224,6 +1250,7 @@ impl Segment {
         result
     }
 
+    /// Convert to line if it is a line variant of the segment
     pub fn to_line(&self) -> Option<Line> {
         match self {
             Segment::Line(line) => Some(*line),
@@ -1231,6 +1258,7 @@ impl Segment {
         }
     }
 
+    /// Convert to quad if it is a quad variant of the segment
     pub fn to_quad(&self) -> Option<Quad> {
         match self {
             Segment::Quad(quad) => Some(*quad),
@@ -1238,6 +1266,7 @@ impl Segment {
         }
     }
 
+    /// Convert to cubic if it is a cubic variant of the segment
     pub fn to_cubic(&self) -> Option<Cubic> {
         match self {
             Segment::Cubic(cubic) => Some(*cubic),
@@ -1297,7 +1326,7 @@ impl Segment {
                     None => {
                         let sweep_flag = start.direction().cross(bevel.direction()) >= 0.0;
                         let radius = stroke_style.width / 2.0;
-                        let arc = ElipArc::new_param(
+                        let arc = EllipArc::new_param(
                             start.end(),
                             end.start(),
                             radius,
@@ -1317,6 +1346,7 @@ impl Segment {
         result
     }
 
+    /// Produce and iterator over segments that adds caps between two segments
     pub fn line_cap(self, other: Segment, stroke_style: StrokeStyle) -> impl Iterator<Item = Self> {
         let mut result = ArrayIter::<[Option<Segment>; 4]>::new();
         if self.end().is_close_to(other.start()) {
@@ -1499,9 +1529,11 @@ impl Iterator for SegmentFlattenIter {
     }
 }
 
+/// Non-empty ollections of segments where end of each segments conisides with the start of the next one.
 #[derive(Clone, PartialEq)]
 pub struct SubPath {
     segments: Vec<Segment>,
+    /// Whether SubPath contains an implicit line segment connecting start and the end of it.
     closed: bool,
 }
 
@@ -1590,6 +1622,7 @@ pub enum FillRule {
     EvenOdd,
 }
 
+/// Collection of the SubPath treated as a signle unit
 #[derive(Clone, PartialEq)]
 pub struct Path {
     subpaths: Vec<SubPath>,
@@ -1646,8 +1679,10 @@ impl Path {
             .fold(0usize, |acc, subpath| acc + subpath.segments().len())
     }
 
-    /// Create path that is by stroking current path
+    /// Stroke path
     ///
+    /// Stroked path is the path constructed from original by offsetting by `distance/2` and
+    /// joinging it with the path offsetted by `-distance/2`.
     /// Resource usefull for debugging: https://yqnn.github.io/svg-path-editor/
     pub fn stroke(&self, style: StrokeStyle) -> Path {
         let mut subpaths = Vec::new();
@@ -1800,12 +1835,14 @@ impl Path {
         Ok(())
     }
 
+    /// Convert path to SVG path representation
     pub fn to_svg_path(&self) -> String {
         let mut output = Vec::new();
         self.save(&mut output).expect("failed in memory write");
         String::from_utf8(output).expect("path save internal error")
     }
 
+    /// Load path from SVG path representation
     pub fn load(mut input: impl Read) -> std::io::Result<Self> {
         let mut buffer = Vec::new();
         input.read_to_end(&mut buffer)?;
@@ -1960,6 +1997,7 @@ impl<'a> Iterator for PathFlattenIter<'a> {
     }
 }
 
+/// Path builder similar to Canvas/Cairo interface.
 #[derive(Clone)]
 pub struct PathBuilder {
     position: Point,
@@ -2084,7 +2122,7 @@ impl PathBuilder {
     ) -> Self {
         let radii: Point = radii.into();
         let p = p.into();
-        let arc = ElipArc::new_param(
+        let arc = EllipArc::new_param(
             self.position,
             p,
             radii.x(),
@@ -2103,6 +2141,9 @@ impl PathBuilder {
         }
     }
 
+    /// Add circle with the center at current position and provided radius.
+    ///
+    /// Current position is not changed after invocation.
     pub fn circle(self, radius: Scalar) -> Self {
         // https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves
         // (4/3)*tan(pi/8) = 4*(sqrt(2)-1)/3 = 0.5522847498307935
@@ -2182,6 +2223,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Error construction helper
     fn error<S: Into<String>>(&self, reason: S) -> Error {
         Error::ParseError {
             offset: self.offset,
@@ -2189,6 +2231,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Byte at the current position
     fn current(&self) -> Result<u8, Error> {
         match self.text.get(self.offset) {
             Some(byte) => Ok(*byte),
@@ -2196,14 +2239,17 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Advance current position by `count` bytes
     fn advance(&mut self, count: usize) {
         self.offset += count;
     }
 
+    /// Check if end of file is reached
     fn is_eof(&self) -> bool {
         self.offset >= self.text.len()
     }
 
+    /// Consume insignificant separators
     fn parse_separators(&mut self) -> Result<(), Error> {
         while !self.is_eof() {
             match self.text[self.offset] {
@@ -2216,6 +2262,7 @@ impl<'a> PathParser<'a> {
         Ok(())
     }
 
+    /// Check if byte under the cursor is a digit and advance
     fn parse_digits(&mut self) -> Result<bool, Error> {
         let mut found = false;
         loop {
@@ -2229,6 +2276,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Consume `+|-` sign
     fn parse_sign(&mut self) -> Result<(), Error> {
         match self.current()? {
             b'-' | b'+' => {
@@ -2239,6 +2287,7 @@ impl<'a> PathParser<'a> {
         Ok(())
     }
 
+    /// Parse single scalar
     fn parse_scalar(&mut self) -> Result<Scalar, Error> {
         self.parse_separators()?;
         let start = self.offset;
@@ -2272,6 +2321,7 @@ impl<'a> PathParser<'a> {
         Ok(scalar)
     }
 
+    /// Parse pair of scalars and convert it to a point
     fn parse_point(&mut self) -> Result<Point, Error> {
         let x = self.parse_scalar()?;
         let y = self.parse_scalar()?;
@@ -2286,6 +2336,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Parse SVG flag `0|1` used by elliptic arc command
     fn parse_flag(&mut self) -> Result<bool, Error> {
         self.parse_separators()?;
         match self.current()? {
@@ -2301,6 +2352,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Parse SVG command
     fn parse_cmd(&mut self) -> Result<u8, Error> {
         let cmd = self.current()?;
         match cmd {
@@ -2325,6 +2377,7 @@ impl<'a> PathParser<'a> {
         }
     }
 
+    /// Parse SVG path and apply changes to the path builder.
     fn parse(mut self, mut builder: PathBuilder) -> Result<PathBuilder, Error> {
         loop {
             self.parse_separators()?;
@@ -2381,6 +2434,15 @@ impl<'a> PathParser<'a> {
     }
 }
 
+/// 2D affine transformation
+///
+/// Stored as an array [m00, m01, m02, m10, m11, m12] but semantically corresponds to
+/// a matrix:
+/// ┌             ┐
+/// │ m00 m01 m02 │
+/// │ m11 m11 m12 │
+/// │   0   0   1 │
+/// └             ┘
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform([Scalar; 6]);
 
@@ -2391,12 +2453,14 @@ impl Default for Transform {
 }
 
 impl Transform {
+    /// Apply this transformation to a point
     pub fn apply(&self, point: Point) -> Point {
         let Self([m00, m01, m02, m10, m11, m12]) = self;
         let Point([x, y]) = point;
         Point([x * m00 + y * m01 + m02, x * m10 + y * m11 + m12])
     }
 
+    /// Find the inverse transformation
     pub fn invert(&self) -> Option<Self> {
         // inv([[M, v], [0, 1]]) = [[inv(M), - inv(M) * v], [0, 1]]
         let Self([m00, m01, m02, m10, m11, m12]) = self;
@@ -2413,19 +2477,23 @@ impl Transform {
         Some(Self([o00, o01, o02, o10, o11, o12]))
     }
 
+    /// Apply translation by `[tx, ty]` before self
     pub fn translate(&self, tx: Scalar, ty: Scalar) -> Self {
         self.matmul(Self([1.0, 0.0, tx, 0.0, 1.0, ty]))
     }
 
+    /// Apply scale transformatoin by `[sx, sy]` before self
     pub fn scale(&self, sx: Scalar, sy: Scalar) -> Self {
         self.matmul(Self([sx, 0.0, 0.0, 0.0, sy, 0.0]))
     }
 
+    /// Apply rotation by `a` angle around the origin before self
     pub fn rotate(&self, a: Scalar) -> Self {
         let (sin, cos) = a.sin_cos();
         self.matmul(Self([cos, -sin, 0.0, sin, cos, 0.0]))
     }
 
+    /// Apply rotation around point `p` by angle `a` before self
     pub fn rotate_around(&self, a: Scalar, p: impl Into<Point>) -> Self {
         let p = p.into();
         self.translate(p.x(), p.y())
@@ -2433,10 +2501,12 @@ impl Transform {
             .translate(-p.x(), -p.y())
     }
 
+    /// Apply scew transformation by `[ax, ay]` before self
     pub fn skew(&self, ax: Scalar, ay: Scalar) -> Self {
         self.matmul(Self([1.0, ax.tan(), 0.0, ay.tan(), 1.0, 0.0]))
     }
 
+    /// Multiply transformations in matrix form
     pub fn matmul(&self, other: Transform) -> Self {
         let Self([s00, s01, s02, s10, s11, s12]) = self;
         let Self([o00, o01, o02, o10, o11, o12]) = other;
@@ -2488,10 +2558,14 @@ impl Transform {
     }
 }
 
+/// Alignment options
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Align {
+    /// Alling by minimal value
     Min,
+    /// Aling by center value
     Mid,
+    /// Align by maximum value
     Max,
 }
 
@@ -2503,14 +2577,17 @@ impl Mul<Transform> for Transform {
     }
 }
 
-/// Bounding box
+/// Bounding box with sides directed along the axes
 #[derive(Clone, Copy)]
 pub struct BBox {
+    /// Point with minimal x and y values
     min: Point,
+    /// Point with maximum x and y values
     max: Point,
 }
 
 impl BBox {
+    /// Construct bounding box which includes points `p0` and `p1`
     pub fn new(p0: Point, p1: Point) -> Self {
         let Point([x0, y0]) = p0;
         let Point([x1, y1]) = p1;
@@ -2522,26 +2599,31 @@ impl BBox {
         }
     }
 
+    /// `x` coordinate of the point with the minimal value
     #[inline]
     pub fn x(&self) -> Scalar {
         self.min.x()
     }
 
+    /// `y` coordinate of the point with the minimal value
     #[inline]
     pub fn y(&self) -> Scalar {
         self.min.y()
     }
 
+    /// Width of the bounding box
     #[inline]
     pub fn width(&self) -> Scalar {
         self.max.x() - self.min.x()
     }
 
+    /// Hight of the bounding box
     #[inline]
     pub fn height(&self) -> Scalar {
         self.max.y() - self.min.y()
     }
 
+    /// Diagonal line from `min` to `max` of the bounding box
     pub fn diag(&self) -> Line {
         Line::new(self.min, self.max)
     }
@@ -2589,6 +2671,7 @@ impl BBox {
         }
     }
 
+    /// Find bounding box of the intersection of two bounding boxes
     pub fn intersect(&self, other: BBox) -> Option<BBox> {
         let (x_min, x_max) =
             range_intersect(self.min.x(), self.max.x(), other.min.x(), other.max.x())?;
@@ -2601,6 +2684,7 @@ impl BBox {
     }
 }
 
+/// Find intersection of two ranges
 fn range_intersect(
     r0_min: Scalar,
     r0_max: Scalar,

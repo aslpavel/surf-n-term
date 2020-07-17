@@ -8,6 +8,7 @@ pub use render::{
 };
 pub use surface::{Surface, SurfaceMut, SurfaceOwned};
 
+/// Restrict value to a certain interval
 #[inline]
 pub fn clamp<T>(val: T, min: T, max: T) -> T
 where
@@ -22,6 +23,7 @@ where
     }
 }
 
+/// Add debug log message with time taken to execute provided function
 pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
     let start = std::time::Instant::now();
     let result = f();
@@ -29,7 +31,7 @@ pub fn timeit<F: FnOnce() -> R, R>(msg: &str, f: F) -> R {
     result
 }
 
-/// Save surface as PPM
+/// Save surface as PPM stream
 pub fn surf_to_ppm<S, W>(surf: S, mut w: W) -> Result<(), std::io::Error>
 where
     S: Surface,
@@ -43,7 +45,7 @@ where
     Ok(())
 }
 
-/// Save surface as PNG
+/// Save surface as PNG stream
 #[cfg(feature = "png")]
 pub fn surf_to_png<S, W>(surf: S, w: W) -> Result<(), png::EncodingError>
 where
@@ -89,6 +91,7 @@ impl Color for Scalar {
     }
 }
 
+/// Abstraction over slices used by `ArrayIter`
 pub trait Array {
     type Item;
     fn new() -> Self;
@@ -123,6 +126,10 @@ macro_rules! impl_array(
 
 impl_array!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 
+/// Fixed sized iterator
+///
+/// This is similar to a smallvec but it never allocates and just panics if you try to fit
+/// more data inside then expected.
 #[derive(Clone, Copy)]
 pub struct ArrayIter<A> {
     size: usize,
@@ -160,6 +167,7 @@ impl<A: Array> ArrayIter<A> {
         }
     }
 
+    /// Push new element to the end of the iterator
     pub fn push(&mut self, item: A::Item) {
         self.array.put(self.size, item);
         self.size += 1;
