@@ -1,3 +1,6 @@
+//! Very simple tool that accepts SVG path as an input and produces rasterized image
+#![deny(warnings)]
+
 use env_logger::Env;
 use rasterize::{
     surf_to_ppm, timeit, Align, BBox, Curve, FillRule, LineCap, LineJoin, Path, Point, Scalar,
@@ -87,13 +90,14 @@ fn parse_args() -> Result<Args, Error> {
         eprintln!("    -w <width>         width in pixels of the output image");
         eprintln!("    -s <stroke_width>  stroke path before rendering");
         eprintln!("    -o                 show outline with control points instead of filling");
-        eprintln!("    <file.path>        file containing SVG path");
-        eprintln!("    <out.ppm>          image rendered in the PPM format");
+        eprintln!("    <file.path>        file containing SVG path ('-' means stdin)");
+        eprintln!("    <out.ppm>          image rendered in the PPM format ('-' means stdout)");
         std::process::exit(1);
     }
     Ok(result)
 }
 
+/// Load path for the file
 fn path_load(path: String) -> Result<Path, Error> {
     let mut contents = String::new();
     if path != "-" {
@@ -105,6 +109,7 @@ fn path_load(path: String) -> Result<Path, Error> {
     Ok(timeit("[parse]", || contents.parse())?)
 }
 
+/// Convert path to the outline with control points.
 fn outline(path: &Path) -> Path {
     let stroke_style = StrokeStyle {
         width: 2.0,
@@ -165,6 +170,8 @@ fn main() -> Result<(), Error> {
     let args = parse_args()?;
 
     let mut path = path_load(args.input_file)?;
+
+    // resize if needed
     match args.width {
         Some(width) if width > 2 => {
             let src_bbox = path
@@ -177,6 +184,8 @@ fn main() -> Result<(), Error> {
         }
         _ => (),
     }
+
+    // stroke
     log::info!("[path::segments_count] {}", path.segments_count());
     if let Some(stroke) = args.stroke {
         path = timeit("[stroke]", || {
@@ -188,10 +197,13 @@ fn main() -> Result<(), Error> {
         });
         log::info!("[stroke::segments_count] {}", path.segments_count());
     }
+
+    // convert to outline with control points
     if args.outline {
         path = outline(&path);
     }
 
+    // rasterize path
     let mask = timeit("[rasterize]", || {
         path.rasterize(Transform::default(), FillRule::NonZero)
     });
@@ -201,6 +213,7 @@ fn main() -> Result<(), Error> {
         mask.height()
     );
 
+    // save
     if args.output_file != "-" {
         let mut image = BufWriter::new(File::create(args.output_file)?);
         timeit("[save:ppm]", || surf_to_ppm(&mask, &mut image))?;
