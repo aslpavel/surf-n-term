@@ -1,4 +1,6 @@
-use crate::{encoder::base64_encode, Color, Error, Position, Surface, TerminalEvent, RGBA};
+use crate::{
+    encoder::base64_encode, Color, Error, Position, Surface, Terminal, TerminalEvent, RGBA,
+};
 use std::{
     collections::HashMap,
     io::{Cursor, Read, Write},
@@ -8,6 +10,9 @@ use std::{
 pub struct ImageHandle(usize);
 
 pub trait ImageStorage {
+    /// Name
+    fn name(&self) -> &str;
+
     /// Regeister image
     ///
     /// Usally means converting it to appropirate format so it could be send
@@ -32,6 +37,11 @@ pub trait ImageStorage {
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
+/// Detect appropriate image storage for provided termainl
+pub fn image_storage_detect(_term: &dyn Terminal) -> Result<Option<Box<dyn ImageStorage>>, Error> {
+    Ok(Some(Box::new(KittyImageStorage::new())))
+}
+
 /// Image storage for kitty graphic protocol
 ///
 /// Reference: https://sw.kovidgoyal.net/kitty/graphics-protocol.html
@@ -54,6 +64,10 @@ impl Default for KittyImageStorage {
 }
 
 impl ImageStorage for KittyImageStorage {
+    fn name(&self) -> &str {
+        "kitty"
+    }
+
     fn register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
         let handle = ImageHandle(self.imgs.len() + 1); // id = 0 can not be used.
         let raw: Vec<_> = img.iter().flat_map(|c| RGBAIter::new(*c)).collect();

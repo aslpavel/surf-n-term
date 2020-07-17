@@ -450,7 +450,7 @@ mod tests {
 
         fn image_register(
             &mut self,
-            _img: impl Surface<Item = RGBA>,
+            _img: &dyn Surface<Item = RGBA>,
         ) -> Result<ImageHandle, Error> {
             unimplemented!()
         }

@@ -4,10 +4,11 @@ use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
+    image::image_storage_detect,
     terminal::{
         Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
     },
-    DecMode, ImageHandle, ImageStorage, KittyImageStorage, Surface, RGBA,
+    DecMode, ImageHandle, ImageStorage, Surface, RGBA,
 };
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -98,7 +99,7 @@ impl UnixTerminal {
         set_blocking(sigwinch_read.as_raw_fd(), false)?;
         set_blocking(waker_read.as_raw_fd(), false)?;
 
-        Ok(Self {
+        let mut term = Self {
             write_handle,
             encoder: TTYEncoder::default(),
             write_queue: Default::default(),
@@ -112,9 +113,10 @@ impl UnixTerminal {
             sigwinch_id,
             stats: TerminalStats::new(),
             tee: None,
-            // TODO: detec image storage
-            image_storage: Some(Box::new(KittyImageStorage::new())),
-        })
+            image_storage: None,
+        };
+        term.image_storage = image_storage_detect(&mut term)?;
+        Ok(term)
     }
 
     /// Duplicate all output to specified tee file. Used for debugging.
@@ -324,7 +326,7 @@ impl Terminal for UnixTerminal {
         }
     }
 
-    fn image_register(&mut self, img: impl Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
+    fn image_register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
         match self.image_storage.as_mut() {
             None => Err(Error::FeatureNotSupported),
             Some(storage) => storage.register(&img),

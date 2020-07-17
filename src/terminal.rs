@@ -28,13 +28,14 @@ pub trait Terminal: Write {
     fn size(&self) -> Result<TerminalSize, Error>;
 
     /// Register image
-    fn image_register(&mut self, img: impl Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
+    fn image_register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
 
     /// Run terminal with event handler
     fn run<H, R, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<R, E>
     where
         H: FnMut(&mut Self, Option<TerminalEvent>) -> Result<TerminalAction<R>, E>,
         E: From<Error>,
+        Self: Sized,
     {
         loop {
             let event = self.poll(timeout)?;
@@ -62,6 +63,7 @@ pub trait Terminal: Write {
             TerminalSurface<'a>,
         ) -> Result<TerminalAction<R>, E>,
         E: From<Error>,
+        Self: Sized,
     {
         let mut renderer = TerminalRenderer::new(self, false)?;
         // run with render event handler
