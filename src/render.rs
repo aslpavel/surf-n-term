@@ -301,16 +301,37 @@ impl<'a> TerminalWriter<'a> {
         value.fmt(self)
     }
 
-    pub fn put(&mut self, cell: Cell) {
-        if let Some(cell_ref) = self.iter.next() {
-            *cell_ref = cell;
+    pub fn put(&mut self, cell: Cell) -> bool {
+        match self.iter.next() {
+            Some(cell_ref) => {
+                *cell_ref = cell;
+                true
+            }
+            None => false,
         }
     }
 
-    pub fn put_char(&mut self, c: char, face: Face) {
-        if let Some(cell) = self.iter.next() {
-            let face = cell.face.overlay(&face);
-            *cell = Cell::new(face, Some(c));
+    pub fn put_char(&mut self, c: char, face: Face) -> bool {
+        match c {
+            '\r' => true,
+            '\n' => {
+                let index = self.iter.index();
+                let shape = self.iter.shape();
+                let (row, col) = self.position();
+                if col != 0 {
+                    let offset = shape.index(row, shape.width - 1) - index;
+                    self.iter.nth(offset);
+                }
+                true
+            }
+            glyph => match self.iter.next() {
+                Some(cell) => {
+                    let face = cell.face.overlay(&face);
+                    *cell = Cell::new(face, Some(glyph));
+                    true
+                }
+                None => false,
+            },
         }
     }
 }
@@ -319,25 +340,8 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut cur = std::io::Cursor::new(buf);
         while let Some(glyph) = self.decoder.decode(&mut cur)? {
-            match glyph {
-                '\r' => continue,
-                '\n' => {
-                    let index = self.iter.index();
-                    let shape = self.iter.shape();
-                    let (row, col) = self.position();
-                    if col != 0 {
-                        let offset = shape.index(row, shape.width - 1) - index;
-                        self.iter.nth(offset);
-                    }
-                }
-                _ => match self.iter.next() {
-                    Some(cell) => {
-                        let glyph = if glyph == ' ' { None } else { Some(glyph) };
-                        let face = cell.face.overlay(&self.face);
-                        *cell = Cell::new(face, glyph)
-                    }
-                    None => return Ok(buf.len()),
-                },
+            if !self.put_char(glyph, self.face) {
+                return Ok(buf.len());
             }
         }
         Ok(cur.position() as usize)
