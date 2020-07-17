@@ -46,7 +46,7 @@ fn parse_args() -> Result<Args, Error> {
     };
     let mut postional = 0;
     let mut args = env::args();
-    let _cmd = args.next().unwrap();
+    let cmd = args.next().unwrap();
     while let Some(arg) = args.next() {
         match arg.as_ref() {
             "-w" => {
@@ -75,7 +75,20 @@ fn parse_args() -> Result<Args, Error> {
         }
     }
     if postional < 2 {
-        eprintln!("Usage: rasterize [-w <width>] [-s <stroke>] [-o] <file.path> <out.ppm>");
+        eprintln!(
+            "Very simple tool that accepts SVG path as an input and produces rasterized image"
+        );
+        eprintln!("\nUSAGE:");
+        eprintln!(
+            "    {} [-w <width>] [-s <stroke>] [-o] <file.path> <out.ppm>",
+            cmd
+        );
+        eprintln!("\nARGS:");
+        eprintln!("    -w <width>         width in pixels of the output image");
+        eprintln!("    -s <stroke_width>  stroke path before rendering");
+        eprintln!("    -o                 show outline with control points instead of filling");
+        eprintln!("    <file.path>        file containing SVG path");
+        eprintln!("    <out.ppm>          image rendered in the PPM format");
         std::process::exit(1);
     }
     Ok(result)
