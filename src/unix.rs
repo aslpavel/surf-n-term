@@ -4,11 +4,11 @@ use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    image::image_storage_detect,
+    image::image_handler_detect,
     terminal::{
         Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
     },
-    DecMode, ImageHandle, ImageStorage, Surface, RGBA,
+    DecMode, ImageHandler,
 };
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -51,7 +51,7 @@ pub struct UnixTerminal {
     sigwinch_id: signal_hook::SigId,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
-    image_storage: Option<Box<dyn ImageStorage>>,
+    image_handler: Option<Box<dyn ImageHandler>>,
 }
 
 impl UnixTerminal {
@@ -113,9 +113,9 @@ impl UnixTerminal {
             sigwinch_id,
             stats: TerminalStats::new(),
             tee: None,
-            image_storage: None,
+            image_handler: None,
         };
-        term.image_storage = image_storage_detect(&mut term)?;
+        term.image_handler = image_handler_detect(&mut term)?;
         Ok(term)
     }
 
@@ -277,8 +277,8 @@ impl Terminal for UnixTerminal {
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
                 while let Some(event) = self.decoder.decode(&mut read_queue)? {
-                    if let Some(storage) = self.image_storage.as_mut() {
-                        if !storage.handle(&event)? {
+                    if let Some(image_handler) = self.image_handler.as_mut() {
+                        if !image_handler.handle(&event)? {
                             self.events_queue.push_back(event)
                         }
                     } else {
@@ -295,15 +295,15 @@ impl Terminal for UnixTerminal {
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         match cmd {
-            TerminalCommand::Image(handle) => {
-                if let Some(storage) = self.image_storage.as_mut() {
-                    storage.draw(handle, &mut self.write_queue)?;
+            TerminalCommand::Image(image) => {
+                if let Some(image_handler) = self.image_handler.as_mut() {
+                    image_handler.draw(&image, &mut self.write_queue)?;
                 }
                 Ok(())
             }
             TerminalCommand::ImageErase(pos) => {
-                if let Some(storage) = self.image_storage.as_mut() {
-                    storage.erase(pos, &mut self.write_queue)?;
+                if let Some(image_handler) = self.image_handler.as_mut() {
+                    image_handler.erase(pos, &mut self.write_queue)?;
                 }
                 Ok(())
             }
@@ -323,13 +323,6 @@ impl Terminal for UnixTerminal {
                 height_pixels: winsize.ws_ypixel as usize,
                 width_pixels: winsize.ws_xpixel as usize,
             })
-        }
-    }
-
-    fn image_register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
-        match self.image_storage.as_mut() {
-            None => Err(Error::FeatureNotSupported),
-            Some(storage) => storage.register(&img),
         }
     }
 

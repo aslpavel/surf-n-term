@@ -94,7 +94,7 @@ impl Encoder for TTYEncoder {
                 _ => (),
             },
             Image(_) | ImageErase(_) => {
-                // image is ignored and must be handled by image storage
+                // image is ignored and must be handled by image handler
             }
             Termcap(caps) => {
                 write!(out, "\x1bP+q")?;

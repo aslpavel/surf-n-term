@@ -492,7 +492,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
 
             let mut mode = KeyMod::from_bits(((event >> 2) & 7) as u8);
             if data[data.len() - 1] == b'M' {
-                mode = mode | KeyMod::PRESS;
+                mode |= KeyMod::PRESS;
             }
 
             let button = event & 3;

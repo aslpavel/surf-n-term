@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     render::{TerminalRenderer, TerminalSurface},
-    Face, ImageHandle, Key, KeyMod, KeyName, Surface, RGBA,
+    Face, Image, Key, KeyMod, KeyName,
 };
 use std::{collections::BTreeMap, fmt, io::Write, sync::Arc, time::Duration};
 
@@ -26,9 +26,6 @@ pub trait Terminal: Write {
 
     /// Get terminal size
     fn size(&self) -> Result<TerminalSize, Error>;
-
-    /// Register image
-    fn image_register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
 
     /// Run terminal with event handler
     fn run<H, R, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<R, E>
@@ -101,7 +98,7 @@ pub enum TerminalAction<R> {
     Sleep(Duration),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalCommand {
     /// Put character
     Char(char),
@@ -132,7 +129,7 @@ pub enum TerminalCommand {
     /// Full reset of the terminal
     Reset,
     /// Draw image
-    Image(ImageHandle),
+    Image(Image),
     /// Erase image
     ImageErase(Position),
     /// Request Termcap/Terminfo XTGETTCAP

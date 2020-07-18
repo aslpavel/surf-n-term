@@ -1,28 +1,71 @@
 use crate::{
-    encoder::base64_encode, Color, Error, Position, Surface, Terminal, TerminalEvent, RGBA,
+    encoder::base64_encode, Color, Error, Position, Shape, Surface, Terminal, TerminalEvent, RGBA,
 };
 use std::{
     collections::HashMap,
+    fmt,
     io::{Cursor, Read, Write},
+    sync::Arc,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ImageHandle(usize);
+#[derive(Clone)]
+pub struct Image {
+    surf: Arc<dyn Surface<Item = RGBA>>,
+    hash: u64,
+}
 
-pub trait ImageStorage {
+impl Image {
+    pub fn new(surf: impl Surface<Item = RGBA> + 'static) -> Self {
+        Self {
+            hash: surf.hash(),
+            surf: Arc::new(surf),
+        }
+    }
+
+    /// Image size in bytes
+    pub fn size(&self) -> usize {
+        self.surf.height() * self.surf.width() * 4
+    }
+}
+
+impl PartialEq for Image {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl Eq for Image {}
+
+impl fmt::Debug for Image {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Image({})", self.hash)
+    }
+}
+
+impl Surface for Image {
+    type Item = RGBA;
+
+    fn shape(&self) -> Shape {
+        self.surf.shape()
+    }
+
+    fn hash(&self) -> u64 {
+        self.hash
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        self.surf.data()
+    }
+}
+
+pub trait ImageHandler {
     /// Name
     fn name(&self) -> &str;
-
-    /// Regeister image
-    ///
-    /// Usally means converting it to appropirate format so it could be send
-    /// multiple times quicker.
-    fn register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error>;
 
     /// Draw image
     ///
     /// Send approprite terminal escape sequence so image would be rendered.
-    fn draw(&mut self, handle: ImageHandle, out: &mut dyn Write) -> Result<(), Error>;
+    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error>;
 
     /// Erase image at specified position
     ///
@@ -37,19 +80,21 @@ pub trait ImageStorage {
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
-/// Detect appropriate image storage for provided termainl
-pub fn image_storage_detect(_term: &dyn Terminal) -> Result<Option<Box<dyn ImageStorage>>, Error> {
-    Ok(Some(Box::new(KittyImageStorage::new())))
+/// Detect appropriate image handler for provided termainl
+pub fn image_handler_detect(
+    _term: &mut dyn Terminal,
+) -> Result<Option<Box<dyn ImageHandler>>, Error> {
+    Ok(Some(Box::new(KittyImageHandler::new())))
 }
 
-/// Image storage for kitty graphic protocol
+/// Image handler for kitty graphic protocol
 ///
 /// Reference: https://sw.kovidgoyal.net/kitty/graphics-protocol.html
-pub struct KittyImageStorage {
-    imgs: HashMap<ImageHandle, Option<Vec<u8>>>,
+pub struct KittyImageHandler {
+    imgs: HashMap<u64, usize>, // hash -> size in bytes
 }
 
-impl KittyImageStorage {
+impl KittyImageHandler {
     pub fn new() -> Self {
         Self {
             imgs: Default::default(),
@@ -57,63 +102,58 @@ impl KittyImageStorage {
     }
 }
 
-impl Default for KittyImageStorage {
+impl Default for KittyImageHandler {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ImageStorage for KittyImageStorage {
+impl ImageHandler for KittyImageHandler {
     fn name(&self) -> &str {
         "kitty"
     }
 
-    fn register(&mut self, img: &dyn Surface<Item = RGBA>) -> Result<ImageHandle, Error> {
-        let handle = ImageHandle(self.imgs.len() + 1); // id = 0 can not be used.
-        let raw: Vec<_> = img.iter().flat_map(|c| RGBAIter::new(*c)).collect();
-        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, /* level */ 10);
-        let mut base64 = Cursor::new(Vec::new());
-        base64_encode(base64.get_mut(), compressed.iter().copied())?;
-
-        let mut buf = [0u8; 4096];
-        let mut data = Vec::new();
-        loop {
-            let size = base64.read(&mut buf)?;
-            let more = if base64.position() < base64.get_ref().len() as u64 {
-                1
-            } else {
-                0
-            };
-            // a = t - transfer only
-            // a = T - transfer and show
-            // a = p - present only using `i = id`
-            write!(
-                &mut data,
-                "\x1b_Ga=T,f=32,o=z,v={},s={},m={},i={};",
-                img.height(),
-                img.width(),
-                more,
-                handle.0,
-            )?;
-            data.write_all(&buf[..size])?;
-            data.write_all(b"\x1b\\")?;
-            if more == 0 {
-                break;
-            }
-        }
-        self.imgs.insert(handle.clone(), Some(data));
-        Ok(handle)
-    }
-
-    fn draw(&mut self, handle: ImageHandle, out: &mut dyn Write) -> Result<(), Error> {
-        match self.imgs.get_mut(&handle).and_then(|data| data.take()) {
-            Some(data) => {
-                // data has not been send yet.
-                out.write_all(&data)?;
+    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+        let id = img.hash() % 4294967295;
+        match self.imgs.get(&id) {
+            Some(_) => {
+                // data has already been send and we can just use an id.
+                write!(out, "\x1b_Ga=p,i={};\x1b\\", id)?;
             }
             None => {
-                // data has already been send and we can just use an id.
-                write!(out, "\x1b_Ga=p,i={};\x1b\\", handle.0)?;
+                let raw: Vec<_> = img.iter().flat_map(|c| RGBAIter::new(*c)).collect();
+                // TODO: stream into base64_encode
+                let compressed =
+                    miniz_oxide::deflate::compress_to_vec_zlib(&raw, /* level */ 5);
+                let mut base64 = Cursor::new(Vec::new());
+                base64_encode(base64.get_mut(), compressed.iter().copied())?;
+
+                let mut buf = [0u8; 4096];
+                loop {
+                    let size = base64.read(&mut buf)?;
+                    let more = if base64.position() < base64.get_ref().len() as u64 {
+                        1
+                    } else {
+                        0
+                    };
+                    // a = t - transfer only
+                    // a = T - transfer and show
+                    // a = p - present only using `i = id`
+                    write!(
+                        out,
+                        "\x1b_Ga=T,f=32,o=z,v={},s={},m={},i={};",
+                        img.height(),
+                        img.width(),
+                        more,
+                        id,
+                    )?;
+                    out.write_all(&buf[..size])?;
+                    out.write_all(b"\x1b\\")?;
+                    if more == 0 {
+                        break;
+                    }
+                }
+                self.imgs.insert(id, img.size());
             }
         }
         Ok(())
@@ -130,6 +170,10 @@ impl ImageStorage for KittyImageStorage {
     }
 
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
+        // TODO:
+        //   - we should probably resend image again if it failed to draw by id (pushed out of cache)
+        //   - probably means we should track where image is supposed to be drawn or whole frame should
+        //     be re-drawn
         match event {
             TerminalEvent::KittyImage { .. } => Ok(true),
             _ => Ok(false),

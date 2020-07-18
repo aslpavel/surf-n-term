@@ -171,6 +171,18 @@ pub trait Surface {
             f(row, col, &data[shape.offset(row, col)])
         })
     }
+
+    /// Create owned copy of the surface
+    fn to_owned_surf(&self) -> SurfaceOwned<Self::Item>
+    where
+        Self::Item: Clone,
+    {
+        let shape = self.shape();
+        let data = self.data();
+        SurfaceOwned::new_with(shape.height, shape.width, |row, col| {
+            data[shape.offset(row, col)].clone()
+        })
+    }
 }
 
 pub trait SurfaceMut: Surface {

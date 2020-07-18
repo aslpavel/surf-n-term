@@ -1,13 +1,13 @@
 use crate::{
-    decoder::Decoder, error::Error, Face, FaceAttrs, ImageHandle, Position, Surface, SurfaceMut,
+    decoder::Decoder, error::Error, Face, FaceAttrs, Image, Position, Surface, SurfaceMut,
     SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, RGBA,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
     face: Face,
     glyph: Option<char>,
-    image: Option<ImageHandle>,
+    image: Option<Image>,
     damaged: bool,
 }
 
@@ -21,7 +21,7 @@ impl Cell {
         }
     }
 
-    pub fn new_image(image: ImageHandle) -> Self {
+    pub fn new_image(image: Image) -> Self {
         Self {
             face: Default::default(),
             glyph: None,
@@ -182,7 +182,7 @@ impl TerminalRenderer {
 pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn draw_box(&mut self, face: Option<Face>);
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
-    fn draw_image(&mut self, img: ImageHandle);
+    fn draw_image(&mut self, img: Image);
     fn erase(&mut self, color: Option<RGBA>);
     fn writer(&mut self) -> TerminalWriter<'_>;
 }
@@ -222,7 +222,7 @@ where
         });
     }
 
-    fn draw_image(&mut self, img: ImageHandle) {
+    fn draw_image(&mut self, img: Image) {
         if let Some(cell) = self.get_mut(0, 0) {
             *cell = Cell::new_image(img);
         }
@@ -358,7 +358,6 @@ mod tests {
     use crate::{
         encoder::{Encoder, TTYEncoder},
         terminal::{TerminalEvent, TerminalSize, TerminalWaker},
-        ImageHandle,
     };
     use std::io::Write;
 
@@ -446,13 +445,6 @@ mod tests {
 
         fn waker(&self) -> TerminalWaker {
             TerminalWaker::new(|| Ok(()))
-        }
-
-        fn image_register(
-            &mut self,
-            _img: &dyn Surface<Item = RGBA>,
-        ) -> Result<ImageHandle, Error> {
-            unimplemented!()
         }
     }
 
