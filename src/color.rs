@@ -130,7 +130,7 @@ impl ColorLinear {
     pub fn distance(&self, other: &Self) -> f32 {
         let Self([r0, g0, b0, _]) = *self;
         let Self([r1, g1, b1, _]) = *other;
-        ((r0 - r1).powi(2) + (g0 - g1).powi(2) + (b0 - b1).powi(2)).sqrt()
+        (r0 - r1).abs() + (g0 - g1).abs() + (b0 - b1).abs()
     }
 }
 
