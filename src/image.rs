@@ -86,7 +86,7 @@ pub trait ImageHandler {
 pub fn image_handler_detect(
     _term: &mut dyn Terminal,
 ) -> Result<Option<Box<dyn ImageHandler>>, Error> {
-    Ok(Some(Box::new(KittyImageHandler::new())))
+    Ok(Some(Box::new(KittyImageHandler::new(true))))
 }
 
 /// Image handler for kitty graphic protocol
@@ -94,19 +94,21 @@ pub fn image_handler_detect(
 /// Reference: https://sw.kovidgoyal.net/kitty/graphics-protocol.html
 pub struct KittyImageHandler {
     imgs: HashMap<u64, usize>, // hash -> size in bytes
+    cache: bool,
 }
 
 impl KittyImageHandler {
-    pub fn new() -> Self {
+    pub fn new(cache: bool) -> Self {
         Self {
             imgs: Default::default(),
+            cache,
         }
     }
 }
 
 impl Default for KittyImageHandler {
     fn default() -> Self {
-        Self::new()
+        Self::new(true)
     }
 }
 
@@ -143,19 +145,24 @@ impl ImageHandler for KittyImageHandler {
                     // a = p - present only using `i = id`
                     write!(
                         out,
-                        "\x1b_Ga=T,f=32,o=z,v={},s={},m={},i={};",
+                        "\x1b_Ga=T,f=32,o=z,v={},s={},m={}",
                         img.height(),
                         img.width(),
                         more,
-                        id,
                     )?;
+                    if self.cache {
+                        write!(out, "i={}", id)?;
+                    }
+                    out.write_all(b";")?;
                     out.write_all(&buf[..size])?;
                     out.write_all(b"\x1b\\")?;
                     if more == 0 {
                         break;
                     }
                 }
-                self.imgs.insert(id, img.size());
+                if self.cache {
+                    self.imgs.insert(id, img.size());
+                }
             }
         }
         Ok(())
@@ -207,51 +214,101 @@ impl Iterator for RGBAIter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct OcTreeLeaf {
     red_acc: usize,
     green_acc: usize,
     blue_acc: usize,
-    count: usize,
+    color_count: usize,
 }
 
-#[derive(Debug)]
+impl OcTreeLeaf {
+    fn new() -> Self {
+        Self {
+            red_acc: 0,
+            green_acc: 0,
+            blue_acc: 0,
+            color_count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 enum OcTreeNode {
     Leaf(OcTreeLeaf),
-    Tree(OcTree),
+    Tree(Box<OcTree>),
+    Empty,
 }
 
-#[derive(Debug)]
+impl OcTreeNode {
+    fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::Empty)
+    }
+
+    fn leaf_count(&self) -> usize {
+        use OcTreeNode::*;
+        match self {
+            Empty => 0,
+            Leaf(_) => 1,
+            Tree(tree) => tree.leaf_count,
+        }
+    }
+}
+
+/// Oc(tet)Tree use for color quantization
+///
+/// Reference: https://www.cubic.org/docs/octree.htm
+#[derive(Debug, Clone)]
 pub struct OcTree {
-    // number of colors in the sub-tree
-    count: usize,
-    // number of leafs in the sub-tree
-    leafs: usize,
-    // children nodes
-    children: [Option<Box<OcTreeNode>>; 8],
+    color_count: usize,
+    leaf_count: usize,
+    children: [OcTreeNode; 8],
 }
 
 impl OcTree {
     pub fn new() -> Self {
+        use OcTreeNode::Empty;
         Self {
-            count: 0,
-            leafs: 0,
-            children: [None, None, None, None, None, None, None, None],
+            color_count: 0,
+            leaf_count: 0,
+            children: [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
         }
+    }
+
+    pub fn color_count(&self) -> usize {
+        self.color_count
+    }
+
+    pub fn leaf_count(&self) -> usize {
+        self.leaf_count
+    }
+
+    pub fn from_surface<S, C>(surf: S) -> Self
+    where
+        S: Surface<Item = C>,
+        C: Color,
+    {
+        let mut tree = OcTree::new();
+        for color in surf.iter().copied() {
+            tree.insert(color)
+        }
+        tree
     }
 
     /// Find nearest color inside the octree
     pub fn find(&self, color: impl Color) -> Option<RGBA> {
+        use OcTreeNode::*;
         let mut tree = self;
         for index in OcTreePath::new(color.rgb_u8()) {
-            match tree.children[index].as_ref()?.as_ref() {
-                OcTreeNode::Leaf(leaf) => {
-                    let r = (leaf.red_acc / leaf.count) as u8;
-                    let g = (leaf.green_acc / leaf.count) as u8;
-                    let b = (leaf.blue_acc / leaf.count) as u8;
+            match &tree.children[index] {
+                Empty => break,
+                Leaf(leaf) => {
+                    let r = (leaf.red_acc / leaf.color_count) as u8;
+                    let g = (leaf.green_acc / leaf.color_count) as u8;
+                    let b = (leaf.blue_acc / leaf.color_count) as u8;
                     return Some(RGBA::new(r, g, b, 255));
                 }
-                OcTreeNode::Tree(next_tree) => tree = next_tree,
+                Tree(next_tree) => tree = next_tree,
             }
         }
         None
@@ -263,117 +320,131 @@ impl OcTree {
         let index = path.next().expect("OcTreePath can not be empty");
         let (child, leafs) = Self::insert_rec(self.children[index].take(), path);
         self.children[index] = child;
-        self.count += 1;
-        self.leafs += leafs;
+        self.color_count += 1;
+        self.leaf_count += leafs;
     }
 
     /// Recursive insertion of the color into a node
     ///
     /// Returns updated node and number of leafs added.
-    fn insert_rec(
-        node: Option<Box<OcTreeNode>>,
-        mut path: OcTreePath,
-    ) -> (Option<Box<OcTreeNode>>, usize) {
+    fn insert_rec(mut node: OcTreeNode, mut path: OcTreePath) -> (OcTreeNode, usize) {
+        use OcTreeNode::*;
         match path.next() {
             Some(index) => match node {
-                Some(mut node) => match node.as_mut() {
-                    OcTreeNode::Leaf(leaf) => {
-                        let [r, g, b] = path.rgb();
-                        leaf.red_acc += r as usize;
-                        leaf.green_acc += g as usize;
-                        leaf.blue_acc += b as usize;
-                        leaf.count += 1;
-                        (Some(node), 0)
-                    }
-                    OcTreeNode::Tree(tree) => {
-                        let (child, leafs) = Self::insert_rec(tree.children[index].take(), path);
-                        tree.children[index] = child;
-                        tree.count += 1;
-                        tree.leafs += leafs;
-                        (Some(node), leafs)
-                    }
-                },
-                None => {
-                    let (child, leafs) = Self::insert_rec(None, path);
+                Empty => {
+                    let (child, leafs) = Self::insert_rec(Empty, path);
                     let mut tree = Self::new();
                     tree.children[index] = child;
-                    tree.count += 1;
-                    tree.leafs += leafs;
-                    (Some(Box::new(OcTreeNode::Tree(tree))), leafs)
+                    tree.color_count += 1;
+                    tree.leaf_count += leafs;
+                    (Tree(Box::new(tree)), leafs)
+                }
+                Leaf(mut leaf) => {
+                    let [r, g, b] = path.rgb();
+                    leaf.red_acc += r as usize;
+                    leaf.green_acc += g as usize;
+                    leaf.blue_acc += b as usize;
+                    leaf.color_count += 1;
+                    (node, 0)
+                }
+                Tree(ref mut tree) => {
+                    let (child, leafs) = Self::insert_rec(tree.children[index].take(), path);
+                    tree.children[index] = child;
+                    tree.color_count += 1;
+                    tree.leaf_count += leafs;
+                    (node, leafs)
                 }
             },
             None => match node {
-                Some(mut node) => match node.as_mut() {
-                    OcTreeNode::Leaf(leaf) => {
-                        let [r, g, b] = path.rgb();
-                        leaf.red_acc += r as usize;
-                        leaf.green_acc += g as usize;
-                        leaf.blue_acc += b as usize;
-                        leaf.count += 1;
-                        (Some(node), 0)
-                    }
-                    _ => unreachable!(),
-                },
-                None => {
+                Empty => {
                     let [r, g, b] = path.rgb();
                     let leaf = OcTreeLeaf {
                         red_acc: r as usize,
                         green_acc: g as usize,
                         blue_acc: b as usize,
-                        count: 1,
+                        color_count: 1,
                     };
-                    (Some(Box::new(OcTreeNode::Leaf(leaf))), 1)
+                    (Leaf(leaf), 1)
                 }
+                Leaf(mut leaf) => {
+                    let [r, g, b] = path.rgb();
+                    leaf.red_acc += r as usize;
+                    leaf.green_acc += g as usize;
+                    leaf.blue_acc += b as usize;
+                    leaf.color_count += 1;
+                    (node, 0)
+                }
+                Tree(_) => unreachable!(),
             },
         }
     }
 
-    /*
     /// Prune octree
     ///
     /// Search the node, where the sum of the childs references is minimal and
     /// convert it to a leaf.
     pub fn prune(&mut self) {
-        let index = match self.find_count_argmin() {
-            None => return,
-            Some(index) => index,
-        };
-    }
-
-    /// Recursive pruning of the sub-tree, returns number of leafs in
-    fn prune_rec(&mut self) -> usize {
-        let index = match self.find_count_argmin() {
-            None => return,
-            Some(index) => index,
-        };
-        match self.children[index] {
-            None => unreachable!("find_count_argmin returned empty subtree index"),
-            Some(node) => match node.as_mut() {
-                OcTreeNode::Leaf(_) => {}
-            },
+        if let Some(index) = self.find_argmin_count_tree() {
+            let child = self.children[index].take();
+            self.leaf_count -= child.leaf_count();
+            let new_child = Self::prune_rec(child);
+            self.leaf_count += new_child.leaf_count();
+            self.children[index] = new_child;
         }
     }
-    */
 
-    /// Find sub-tree index with minimum count of colors
-    fn find_count_argmin(&self) -> Option<usize> {
+    /// Recursive pruning of the sub-tree
+    fn prune_rec(node: OcTreeNode) -> OcTreeNode {
+        use OcTreeNode::*;
+        let mut tree = match node {
+            Tree(tree) => tree,
+            _ => return node,
+        };
+        match tree.find_argmin_count_tree() {
+            None => {
+                // we have found the node with minimal number of refernces
+                let mut leaf = OcTreeLeaf::new();
+                for index in 0..8 {
+                    match tree.children[index].take() {
+                        Tree(_) => unreachable!("OcTree::find_count_argmin failed to find subtree"),
+                        Empty => continue,
+                        Leaf(other) => {
+                            leaf.red_acc += other.red_acc;
+                            leaf.green_acc += other.green_acc;
+                            leaf.blue_acc += other.blue_acc;
+                            leaf.color_count += other.color_count;
+                        }
+                    }
+                }
+                Leaf(leaf)
+            }
+            Some(index) => {
+                let child = tree.children[index].take();
+                tree.leaf_count -= child.leaf_count();
+                let new_child = Self::prune_rec(child);
+                tree.leaf_count += new_child.leaf_count();
+                tree.children[index] = new_child;
+                Tree(tree)
+            }
+        }
+    }
+
+    /// Find **sub-tree** with minimum count of colors
+    fn find_argmin_count_tree(&self) -> Option<usize> {
         let mut min = None;
         let mut argmin = None;
         for index in 0..8 {
-            let count = match &self.children[index] {
-                None => continue,
-                Some(node) => match node.as_ref() {
-                    OcTreeNode::Leaf(leaf) => leaf.count,
-                    OcTreeNode::Tree(tree) => tree.count,
-                },
+            let color_count = match &self.children[index] {
+                OcTreeNode::Tree(tree) => tree.color_count,
+                _ => continue,
             };
             match min {
                 None => {
-                    min = Some(count);
+                    min = Some(color_count);
                     argmin = Some(index);
                 }
-                Some(min_count) if count < min_count => {
-                    min = Some(count);
+                Some(min_count) if color_count < min_count => {
+                    min = Some(color_count);
                     argmin = Some(index);
                 }
                 _ => (),
@@ -506,15 +577,15 @@ mod tests {
 
         tree.insert(c0);
         tree.insert(c0);
-        assert_eq!(tree.count, 2);
-        assert_eq!(tree.leafs, 1);
-        assert_eq!(tree.find_count_argmin(), Some(1));
+        assert_eq!(tree.color_count, 2);
+        assert_eq!(tree.leaf_count, 1);
+        assert_eq!(tree.find_argmin_count_tree(), Some(1));
         assert_eq!(tree.find(c0), Some(c0));
 
         tree.insert(c1);
-        assert_eq!(tree.count, 3);
-        assert_eq!(tree.leafs, 2);
-        assert_eq!(tree.find_count_argmin(), Some(7));
+        assert_eq!(tree.color_count, 3);
+        assert_eq!(tree.leaf_count, 2);
+        assert_eq!(tree.find_argmin_count_tree(), Some(7));
         assert_eq!(tree.find(c1), Some(c1));
 
         Ok(())
