@@ -5,6 +5,7 @@ use crate::{
 use std::{
     collections::HashMap,
     fmt,
+    fmt::Write as _,
     io::{Cursor, Read, Write},
     sync::Arc,
 };
@@ -240,6 +241,39 @@ enum OcTreeNode {
     Empty,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OcTreeNodeStats {
+    leaf_count: usize,
+    min_color: Option<usize>,
+}
+
+impl OcTreeNodeStats {
+    fn empty() -> Self {
+        Self {
+            leaf_count: 0,
+            min_color: None,
+        }
+    }
+
+    fn join(self, other: Self) -> Self {
+        Self {
+            leaf_count: self.leaf_count + other.leaf_count,
+            min_color: match (self.min_color, other.min_color) {
+                (Some(c0), Some(c1)) => Some(std::cmp::min(c0, c1)),
+                (None, Some(c1)) => Some(c1),
+                (Some(c0), None) => Some(c0),
+                (None, None) => None,
+            },
+        }
+    }
+
+    fn from_slice(slice: &[OcTreeNode]) -> Self {
+        slice
+            .iter()
+            .fold(Self::empty(), |acc, n| acc.join(n.stats()))
+    }
+}
+
 impl OcTreeNode {
     fn take(&mut self) -> Self {
         std::mem::replace(self, Self::Empty)
@@ -253,6 +287,18 @@ impl OcTreeNode {
             Tree(tree) => tree.leaf_count,
         }
     }
+
+    fn stats(&self) -> OcTreeNodeStats {
+        use OcTreeNode::*;
+        match self {
+            Empty => OcTreeNodeStats::empty(),
+            Leaf(leaf) => OcTreeNodeStats {
+                leaf_count: 1,
+                min_color: Some(leaf.color_count),
+            },
+            Tree(tree) => tree.stats,
+        }
+    }
 }
 
 /// Oc(tet)Tree use for color quantization
@@ -260,6 +306,7 @@ impl OcTreeNode {
 /// Reference: https://www.cubic.org/docs/octree.htm
 #[derive(Debug, Clone)]
 pub struct OcTree {
+    stats: OcTreeNodeStats,
     color_count: usize,
     leaf_count: usize,
     children: [OcTreeNode; 8],
@@ -269,6 +316,7 @@ impl OcTree {
     pub fn new() -> Self {
         use OcTreeNode::Empty;
         Self {
+            stats: OcTreeNodeStats::empty(),
             color_count: 0,
             leaf_count: 0,
             children: [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
@@ -314,11 +362,23 @@ impl OcTree {
         None
     }
 
+    /// Repalce node and fix node statistics
+    fn node_replace(&mut self, index: usize, node: OcTreeNode) -> OcTreeNode {
+        let old_node = std::mem::replace(&mut self.children[index], node);
+        self.stats = OcTreeNodeStats::from_slice(&self.children);
+        old_node
+    }
+
+    /// Take node (Note: statistics is broken at this point)
+    fn node_take(&mut self, index: usize) -> OcTreeNode {
+        self.children[index].take()
+    }
+
     /// Insert color into the octree
     pub fn insert(&mut self, color: impl Color) {
         let mut path = OcTreePath::new(color.rgb_u8());
         let index = path.next().expect("OcTreePath can not be empty");
-        let (child, leafs) = Self::insert_rec(self.children[index].take(), path);
+        let (child, leafs) = Self::insert_rec(self.node_take(index), path);
         self.children[index] = child;
         self.color_count += 1;
         self.leaf_count += leafs;
@@ -451,6 +511,82 @@ impl OcTree {
             }
         }
         argmin
+    }
+
+    pub fn debug_palette(&self) {
+        use OcTreeNode::*;
+        for child in self.children.iter() {
+            match child {
+                Empty => continue,
+                Leaf(leaf) => {
+                    let r = (leaf.red_acc / leaf.color_count) as u8;
+                    let g = (leaf.green_acc / leaf.color_count) as u8;
+                    let b = (leaf.blue_acc / leaf.color_count) as u8;
+                    print!("\x1b[48;2;{};{};{}m  \x1b[m", r, g, b);
+                }
+                Tree(tree) => tree.debug_palette(),
+            }
+        }
+    }
+
+    pub fn dot(&self) -> Result<String, fmt::Error> {
+        let mut next = 1;
+        let mut out = String::new();
+        writeln!(&mut out, "digraph OcTree {{")?;
+        writeln!(&mut out, "  rankdir=\"LR\"")?;
+        writeln!(
+            &mut out,
+            "  0 [label=\"{} {}\"]",
+            self.leaf_count, self.color_count
+        )?;
+        self.dot_rec(0, &mut next, &mut out)?;
+        writeln!(&mut out, "}}")?;
+        Ok(out)
+    }
+
+    pub fn dot_rec(
+        &self,
+        parent: usize,
+        next: &mut usize,
+        out: &mut dyn std::fmt::Write,
+    ) -> fmt::Result {
+        use OcTreeNode::*;
+
+        for child in self.children.iter() {
+            match child {
+                Empty => continue,
+                Leaf(leaf) => {
+                    let r = (leaf.red_acc / leaf.color_count) as u8;
+                    let g = (leaf.green_acc / leaf.color_count) as u8;
+                    let b = (leaf.blue_acc / leaf.color_count) as u8;
+                    let color = RGBA::new(r, g, b, 255);
+
+                    let id = *next;
+                    *next += 1;
+
+                    writeln!(
+                        out,
+                        "  {} [style=filled, color=\"{:?}\", label=\"{}\"]",
+                        id, color, leaf.color_count
+                    )?;
+                    writeln!(out, "  {} -> {}", parent, id)?;
+                }
+                Tree(tree) => {
+                    let id = *next;
+                    *next += 1;
+
+                    writeln!(
+                        out,
+                        "  {} [label=\"{} [{}]\"]",
+                        id, tree.color_count, tree.leaf_count
+                    )?;
+                    writeln!(out, "  {} -> {}", parent, id)?;
+                    tree.dot_rec(id, next, out)?
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
