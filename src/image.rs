@@ -5,7 +5,6 @@ use crate::{
 use std::{
     collections::HashMap,
     fmt,
-    fmt::Write as _,
     io::{Cursor, Read, Write},
     ops::{Add, AddAssign, Mul},
     sync::Arc,
@@ -218,18 +217,12 @@ impl Iterator for RGBAIter {
 
 /// Qunatize image
 ///
-/// Performs palette extraction with `OcTree` and apply Floyd–Steinberg dithering.
+/// Performs palette extraction with `OcTreeQuantizer` and apply Floyd–Steinberg dithering.
 pub fn quantize_and_dither(
     img: impl Surface<Item = RGBA>,
     palette_size: usize,
-) -> (Vec<RGBA>, SurfaceOwned<usize>) {
-    // build and prune octree unitil desired size
-    let mut octree = OcTree::from_surface(&img);
-    octree.prune_until(palette_size);
-
-    // allocate data
-    let mut color_to_index: HashMap<RGBA, usize> = HashMap::new();
-    let mut palette: Vec<RGBA> = Vec::new();
+) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
+    let mut quantizer = OcTreeQuantizer::new(img.iter().copied(), palette_size)?;
     let mut qimg = SurfaceOwned::new(img.height(), img.width());
 
     // quantize and dither
@@ -238,7 +231,7 @@ pub fn quantize_and_dither(
     errors.resize_with(ewidth * 2, || ColorError::new());
     for row in 0..img.height() {
         // swap error rows
-        for col in 0..ewidth + 2 {
+        for col in 0..ewidth {
             errors[col] = errors[col + ewidth];
             errors[col + ewidth] = ColorError::new();
         }
@@ -246,22 +239,8 @@ pub fn quantize_and_dither(
         for col in 0..img.width() {
             let color = img.get(row, col).unwrap().clone();
             let color = errors[col + 1].apply(color); // account for error
-            let qcolor = octree
-                .find(color)
-                .expect("[quantize] octree cannot find color")
-                .clone();
-
-            // allocate palette index
-            let index = match color_to_index.get(&qcolor) {
-                Some(index) => *index,
-                None => {
-                    let index = palette.len();
-                    color_to_index.insert(qcolor, index);
-                    palette.push(qcolor);
-                    index
-                }
-            };
-            qimg.set(row, col, index);
+            let (qindex, qcolor) = quantizer.quantize(color);
+            qimg.set(row, col, qindex);
             // spread the error according to Floyd–Steinberg dithering matrix:
             // [[0   , X   , 7/16],
             // [3/16, 5/16, 1/16]]
@@ -273,7 +252,7 @@ pub fn quantize_and_dither(
         }
     }
 
-    (palette, qimg)
+    Some((quantizer.into_palette(), qimg))
 }
 
 #[derive(Clone, Copy)]
@@ -333,6 +312,34 @@ impl Mul<f32> for ColorError {
     }
 }
 
+pub struct OcTreeQuantizer {
+    octree: OcTree,
+    palette: ColorPalette,
+}
+
+impl OcTreeQuantizer {
+    pub fn new(colors: impl IntoIterator<Item = RGBA>, palette_size: usize) -> Option<Self> {
+        let mut octree = OcTree::new();
+        for color in colors {
+            octree.insert(color);
+        }
+        octree.prune_until(palette_size);
+        let palette = octree.palette()?;
+        Some(Self { octree, palette })
+    }
+
+    pub fn quantize(&mut self, color: RGBA) -> (usize, RGBA) {
+        match self.octree.find(color) {
+            Some(qcolor) => self.palette.find(qcolor),
+            None => self.palette.find(color),
+        }
+    }
+
+    pub fn into_palette(self) -> ColorPalette {
+        self.palette
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct OcTreeLeaf {
     red_acc: usize,
@@ -349,6 +356,13 @@ impl OcTreeLeaf {
             blue_acc: 0,
             color_count: 0,
         }
+    }
+
+    fn to_rgba(&self) -> RGBA {
+        let r = (self.red_acc / self.color_count) as u8;
+        let g = (self.green_acc / self.color_count) as u8;
+        let b = (self.blue_acc / self.color_count) as u8;
+        RGBA::new(r, g, b, 255)
     }
 }
 
@@ -452,30 +466,42 @@ impl OcTree {
     }
 
     /// Find nearest color inside the octree
-    pub fn find(&self, color: impl Color) -> Option<RGBA> {
+    pub fn find(&self, color: RGBA) -> Option<RGBA> {
         use OcTreeNode::*;
         let mut tree = self;
         for index in OcTreePath::new(color.rgb_u8()) {
             match &tree.children[index] {
                 Empty => break,
-                Leaf(leaf) => {
-                    let r = (leaf.red_acc / leaf.color_count) as u8;
-                    let g = (leaf.green_acc / leaf.color_count) as u8;
-                    let b = (leaf.blue_acc / leaf.color_count) as u8;
-                    return Some(RGBA::new(r, g, b, 255));
-                }
+                Leaf(leaf) => return Some(leaf.to_rgba()),
                 Tree(next_tree) => tree = next_tree,
             }
         }
         None
     }
 
-    /// Take node (Note: statistics is broken at this point)
-    fn node_take(&mut self, index: usize) -> OcTreeNode {
-        self.children[index].take()
+    /// All color present in the octree
+    pub fn palette(&self) -> Option<ColorPalette> {
+        fn palette_rec(node: &OcTreeNode, palette: &mut Vec<RGBA>) {
+            use OcTreeNode::*;
+            match node {
+                Empty => return,
+                Leaf(leaf) => palette.push(leaf.to_rgba()),
+                Tree(tree) => {
+                    for child in tree.children.iter() {
+                        palette_rec(child, palette)
+                    }
+                }
+            }
+        }
+
+        let mut palette = Vec::new();
+        for child in self.children.iter() {
+            palette_rec(child, &mut palette);
+        }
+        ColorPalette::new(palette)
     }
 
-    /// Update node with provided function preseving node tree stats
+    /// Update node with provided function.
     fn node_update(&mut self, index: usize, func: impl FnOnce(OcTreeNode) -> OcTreeNode) {
         self.children[index] = func(self.children[index].take());
         self.stats = OcTreeStats::from_slice(&self.children);
@@ -566,7 +592,8 @@ impl OcTree {
                 // we have found the node with minimal number of refernces
                 let mut leaf = OcTreeLeaf::new();
                 for index in 0..8 {
-                    match tree.node_take(index) {
+                    let child: OcTreeNode = tree.children[index].take();
+                    match child {
                         Tree(_) => unreachable!("OcTree::find_count_argmin failed to find subtree"),
                         Empty => continue,
                         Leaf(other) => {
@@ -577,6 +604,7 @@ impl OcTree {
                         }
                     }
                 }
+                std::mem::drop(tree); // avoid accidental reuse
                 Leaf(leaf)
             }
             Some(index) => {
@@ -610,25 +638,10 @@ impl OcTree {
         argmin
     }
 
-    pub fn debug_palette(&self) {
-        use OcTreeNode::*;
-        for child in self.children.iter() {
-            match child {
-                Empty => continue,
-                Leaf(leaf) => {
-                    let r = (leaf.red_acc / leaf.color_count) as u8;
-                    let g = (leaf.green_acc / leaf.color_count) as u8;
-                    let b = (leaf.blue_acc / leaf.color_count) as u8;
-                    print!("\x1b[48;2;{};{};{}m  \x1b[m", r, g, b);
-                }
-                Tree(tree) => tree.debug_palette(),
-            }
-        }
-    }
-
-    pub fn dot(&self) -> Result<String, fmt::Error> {
+    /// Create graphviz digraph out of octree
+    pub fn to_digraph(&self) -> Result<String, Error> {
         let mut next = 1;
-        let mut out = String::new();
+        let mut out = Vec::new();
         writeln!(&mut out, "digraph OcTree {{")?;
         writeln!(&mut out, "  rankdir=\"LR\"")?;
         writeln!(
@@ -639,33 +652,25 @@ impl OcTree {
         )?;
         self.dot_rec(0, &mut next, &mut out)?;
         writeln!(&mut out, "}}")?;
-        Ok(out)
+        Ok(String::from_utf8_lossy(&out).into())
     }
 
-    pub fn dot_rec(
-        &self,
-        parent: usize,
-        next: &mut usize,
-        out: &mut dyn std::fmt::Write,
-    ) -> fmt::Result {
+    pub fn dot_rec(&self, parent: usize, next: &mut usize, out: &mut Vec<u8>) -> Result<(), Error> {
         use OcTreeNode::*;
 
         for child in self.children.iter() {
             match child {
                 Empty => continue,
                 Leaf(leaf) => {
-                    let r = (leaf.red_acc / leaf.color_count) as u8;
-                    let g = (leaf.green_acc / leaf.color_count) as u8;
-                    let b = (leaf.blue_acc / leaf.color_count) as u8;
-                    let color = RGBA::new(r, g, b, 255);
-
                     let id = *next;
                     *next += 1;
 
                     writeln!(
                         out,
                         "  {} [style=filled, color=\"{:?}\", label=\"{}\"]",
-                        id, color, leaf.color_count
+                        id,
+                        leaf.to_rgba(),
+                        leaf.color_count
                     )?;
                     writeln!(out, "  {} -> {}", parent, id)?;
                 }
@@ -673,13 +678,12 @@ impl OcTree {
                     let id = *next;
                     *next += 1;
 
-                    let stats = tree.stats();
                     writeln!(
                         out,
                         "  {} [label=\"{} [{}]\"]",
                         id,
-                        stats.min_color.unwrap_or(0),
-                        stats.leaf_count,
+                        tree.stats.min_color.unwrap_or(0),
+                        tree.stats.leaf_count,
                     )?;
                     writeln!(out, "  {} -> {}", parent, id)?;
                     tree.dot_rec(id, next, out)?
@@ -741,6 +745,62 @@ impl Iterator for OcTreePath {
         self.state = (self.state << 1) & 0x00fefefe;
         let value = ((bits >> 21) | (bits >> 14) | (bits >> 7)) & 0b111;
         Some(value as usize)
+    }
+}
+
+pub struct ColorPalette {
+    colors: Vec<RGBA>,
+    cache: HashMap<RGBA, usize>,
+}
+
+impl ColorPalette {
+    pub fn new(colors: Vec<RGBA>) -> Option<Self> {
+        if colors.is_empty() {
+            None
+        } else {
+            let cache = colors.iter().enumerate().map(|(i, c)| (*c, i)).collect();
+            Some(Self { colors, cache })
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.colors.len()
+    }
+
+    pub fn get(&self, index: usize) -> RGBA {
+        self.colors[index]
+    }
+
+    pub fn colors(&self) -> &[RGBA] {
+        &self.colors
+    }
+
+    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
+        if let Some(index) = self.cache.get(&color) {
+            // exect match
+            return (*index, color);
+        }
+        // slow path
+        fn dist(c0: RGBA, c1: RGBA) -> i32 {
+            let [r0, g0, b0] = c0.rgb_u8();
+            let [r1, g1, b1] = c1.rgb_u8();
+            (r0 as i32 - r1 as i32).abs()
+                + (g0 as i32 - g1 as i32).abs()
+                + (b0 as i32 - b1 as i32).abs()
+        }
+        let best_dist = dist(color, self.colors[0]);
+        let (best_index, _) =
+            (1..self.colors.len()).fold((0, best_dist), |(best_index, best_dist), index| {
+                let dist = dist(color, self.colors[index]);
+                if dist < best_dist {
+                    (index, dist)
+                } else {
+                    (best_index, best_dist)
+                }
+            });
+        let (qindex, qcolor) = (best_index, self.colors[best_index]);
+        self.cache.insert(qcolor, qindex);
+        (qindex, qcolor)
     }
 }
 

@@ -204,13 +204,13 @@ pub trait SurfaceMut: Surface {
     fn set(&mut self, row: usize, col: usize, item: Self::Item) -> Self::Item {
         let shape = self.shape();
         assert!(
-            row >= shape.height,
+            row < shape.height,
             "row {} is out of bound (height {})",
             row,
             shape.height
         );
         assert!(
-            col >= shape.width,
+            col < shape.width,
             "column {} is out of bound (width {})",
             col,
             shape.width
