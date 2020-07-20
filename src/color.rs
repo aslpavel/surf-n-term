@@ -62,8 +62,8 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
 
     /// Calculate luma of the color.
     fn luma(self) -> f32 {
-        let ColorLinear([r, g, b, _]) = self.into();
-        linear_to_srgb(r) * 0.2126 + linear_to_srgb(g) * 0.7152 + linear_to_srgb(b) * 0.0722
+        let [r, g, b] = self.rgb_u8();
+        0.2126 * (r as f32 / 255.0) + 0.7152 * (g as f32 / 255.0) + 0.0722 * (b as f32 / 255.0)
     }
 
     /// Pick color that produces the best contrast with self
@@ -130,7 +130,7 @@ impl ColorLinear {
     pub fn distance(&self, other: &Self) -> f32 {
         let Self([r0, g0, b0, _]) = *self;
         let Self([r1, g1, b1, _]) = *other;
-        (r0 - r1).abs() + (g0 - g1).abs() + (b0 - b1).abs()
+        ((r0 - r1).powi(2) + (g0 - g1).powi(2) + (b0 - b1).powi(2)).sqrt()
     }
 }
 
@@ -223,7 +223,7 @@ impl FromStr for ColorLinear {
     }
 }
 
-impl fmt::Debug for RGBA {
+impl fmt::Display for RGBA {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [r, g, b, a] = self.rgba_u8();
         write!(fmt, "#{:02x}{:02x}{:02x}", r, g, b)?;
@@ -231,6 +231,22 @@ impl fmt::Debug for RGBA {
             write!(fmt, "{:02x}", a)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Debug for RGBA {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let [bg_r, bg_g, bg_b] = self.rgb_u8();
+        let [fg_r, fg_g, fg_b] = self
+            .best_contrast(RGBA::new(255, 255, 255, 255), RGBA::new(0, 0, 0, 255))
+            .rgb_u8();
+        write!(
+            fmt,
+            "\x1b[38;2;{};{};{};48;2;{};{};{}m",
+            fg_r, fg_g, fg_b, bg_r, bg_g, bg_b
+        )?;
+        write!(fmt, "{}", self)?;
+        write!(fmt, "\x1b[m")
     }
 }
 

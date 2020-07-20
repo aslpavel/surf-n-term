@@ -246,9 +246,9 @@ pub fn quantize_and_dither(
             // [3/16, 5/16, 1/16]]
             let error = ColorError::between(color, qcolor);
             errors[col + 2] += error * 0.4375; // 7/16
-            errors[col + ewidth - 1] += error * 0.1875; // 3/16
-            errors[col + ewidth] += error * 0.3125; // 5/16
-            errors[col + ewidth + 1] += error * 0.0625; // 1/16
+            errors[col + ewidth] += error * 0.1875; // 3/16
+            errors[col + ewidth + 1] += error * 0.3125; // 5/16
+            errors[col + ewidth + 2] += error * 0.0625; // 1/16
         }
     }
 
@@ -277,9 +277,9 @@ impl ColorError {
         let [r, g, b] = color.rgb_u8();
         let Self([re, ge, be]) = self;
         RGBA::new(
-            clamp(r as f32 + re, 0.0, 255.0).round() as u8,
-            clamp(g as f32 + ge, 0.0, 255.0).round() as u8,
-            clamp(b as f32 + be, 0.0, 255.0).round() as u8,
+            clamp(r as f32 + re, 0.0, 255.0) as u8,
+            clamp(g as f32 + ge, 0.0, 255.0) as u8,
+            clamp(b as f32 + be, 0.0, 255.0) as u8,
             255,
         )
     }
@@ -324,6 +324,8 @@ impl OcTreeQuantizer {
             octree.insert(color);
         }
         octree.prune_until(palette_size);
+        // octree.prune_empty();
+        // octree.prune_until(palette_size);
         let palette = octree.palette()?;
         Some(Self { octree, palette })
     }
@@ -358,11 +360,29 @@ impl OcTreeLeaf {
         }
     }
 
+    fn from_rgba(rgba: RGBA) -> Self {
+        let [r, g, b] = rgba.rgb_u8();
+        Self {
+            red_acc: r as usize,
+            green_acc: g as usize,
+            blue_acc: b as usize,
+            color_count: 1,
+        }
+    }
+
     fn to_rgba(&self) -> RGBA {
         let r = (self.red_acc / self.color_count) as u8;
         let g = (self.green_acc / self.color_count) as u8;
         let b = (self.blue_acc / self.color_count) as u8;
         RGBA::new(r, g, b, 255)
+    }
+
+    fn add_rgba(&mut self, color: RGBA) {
+        let [r, g, b] = color.rgb_u8();
+        self.red_acc += r as usize;
+        self.green_acc += g as usize;
+        self.blue_acc += b as usize;
+        self.color_count += 1;
     }
 }
 
@@ -371,6 +391,22 @@ enum OcTreeNode {
     Leaf(OcTreeLeaf),
     Tree(Box<OcTree>),
     Empty,
+}
+
+impl OcTreeNode {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            OcTreeNode::Empty => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        match self {
+            OcTreeNode::Leaf(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -433,7 +469,9 @@ impl OcTreeNode {
 
 /// Oc(tet)Tree use for color quantization
 ///
-/// Reference: https://www.cubic.org/docs/octree.htm
+/// References:
+/// - https://www.cubic.org/docs/octree.htm
+/// - http://www.leptonica.org/color-quantization.html
 #[derive(Debug, Clone)]
 pub struct OcTree {
     stats: OcTreeStats,
@@ -453,11 +491,7 @@ impl OcTree {
         self.stats
     }
 
-    pub fn from_surface<S, C>(surf: S) -> Self
-    where
-        S: Surface<Item = C>,
-        C: Color,
-    {
+    pub fn from_surface(surf: impl Surface<Item = RGBA>) -> Self {
         let mut tree = OcTree::new();
         for color in surf.iter().copied() {
             tree.insert(color)
@@ -469,7 +503,7 @@ impl OcTree {
     pub fn find(&self, color: RGBA) -> Option<RGBA> {
         use OcTreeNode::*;
         let mut tree = self;
-        for index in OcTreePath::new(color.rgb_u8()) {
+        for index in OcTreePath::new(color) {
             match &tree.children[index] {
                 Empty => break,
                 Leaf(leaf) => return Some(leaf.to_rgba()),
@@ -508,8 +542,8 @@ impl OcTree {
     }
 
     /// Insert color into the octree
-    pub fn insert(&mut self, color: impl Color) {
-        let mut path = OcTreePath::new(color.rgb_u8());
+    pub fn insert(&mut self, color: RGBA) {
+        let mut path = OcTreePath::new(color);
         let index = path.next().expect("OcTreePath can not be empty");
         self.node_update(index, |node| Self::insert_rec(node, path));
     }
@@ -517,7 +551,7 @@ impl OcTree {
     /// Recursive insertion of the color into a node
     ///
     /// Returns updated node and number of leafs added.
-    fn insert_rec(mut node: OcTreeNode, mut path: OcTreePath) -> OcTreeNode {
+    fn insert_rec(node: OcTreeNode, mut path: OcTreePath) -> OcTreeNode {
         use OcTreeNode::*;
         match path.next() {
             Some(index) => match node {
@@ -527,35 +561,18 @@ impl OcTree {
                     Tree(Box::new(tree))
                 }
                 Leaf(mut leaf) => {
-                    let [r, g, b] = path.rgb();
-                    leaf.red_acc += r as usize;
-                    leaf.green_acc += g as usize;
-                    leaf.blue_acc += b as usize;
-                    leaf.color_count += 1;
-                    node
+                    leaf.add_rgba(path.rgba());
+                    Leaf(leaf)
                 }
-                Tree(ref mut tree) => {
+                Tree(mut tree) => {
                     tree.node_update(index, move |node| Self::insert_rec(node, path));
-                    node
+                    Tree(tree)
                 }
             },
             None => match node {
-                Empty => {
-                    let [r, g, b] = path.rgb();
-                    let leaf = OcTreeLeaf {
-                        red_acc: r as usize,
-                        green_acc: g as usize,
-                        blue_acc: b as usize,
-                        color_count: 1,
-                    };
-                    Leaf(leaf)
-                }
+                Empty => Leaf(OcTreeLeaf::from_rgba(path.rgba())),
                 Leaf(mut leaf) => {
-                    let [r, g, b] = path.rgb();
-                    leaf.red_acc += r as usize;
-                    leaf.green_acc += g as usize;
-                    leaf.blue_acc += b as usize;
-                    leaf.color_count += 1;
+                    leaf.add_rgba(path.rgba());
                     Leaf(leaf)
                 }
                 Tree(_) => unreachable!(),
@@ -563,10 +580,38 @@ impl OcTree {
         }
     }
 
+    /// Replace all empty nodes with corresponding colors
+    pub fn prune_empty(&mut self) {
+        fn prune_empty_rec(node: OcTreeNode, path: &mut Vec<usize>) -> OcTreeNode {
+            use OcTreeNode::*;
+            match node {
+                Empty => Leaf(OcTreeLeaf::from_rgba(color_from_path(path))),
+                Leaf(_) => return node,
+                Tree(mut tree) => {
+                    for index in 0..8 {
+                        path.push(index);
+                        tree.children[index] = prune_empty_rec(tree.children[index].take(), path);
+                        path.pop();
+                    }
+                    tree.stats = OcTreeStats::from_slice(&tree.children);
+                    Tree(tree)
+                }
+            }
+        }
+
+        let mut path = Vec::with_capacity(8);
+        for index in 0..8 {
+            path.push(index);
+            self.children[index] = prune_empty_rec(self.children[index].take(), &mut path);
+            path.pop();
+        }
+        self.stats = OcTreeStats::from_slice(&self.children);
+    }
+
     /// Prune until desired number of colors is left
     pub fn prune_until(&mut self, color_count: usize) {
         while self.stats.leaf_count > color_count {
-            self.prune()
+            self.prune();
         }
     }
 
@@ -608,10 +653,20 @@ impl OcTree {
                 Leaf(leaf)
             }
             Some(index) => {
-                tree.node_update(index, Self::prune_rec);
-                Tree(tree)
+                let child = Self::prune_rec(tree.children[index].take());
+                if child.is_leaf() && tree.is_empty() {
+                    // fold node to a leaf as it is the only child
+                    child
+                } else {
+                    tree.node_update(index, |_| child);
+                    Tree(tree)
+                }
             }
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.children.iter().all(OcTreeNode::is_empty)
     }
 
     /// Find **sub-tree** with minimum count of colors
@@ -667,7 +722,7 @@ impl OcTree {
 
                     writeln!(
                         out,
-                        "  {} [style=filled, color=\"{:?}\", label=\"{}\"]",
+                        "  {} [color=\"{}\", label=\"{}\"]",
                         id,
                         leaf.to_rgba(),
                         leaf.color_count
@@ -695,6 +750,29 @@ impl OcTree {
     }
 }
 
+/// Convert path generated by OcTreePath back to RGBA color
+fn color_from_path(path: &Vec<usize>) -> RGBA {
+    let mut r: u8 = 0;
+    let mut g: u8 = 0;
+    let mut b: u8 = 0;
+    for index in 0..8 {
+        r <<= 1;
+        g <<= 1;
+        b <<= 1;
+        let bits = path.get(index).unwrap_or(&0);
+        if bits & 0b100 != 0 {
+            r |= 1;
+        }
+        if bits & 0b010 != 0 {
+            g |= 1;
+        }
+        if bits & 0b001 != 0 {
+            b |= 1;
+        }
+    }
+    RGBA::new(r, g, b, 255)
+}
+
 /// Iterator which goes over all most significant bits of the color
 /// concatinated together.
 ///
@@ -705,25 +783,25 @@ impl OcTree {
 /// B 1 0 0 1 1 1 0 1
 /// Output will be [0b001, 0b110, 0b010, 0b111, 0b101, 0b001, 0b100, 0b011]
 struct OcTreePath {
-    rgb: [u8; 3],
+    rgba: RGBA,
     state: u32,
     length: u8,
 }
 
 impl OcTreePath {
-    pub fn new(rgb: [u8; 3]) -> Self {
-        let [r, g, b] = rgb;
+    pub fn new(rgba: RGBA) -> Self {
+        let [r, g, b] = rgba.rgb_u8();
         // pack RGB components into u32 value
         let state = ((r as u32) << 16) | ((g as u32) << 8) | b as u32;
         Self {
-            rgb,
+            rgba,
             state,
             length: 8,
         }
     }
 
-    pub fn rgb(&self) -> [u8; 3] {
-        self.rgb
+    pub fn rgba(&self) -> RGBA {
+        self.rgba
     }
 }
 
@@ -777,16 +855,16 @@ impl ColorPalette {
 
     pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
         if let Some(index) = self.cache.get(&color) {
-            // exect match
+            // cache hit
             return (*index, color);
         }
         // slow path
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
             let [r0, g0, b0] = c0.rgb_u8();
             let [r1, g1, b1] = c1.rgb_u8();
-            (r0 as i32 - r1 as i32).abs()
-                + (g0 as i32 - g1 as i32).abs()
-                + (b0 as i32 - b1 as i32).abs()
+            (r0 as i32 - r1 as i32).pow(2)
+                + (g0 as i32 - g1 as i32).pow(2)
+                + (b0 as i32 - b1 as i32).pow(2)
         }
         let best_dist = dist(color, self.colors[0]);
         let (best_index, _) =
@@ -799,7 +877,7 @@ impl ColorPalette {
                 }
             });
         let (qindex, qcolor) = (best_index, self.colors[best_index]);
-        self.cache.insert(qcolor, qindex);
+        self.cache.insert(color, qindex);
         (qindex, qcolor)
     }
 }
@@ -810,14 +888,20 @@ mod tests {
 
     #[test]
     fn test_octree_path() -> Result<(), Error> {
-        let path: Vec<_> = OcTreePath::new("#5a719d".parse::<RGBA>()?.rgb_u8()).collect();
+        let c0 = "#5a719d".parse::<RGBA>()?;
+        let path: Vec<_> = OcTreePath::new(c0).collect();
         assert_eq!(path, vec![1, 6, 2, 7, 5, 1, 4, 3]);
+        assert_eq!(c0, color_from_path(&path));
 
-        let path: Vec<_> = OcTreePath::new("#808080".parse::<RGBA>()?.rgb_u8()).collect();
+        let c1 = "#808080".parse::<RGBA>()?;
+        let path: Vec<_> = OcTreePath::new(c1).collect();
         assert_eq!(path, vec![7, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(c1, color_from_path(&vec![7]));
 
-        let path: Vec<_> = OcTreePath::new("#d3869b".parse::<RGBA>()?.rgb_u8()).collect();
+        let c2 = "#d3869b".parse::<RGBA>()?;
+        let path: Vec<_> = OcTreePath::new(c2).collect();
         assert_eq!(path, vec![7, 4, 0, 5, 1, 2, 7, 5]);
+        assert_eq!(c2, color_from_path(&path));
 
         Ok(())
     }
