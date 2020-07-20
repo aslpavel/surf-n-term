@@ -200,6 +200,24 @@ pub trait SurfaceMut: Surface {
         }
     }
 
+    /// Set value at row and column
+    fn set(&mut self, row: usize, col: usize, item: Self::Item) -> Self::Item {
+        let shape = self.shape();
+        assert!(
+            row >= shape.height,
+            "row {} is out of bound (height {})",
+            row,
+            shape.height
+        );
+        assert!(
+            col >= shape.width,
+            "column {} is out of bound (width {})",
+            col,
+            shape.width
+        );
+        std::mem::replace(&mut self.data_mut()[shape.offset(row, col)], item)
+    }
+
     /// Iterator over mutable references to the items of the view in the row-major order
     fn iter_mut(&mut self) -> SurfaceMutIter<'_, Self::Item> {
         SurfaceMutIter {
