@@ -107,6 +107,40 @@ impl Default for IOQueue {
     }
 }
 
+/// Simple random number generator
+///
+/// Imlemented as linear congruential generator LCG. Used here instead
+/// of pooling in `rand` crate to reduce dependencies.
+/// Formula:
+///     X(n) = ((X(n - 1) * a + c) % m) / d
+///     a = 214_013
+///     c = 2_531_011
+///     m = 2 ^ 31
+///     d = 2 ^ 16
+/// This formula produces 16-bit random number.
+pub struct Rnd {
+    state: u32,
+}
+
+impl Rnd {
+    pub fn new(seed: u32) -> Self {
+        Self { state: seed }
+    }
+
+    fn step(&mut self) -> u32 {
+        self.state = self.state.wrapping_mul(214_013).wrapping_add(2_531_011) & 0x7fffffff;
+        self.state >> 16
+    }
+
+    pub fn next_u32(&mut self) -> u32 {
+        (self.step() & 0xffff) << 16 | (self.step() & 0xffff)
+    }
+
+    pub fn next_u64(&mut self) -> u64 {
+        ((self.next_u32() as u64) << 32) | (self.next_u32() as u64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::IOQueue;

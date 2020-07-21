@@ -1,11 +1,14 @@
 use crate::{
-    common::clamp, encoder::base64_encode, Color, Error, Position, Shape, Surface, SurfaceMut,
-    SurfaceOwned, Terminal, TerminalEvent, RGBA,
+    common::{clamp, Rnd},
+    encoder::base64_encode,
+    Color, Error, Position, Shape, Surface, SurfaceMut, SurfaceOwned, Terminal, TerminalEvent,
+    RGBA,
 };
 use std::{
     collections::HashMap,
     fmt,
     io::{Cursor, Read, Write},
+    iter::FromIterator,
     ops::{Add, AddAssign, Mul},
     sync::Arc,
 };
@@ -222,7 +225,7 @@ pub fn quantize_and_dither(
     img: impl Surface<Item = RGBA>,
     palette_size: usize,
 ) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
-    let mut quantizer = OcTreeQuantizer::new(img.iter().copied(), palette_size)?;
+    let mut quantizer = OcTreeQuantizer::new(&img, palette_size)?;
     let mut qimg = SurfaceOwned::new(img.height(), img.width());
 
     // quantize and dither
@@ -238,7 +241,7 @@ pub fn quantize_and_dither(
         // qunatize and spread the error
         for col in 0..img.width() {
             let color = img.get(row, col).unwrap().clone();
-            let color = errors[col + 1].apply(color); // account for error
+            let color = errors[col + 1].add(color); // account for error
             let (qindex, qcolor) = quantizer.quantize(color);
             qimg.set(row, col, qindex);
             // spread the error according to Floyd–Steinberg dithering matrix:
@@ -263,6 +266,7 @@ impl ColorError {
         Self([0.0; 3])
     }
 
+    /// Error between two colors
     fn between(c0: RGBA, c1: RGBA) -> Self {
         let [r0, g0, b0] = c0.rgb_u8();
         let [r1, g1, b1] = c1.rgb_u8();
@@ -273,7 +277,8 @@ impl ColorError {
         ])
     }
 
-    fn apply(self, color: RGBA) -> RGBA {
+    /// Add error to the color
+    fn add(self, color: RGBA) -> RGBA {
         let [r, g, b] = color.rgb_u8();
         let Self([re, ge, be]) = self;
         RGBA::new(
@@ -318,14 +323,23 @@ pub struct OcTreeQuantizer {
 }
 
 impl OcTreeQuantizer {
-    pub fn new(colors: impl IntoIterator<Item = RGBA>, palette_size: usize) -> Option<Self> {
-        let mut octree = OcTree::new();
-        for color in colors {
-            octree.insert(color);
-        }
+    pub fn new(img: impl Surface<Item = RGBA>, palette_size: usize) -> Option<Self> {
+        let sample: u32 = (img.height() * img.width() / (palette_size * 100)) as u32;
+        let mut octree: OcTree = if sample < 2 {
+            img.iter().copied().collect()
+        } else {
+            let mut octree = OcTree::new();
+            let mut rnd = Rnd::new(5);
+            let mut colors = img.iter().copied();
+            while let Some(color) = colors.nth((rnd.next_u32() % sample) as usize) {
+                octree.insert(color);
+            }
+            octree
+        };
         octree.prune_until(palette_size);
         // octree.prune_empty();
         // octree.prune_until(palette_size);
+
         let palette = octree.palette()?;
         Some(Self { octree, palette })
     }
@@ -410,7 +424,7 @@ impl OcTreeNode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct OcTreeStats {
+pub struct OcTreeInfo {
     // total number of leafs in the subtree
     pub leaf_count: usize,
     // total number of colors in the subtree
@@ -419,18 +433,14 @@ pub struct OcTreeStats {
     pub min_tail_tree: Option<usize>,
 }
 
-impl OcTreeStats {
-    pub fn new(leaf_count: usize, min_color: Option<usize>) -> Self {
-        Self {
-            leaf_count,
-            color_count: min_color.unwrap_or(0),
-            min_tail_tree: None,
-        }
-    }
-
+impl OcTreeInfo {
     // Monoidal unit
     pub fn empty() -> Self {
-        Self::new(0, None)
+        Self {
+            leaf_count: 0,
+            color_count: 0,
+            min_tail_tree: None,
+        }
     }
 
     // Monoidal sum
@@ -450,13 +460,13 @@ impl OcTreeStats {
         }
     }
 
-    // Monodial sum over oll stats of nodes in the slice
+    // Monodial sum over oll infos of nodes in the slice
     fn from_slice(slice: &[OcTreeNode]) -> Self {
-        let mut stats = slice
+        let mut info = slice
             .iter()
-            .fold(Self::empty(), |acc, n| acc.join(n.stats()));
-        stats.min_tail_tree = stats.min_tail_tree.or(Some(stats.color_count));
-        stats
+            .fold(Self::empty(), |acc, n| acc.join(n.info()));
+        info.min_tail_tree = info.min_tail_tree.or(Some(info.color_count));
+        info
     }
 }
 
@@ -465,16 +475,16 @@ impl OcTreeNode {
         std::mem::replace(self, Self::Empty)
     }
 
-    fn stats(&self) -> OcTreeStats {
+    fn info(&self) -> OcTreeInfo {
         use OcTreeNode::*;
         match self {
-            Empty => OcTreeStats::empty(),
-            Leaf(leaf) => OcTreeStats {
+            Empty => OcTreeInfo::empty(),
+            Leaf(leaf) => OcTreeInfo {
                 leaf_count: 1,
                 color_count: leaf.color_count,
                 min_tail_tree: None,
             },
-            Tree(tree) => tree.stats,
+            Tree(tree) => tree.info,
         }
     }
 }
@@ -486,29 +496,37 @@ impl OcTreeNode {
 /// - http://www.leptonica.org/color-quantization.html
 #[derive(Debug, Clone)]
 pub struct OcTree {
-    stats: OcTreeStats,
+    info: OcTreeInfo,
     children: [OcTreeNode; 8],
+}
+
+impl Extend<RGBA> for OcTree {
+    fn extend<T: IntoIterator<Item = RGBA>>(&mut self, colors: T) {
+        for color in colors {
+            self.insert(color)
+        }
+    }
+}
+
+impl FromIterator<RGBA> for OcTree {
+    fn from_iter<T: IntoIterator<Item = RGBA>>(iter: T) -> Self {
+        let mut octree = OcTree::new();
+        octree.extend(iter);
+        octree
+    }
 }
 
 impl OcTree {
     pub fn new() -> Self {
         use OcTreeNode::Empty;
         Self {
-            stats: OcTreeStats::empty(),
+            info: OcTreeInfo::empty(),
             children: [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
         }
     }
 
-    pub fn stats(&self) -> OcTreeStats {
-        self.stats
-    }
-
-    pub fn from_surface(surf: impl Surface<Item = RGBA>) -> Self {
-        let mut tree = OcTree::new();
-        for color in surf.iter().copied() {
-            tree.insert(color)
-        }
-        tree
+    pub fn info(&self) -> OcTreeInfo {
+        self.info
     }
 
     /// Find nearest color inside the octree
@@ -550,7 +568,7 @@ impl OcTree {
     /// Update node with provided function.
     fn node_update(&mut self, index: usize, func: impl FnOnce(OcTreeNode) -> OcTreeNode) {
         self.children[index] = func(self.children[index].take());
-        self.stats = OcTreeStats::from_slice(&self.children);
+        self.info = OcTreeInfo::from_slice(&self.children);
     }
 
     /// Insert color into the octree
@@ -605,7 +623,7 @@ impl OcTree {
                         tree.children[index] = prune_empty_rec(tree.children[index].take(), path);
                         path.pop();
                     }
-                    tree.stats = OcTreeStats::from_slice(&tree.children);
+                    tree.info = OcTreeInfo::from_slice(&tree.children);
                     Tree(tree)
                 }
             }
@@ -617,12 +635,12 @@ impl OcTree {
             self.children[index] = prune_empty_rec(self.children[index].take(), &mut path);
             path.pop();
         }
-        self.stats = OcTreeStats::from_slice(&self.children);
+        self.info = OcTreeInfo::from_slice(&self.children);
     }
 
     /// Prune until desired number of colors is left
     pub fn prune_until(&mut self, color_count: usize) {
-        while self.stats.leaf_count > color_count {
+        while self.info.leaf_count > color_count {
             self.prune();
         }
     }
@@ -632,7 +650,7 @@ impl OcTree {
     /// Search the node, where the sum of the childs references is minimal and
     /// convert it to a leaf.
     pub fn prune(&mut self) {
-        if let Some(index) = self.find_argmin_min_color() {
+        if let Some(index) = self.argmin_min_tail_tree() {
             self.node_update(index, Self::prune_rec)
         }
     }
@@ -644,7 +662,7 @@ impl OcTree {
             Tree(tree) => tree,
             _ => unreachable!("prune_rec visited a leaf"),
         };
-        match tree.find_argmin_min_color() {
+        match tree.argmin_min_tail_tree() {
             None => {
                 // we have found the node with minimal number of refernces
                 let mut leaf = OcTreeLeaf::new();
@@ -681,13 +699,13 @@ impl OcTree {
     ///
     /// This function should never return index associated
     /// with Leaf or Empty nodes.
-    fn find_argmin_min_color(&self) -> Option<usize> {
+    fn argmin_min_tail_tree(&self) -> Option<usize> {
         self.children
             .iter()
             .enumerate()
             .filter_map(|(index, node)| {
                 // only visit trees!
-                Some((index, node.stats().min_tail_tree?))
+                Some((index, node.info().min_tail_tree?))
             })
             .min_by_key(|(_, min_tail_tree)| *min_tail_tree)
             .map(|(index, _)| index)
@@ -703,8 +721,8 @@ impl OcTree {
             writeln!(
                 &mut out,
                 "  0 [label=\"{} {}\"]",
-                self.stats.leaf_count,
-                self.stats.min_tail_tree.unwrap_or(0),
+                self.info.leaf_count,
+                self.info.min_tail_tree.unwrap_or(0),
             )?;
             self.to_digraph_rec(0, &mut next, &mut out)?;
             writeln!(&mut out, "}}")?;
@@ -720,7 +738,6 @@ impl OcTree {
         out: &mut Vec<u8>,
     ) -> Result<(), Error> {
         use OcTreeNode::*;
-
         for child in self.children.iter() {
             match child {
                 Empty => continue,
@@ -749,15 +766,14 @@ impl OcTree {
                         out,
                         "  {} [label=\"{} {}\"]",
                         id,
-                        tree.stats.leaf_count,
-                        tree.stats.min_tail_tree.unwrap_or(0),
+                        tree.info.leaf_count,
+                        tree.info.min_tail_tree.unwrap_or(0),
                     )?;
                     writeln!(out, "  {} -> {}", parent, id)?;
                     tree.to_digraph_rec(id, next, out)?
                 }
             }
         }
-
         Ok(())
     }
 }
@@ -919,15 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn test_octree_stats() {
-        let s0 = OcTreeStats::new(1, Some(1));
-        let s1 = OcTreeStats::new(2, Some(1));
-        let s2 = OcTreeStats::new(2, Some(2));
-        let s3 = OcTreeStats::new(1, None);
-        assert_eq!(s0.join(s1), OcTreeStats::new(3, Some(1)));
-        assert_eq!(s0.join(s2), OcTreeStats::new(3, Some(1)));
-        assert_eq!(s0.join(s3), OcTreeStats::new(2, Some(1)));
-
+    fn test_octree_info() {
         let mut tree = OcTree::new();
         tree.node_update(1, |_| {
             OcTreeNode::Leaf(OcTreeLeaf {
@@ -937,7 +945,14 @@ mod tests {
                 color_count: 4,
             })
         });
-        assert_eq!(tree.stats, OcTreeStats::new(1, Some(4)));
+        assert_eq!(
+            tree.info,
+            OcTreeInfo {
+                leaf_count: 1,
+                color_count: 4,
+                min_tail_tree: Some(4),
+            }
+        );
     }
 
     #[test]
@@ -949,13 +964,27 @@ mod tests {
 
         tree.insert(c0);
         tree.insert(c0);
-        assert_eq!(tree.stats(), OcTreeStats::new(1, Some(2)));
-        assert_eq!(tree.find_argmin_min_color(), Some(1));
+        assert_eq!(
+            tree.info(),
+            OcTreeInfo {
+                color_count: 2,
+                leaf_count: 1,
+                min_tail_tree: Some(2),
+            }
+        );
+        assert_eq!(tree.argmin_min_tail_tree(), Some(1));
         assert_eq!(tree.find(c0), Some(c0));
 
         tree.insert(c1);
-        assert_eq!(tree.stats(), OcTreeStats::new(2, Some(1)));
-        assert_eq!(tree.find_argmin_min_color(), Some(7));
+        assert_eq!(
+            tree.info(),
+            OcTreeInfo {
+                color_count: 3,
+                leaf_count: 2,
+                min_tail_tree: Some(1),
+            }
+        );
+        assert_eq!(tree.argmin_min_tail_tree(), Some(7));
         assert_eq!(tree.find(c1), Some(c1));
 
         Ok(())
