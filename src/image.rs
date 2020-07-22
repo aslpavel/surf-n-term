@@ -553,8 +553,6 @@ impl OcTree {
         None
     }
 
-    // pub fn find_new(&self, color: RGBA) -> (usize, RGBA) {}
-
     /// All color present in the octree
     pub fn build_palette(&mut self) -> Option<ColorPalette> {
         fn palette_rec(node: &mut OcTreeNode, palette: &mut Vec<RGBA>) {
@@ -588,41 +586,39 @@ impl OcTree {
 
     /// Insert color into the octree
     pub fn insert(&mut self, color: RGBA) {
+        // Recursive insertion of the color into a node
+        fn insert_rec(node: OcTreeNode, mut path: OcTreePath) -> OcTreeNode {
+            use OcTreeNode::*;
+            match path.next() {
+                Some(index) => match node {
+                    Empty => {
+                        let mut tree = OcTree::new();
+                        tree.node_update(index, move |node| insert_rec(node, path));
+                        Tree(Box::new(tree))
+                    }
+                    Leaf(mut leaf) => {
+                        leaf += path.rgba();
+                        Leaf(leaf)
+                    }
+                    Tree(mut tree) => {
+                        tree.node_update(index, move |node| insert_rec(node, path));
+                        Tree(tree)
+                    }
+                },
+                None => match node {
+                    Empty => Leaf(OcTreeLeaf::from_rgba(path.rgba())),
+                    Leaf(mut leaf) => {
+                        leaf += path.rgba();
+                        Leaf(leaf)
+                    }
+                    Tree(_) => unreachable!(),
+                },
+            }
+        }
+
         let mut path = OcTreePath::new(color);
         let index = path.next().expect("OcTreePath can not be empty");
-        self.node_update(index, |node| Self::insert_rec(node, path));
-    }
-
-    /// Recursive insertion of the color into a node
-    ///
-    /// Returns updated node and number of leafs added.
-    fn insert_rec(node: OcTreeNode, mut path: OcTreePath) -> OcTreeNode {
-        use OcTreeNode::*;
-        match path.next() {
-            Some(index) => match node {
-                Empty => {
-                    let mut tree = Self::new();
-                    tree.node_update(index, move |node| Self::insert_rec(node, path));
-                    Tree(Box::new(tree))
-                }
-                Leaf(mut leaf) => {
-                    leaf += path.rgba();
-                    Leaf(leaf)
-                }
-                Tree(mut tree) => {
-                    tree.node_update(index, move |node| Self::insert_rec(node, path));
-                    Tree(tree)
-                }
-            },
-            None => match node {
-                Empty => Leaf(OcTreeLeaf::from_rgba(path.rgba())),
-                Leaf(mut leaf) => {
-                    leaf += path.rgba();
-                    Leaf(leaf)
-                }
-                Tree(_) => unreachable!(),
-            },
-        }
+        self.node_update(index, |node| insert_rec(node, path));
     }
 
     /// Replace all empty nodes with corresponding colors
@@ -861,6 +857,7 @@ impl Iterator for OcTreePath {
 }
 
 pub struct ColorPalette {
+    // there is no point in adding cache here as it always misses
     colors: Vec<RGBA>,
 }
 
@@ -885,8 +882,7 @@ impl ColorPalette {
         &self.colors
     }
 
-    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
-        // slow path
+    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
             let [r0, g0, b0] = c0.rgb_u8();
             let [r1, g1, b1] = c1.rgb_u8();
@@ -914,8 +910,7 @@ impl ColorPalette {
                     (best_index, best_dist)
                 }
             });
-        let (qindex, qcolor) = (best_index, self.colors[best_index]);
-        (qindex, qcolor)
+        (best_index, self.colors[best_index])
     }
 }
 

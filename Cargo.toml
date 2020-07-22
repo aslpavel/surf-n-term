@@ -8,6 +8,7 @@ edition = "2018"
 surface = { path = "surface" }
 nix = "0.17.0"
 libc = "0.2.69"
+fnv = "1.0.7"
 signal-hook = "0.1.14"
 lazy_static = "1.4.0"
 miniz_oxide = "0.3.6"
