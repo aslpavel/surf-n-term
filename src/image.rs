@@ -393,13 +393,24 @@ impl OcTreeLeaf {
         let b = (self.blue_acc / self.color_count) as u8;
         RGBA::new(r, g, b, 255)
     }
+}
 
-    fn add_rgba(&mut self, color: RGBA) {
-        let [r, g, b] = color.rgb_u8();
+impl AddAssign<RGBA> for OcTreeLeaf {
+    fn add_assign(&mut self, rhs: RGBA) {
+        let [r, g, b] = rhs.rgb_u8();
         self.red_acc += r as usize;
         self.green_acc += g as usize;
         self.blue_acc += b as usize;
         self.color_count += 1;
+    }
+}
+
+impl AddAssign<OcTreeLeaf> for OcTreeLeaf {
+    fn add_assign(&mut self, rhs: Self) {
+        self.red_acc += rhs.red_acc;
+        self.green_acc += rhs.green_acc;
+        self.blue_acc += rhs.blue_acc;
+        self.color_count += rhs.color_count;
     }
 }
 
@@ -417,13 +428,6 @@ impl OcTreeNode {
             _ => false,
         }
     }
-
-    pub fn is_leaf(&self) -> bool {
-        match self {
-            OcTreeNode::Leaf(_) => true,
-            _ => false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -432,8 +436,8 @@ pub struct OcTreeInfo {
     pub leaf_count: usize,
     // total number of colors in the subtree
     pub color_count: usize,
-    // smallest number of colors of the node in tail position (all children are leafs)
-    pub min_tail_tree: Option<usize>,
+    // node (Tree|Leaf) with smallest number of colors in the subtree
+    pub min_color_count: Option<usize>,
 }
 
 impl OcTreeInfo {
@@ -442,7 +446,7 @@ impl OcTreeInfo {
         Self {
             leaf_count: 0,
             color_count: 0,
-            min_tail_tree: None,
+            min_color_count: None,
         }
     }
 
@@ -450,7 +454,7 @@ impl OcTreeInfo {
     pub fn join(self, other: Self) -> Self {
         let leaf_count = self.leaf_count + other.leaf_count;
         let color_count = self.color_count + other.color_count;
-        let min_tail_tree = match (self.min_tail_tree, other.min_tail_tree) {
+        let min_color_count = match (self.min_color_count, other.min_color_count) {
             (Some(c0), Some(c1)) => Some(std::cmp::min(c0, c1)),
             (None, Some(c1)) => Some(c1),
             (Some(c0), None) => Some(c0),
@@ -459,25 +463,25 @@ impl OcTreeInfo {
         Self {
             leaf_count,
             color_count,
-            min_tail_tree,
+            min_color_count,
         }
     }
 
     // Monodial sum over oll infos of nodes in the slice
     fn from_slice(slice: &[OcTreeNode]) -> Self {
-        let mut info = slice
+        slice
             .iter()
-            .fold(Self::empty(), |acc, n| acc.join(n.info()));
-        info.min_tail_tree = info.min_tail_tree.or(Some(info.color_count));
-        info
+            .fold(Self::empty(), |acc, n| acc.join(n.info()))
     }
 }
 
 impl OcTreeNode {
+    // Take node content and replace it with empty node
     fn take(&mut self) -> Self {
         std::mem::replace(self, Self::Empty)
     }
 
+    // Get info associated with the node
     fn info(&self) -> OcTreeInfo {
         use OcTreeNode::*;
         match self {
@@ -485,7 +489,7 @@ impl OcTreeNode {
             Leaf(leaf) => OcTreeInfo {
                 leaf_count: 1,
                 color_count: leaf.color_count,
-                min_tail_tree: None,
+                min_color_count: Some(leaf.color_count),
             },
             Tree(tree) => tree.info,
         }
@@ -500,6 +504,7 @@ impl OcTreeNode {
 #[derive(Debug, Clone)]
 pub struct OcTree {
     info: OcTreeInfo,
+    removed: OcTreeLeaf,
     children: [OcTreeNode; 8],
 }
 
@@ -524,6 +529,7 @@ impl OcTree {
         use OcTreeNode::Empty;
         Self {
             info: OcTreeInfo::empty(),
+            removed: OcTreeLeaf::new(),
             children: [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
         }
     }
@@ -546,6 +552,8 @@ impl OcTree {
         }
         None
     }
+
+    // pub fn find_new(&self, color: RGBA) -> (usize, RGBA) {}
 
     /// All color present in the octree
     pub fn build_palette(&mut self) -> Option<ColorPalette> {
@@ -598,7 +606,7 @@ impl OcTree {
                     Tree(Box::new(tree))
                 }
                 Leaf(mut leaf) => {
-                    leaf.add_rgba(path.rgba());
+                    leaf += path.rgba();
                     Leaf(leaf)
                 }
                 Tree(mut tree) => {
@@ -609,7 +617,7 @@ impl OcTree {
             None => match node {
                 Empty => Leaf(OcTreeLeaf::from_rgba(path.rgba())),
                 Leaf(mut leaf) => {
-                    leaf.add_rgba(path.rgba());
+                    leaf += path.rgba();
                     Leaf(leaf)
                 }
                 Tree(_) => unreachable!(),
@@ -652,71 +660,61 @@ impl OcTree {
         }
     }
 
-    /// Prune octree
-    ///
-    /// Search the node, where the sum of the childs references is minimal and
-    /// convert it to a leaf.
+    /// Remove the node with minimal number of colors in the it
     pub fn prune(&mut self) {
-        println!("{:?}", self.info.min_tail_tree);
-        if let Some(index) = self.argmin_min_tail_tree() {
-            self.node_update(index, Self::prune_rec)
-        }
-    }
-
-    /// Recursive pruning of the sub-tree
-    fn prune_rec(node: OcTreeNode) -> OcTreeNode {
         use OcTreeNode::*;
-        let mut tree = match node {
-            Tree(tree) => tree,
-            _ => unreachable!("prune_rec visited a leaf"),
-        };
-        match tree.argmin_min_tail_tree() {
-            None => {
-                // we have found the node with minimal number of refernces
-                let mut leaf = OcTreeLeaf::new();
-                for index in 0..8 {
-                    let child: OcTreeNode = tree.children[index].take();
-                    match child {
-                        Tree(_) => unreachable!("OcTree::find_count_argmin failed to find subtree"),
-                        Empty => continue,
-                        Leaf(other) => {
-                            leaf.red_acc += other.red_acc;
-                            leaf.green_acc += other.green_acc;
-                            leaf.blue_acc += other.blue_acc;
-                            leaf.color_count += other.color_count;
+
+        // find child index with minimal color count in the child subtree
+        fn argmin_color_count(tree: &OcTree) -> Option<usize> {
+            tree.children
+                .iter()
+                .enumerate()
+                .filter_map(|(index, node)| Some((index, node.info().min_color_count?)))
+                .min_by_key(|(_, min_tail_tree)| *min_tail_tree)
+                .map(|(index, _)| index)
+        }
+
+        // recursive prune helper
+        fn prune_rec(mut tree: Box<OcTree>) -> OcTreeNode {
+            match argmin_color_count(&tree) {
+                None => Leaf(tree.removed),
+                Some(index) => match tree.children[index].take() {
+                    Empty => unreachable!("agrmin_color_count found and empty node"),
+                    Leaf(leaf) => {
+                        tree.removed += leaf;
+                        if tree.children.iter().all(OcTreeNode::is_empty) {
+                            Leaf(tree.removed)
+                        } else {
+                            Tree(tree)
                         }
                     }
-                }
-                std::mem::drop(tree); // avoid accidental reuse
-                Leaf(leaf)
+                    Tree(child_tree) => {
+                        let child = prune_rec(child_tree);
+                        match child {
+                            Leaf(leaf) if tree.children.iter().all(OcTreeNode::is_empty) => {
+                                tree.removed += leaf;
+                                Leaf(tree.removed)
+                            }
+                            _ => {
+                                tree.node_update(index, |_| child);
+                                Tree(tree)
+                            }
+                        }
+                    }
+                },
             }
-            Some(index) => {
-                let child = Self::prune_rec(tree.children[index].take());
-                if child.is_leaf() && tree.children.iter().all(OcTreeNode::is_empty) {
-                    // fold node to a leaf as it is the only child
-                    child
-                } else {
-                    tree.node_update(index, |_| child);
-                    Tree(tree)
+        }
+
+        if let Some(index) = argmin_color_count(self) {
+            match self.children[index].take() {
+                Empty => unreachable!("agrmin_color_count found and empty node"),
+                Leaf(leaf) => self.removed += leaf,
+                Tree(child_tree) => {
+                    let child = prune_rec(child_tree);
+                    self.node_update(index, |_| child);
                 }
             }
         }
-    }
-
-    /// Find **sub-tree** with minimum count of colors.
-    ///
-    /// This function should never return index associated
-    /// with Leaf or Empty nodes.
-    fn argmin_min_tail_tree(&self) -> Option<usize> {
-        self.children
-            .iter()
-            .enumerate()
-            .filter_map(|(index, node)| {
-                // only visit trees!
-                Some((index, node.info().min_tail_tree?))
-            })
-            .min_by_key(|(_, min_tail_tree)| *min_tail_tree)
-            .map(|(index, _)| index)
     }
 
     /// Render octree as graphviz digraph.
@@ -730,7 +728,7 @@ impl OcTree {
                 &mut out,
                 "  0 [label=\"{} {}\"]",
                 self.info.leaf_count,
-                self.info.min_tail_tree.unwrap_or(0),
+                self.info.min_color_count.unwrap_or(0),
             )?;
             self.to_digraph_rec(0, &mut next, &mut out)?;
             writeln!(&mut out, "}}")?;
@@ -775,7 +773,7 @@ impl OcTree {
                         "  {} [label=\"{} {}\"]",
                         id,
                         tree.info.leaf_count,
-                        tree.info.min_tail_tree.unwrap_or(0),
+                        tree.info.min_color_count.unwrap_or(0),
                     )?;
                     writeln!(out, "  {} -> {}", parent, id)?;
                     tree.to_digraph_rec(id, next, out)?
@@ -962,7 +960,7 @@ mod tests {
             OcTreeInfo {
                 leaf_count: 1,
                 color_count: 4,
-                min_tail_tree: Some(4),
+                min_color_count: Some(4),
             }
         );
     }
@@ -981,10 +979,9 @@ mod tests {
             OcTreeInfo {
                 color_count: 2,
                 leaf_count: 1,
-                min_tail_tree: Some(2),
+                min_color_count: Some(2),
             }
         );
-        assert_eq!(tree.argmin_min_tail_tree(), Some(1));
         assert_eq!(tree.find(c0), Some((0, c0)));
 
         tree.insert(c1);
@@ -993,10 +990,9 @@ mod tests {
             OcTreeInfo {
                 color_count: 3,
                 leaf_count: 2,
-                min_tail_tree: Some(1),
+                min_color_count: Some(1),
             }
         );
-        assert_eq!(tree.argmin_min_tail_tree(), Some(7));
         assert_eq!(tree.find(c1), Some((0, c1)));
 
         Ok(())
