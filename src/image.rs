@@ -340,13 +340,13 @@ impl OcTreeQuantizer {
         // octree.prune_empty();
         // octree.prune_until(palette_size);
 
-        let palette = octree.palette()?;
+        let palette = octree.build_palette()?;
         Some(Self { octree, palette })
     }
 
     pub fn quantize(&mut self, color: RGBA) -> (usize, RGBA) {
         match self.octree.find(color) {
-            Some(qcolor) => self.palette.find(qcolor),
+            Some(result) => result,
             None => self.palette.find(color),
         }
     }
@@ -362,6 +362,7 @@ struct OcTreeLeaf {
     green_acc: usize,
     blue_acc: usize,
     color_count: usize,
+    index: usize,
 }
 
 impl OcTreeLeaf {
@@ -371,6 +372,7 @@ impl OcTreeLeaf {
             green_acc: 0,
             blue_acc: 0,
             color_count: 0,
+            index: 0,
         }
     }
 
@@ -381,6 +383,7 @@ impl OcTreeLeaf {
             green_acc: g as usize,
             blue_acc: b as usize,
             color_count: 1,
+            index: 0,
         }
     }
 
@@ -530,13 +533,14 @@ impl OcTree {
     }
 
     /// Find nearest color inside the octree
-    pub fn find(&self, color: RGBA) -> Option<RGBA> {
+    /// NOTE: to get correct palette index call build_palette first.
+    pub fn find(&self, color: RGBA) -> Option<(usize, RGBA)> {
         use OcTreeNode::*;
         let mut tree = self;
         for index in OcTreePath::new(color) {
             match &tree.children[index] {
                 Empty => break,
-                Leaf(leaf) => return Some(leaf.to_rgba()),
+                Leaf(leaf) => return Some((leaf.index, leaf.to_rgba())),
                 Tree(next_tree) => tree = next_tree,
             }
         }
@@ -544,14 +548,17 @@ impl OcTree {
     }
 
     /// All color present in the octree
-    pub fn palette(&self) -> Option<ColorPalette> {
-        fn palette_rec(node: &OcTreeNode, palette: &mut Vec<RGBA>) {
+    pub fn build_palette(&mut self) -> Option<ColorPalette> {
+        fn palette_rec(node: &mut OcTreeNode, palette: &mut Vec<RGBA>) {
             use OcTreeNode::*;
             match node {
                 Empty => return,
-                Leaf(leaf) => palette.push(leaf.to_rgba()),
+                Leaf(ref mut leaf) => {
+                    leaf.index = palette.len();
+                    palette.push(leaf.to_rgba());
+                }
                 Tree(tree) => {
-                    for child in tree.children.iter() {
+                    for child in tree.children.iter_mut() {
                         palette_rec(child, palette)
                     }
                 }
@@ -559,7 +566,7 @@ impl OcTree {
         }
 
         let mut palette = Vec::new();
-        for child in self.children.iter() {
+        for child in self.children.iter_mut() {
             palette_rec(child, &mut palette);
         }
         ColorPalette::new(palette)
@@ -650,6 +657,7 @@ impl OcTree {
     /// Search the node, where the sum of the childs references is minimal and
     /// convert it to a leaf.
     pub fn prune(&mut self) {
+        println!("{:?}", self.info.min_tail_tree);
         if let Some(index) = self.argmin_min_tail_tree() {
             self.node_update(index, Self::prune_rec)
         }
@@ -856,7 +864,6 @@ impl Iterator for OcTreePath {
 
 pub struct ColorPalette {
     colors: Vec<RGBA>,
-    cache: HashMap<RGBA, usize>,
 }
 
 impl ColorPalette {
@@ -864,8 +871,7 @@ impl ColorPalette {
         if colors.is_empty() {
             None
         } else {
-            let cache = colors.iter().enumerate().map(|(i, c)| (*c, i)).collect();
-            Some(Self { colors, cache })
+            Some(Self { colors })
         }
     }
 
@@ -881,11 +887,7 @@ impl ColorPalette {
         &self.colors
     }
 
-    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
-        if let Some(index) = self.cache.get(&color) {
-            // cache hit
-            return (*index, color);
-        }
+    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         // slow path
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
             let [r0, g0, b0] = c0.rgb_u8();
@@ -894,6 +896,16 @@ impl ColorPalette {
                 + (g0 as i32 - g1 as i32).pow(2)
                 + (b0 as i32 - b1 as i32).pow(2)
         }
+        /*
+        let (qindex, qcolor) = self
+            .colors
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, c)| dist(**c, color))
+            .unwrap();
+        (qindex, *qcolor)
+        */
+
         let best_dist = dist(color, self.colors[0]);
         let (best_index, _) =
             (1..self.colors.len()).fold((0, best_dist), |(best_index, best_dist), index| {
@@ -905,7 +917,6 @@ impl ColorPalette {
                 }
             });
         let (qindex, qcolor) = (best_index, self.colors[best_index]);
-        self.cache.insert(color, qindex);
         (qindex, qcolor)
     }
 }
@@ -943,6 +954,7 @@ mod tests {
                 green_acc: 2,
                 blue_acc: 3,
                 color_count: 4,
+                index: 0,
             })
         });
         assert_eq!(
@@ -973,7 +985,7 @@ mod tests {
             }
         );
         assert_eq!(tree.argmin_min_tail_tree(), Some(1));
-        assert_eq!(tree.find(c0), Some(c0));
+        assert_eq!(tree.find(c0), Some((0, c0)));
 
         tree.insert(c1);
         assert_eq!(
@@ -985,7 +997,7 @@ mod tests {
             }
         );
         assert_eq!(tree.argmin_min_tail_tree(), Some(7));
-        assert_eq!(tree.find(c1), Some(c1));
+        assert_eq!(tree.find(c1), Some((0, c1)));
 
         Ok(())
     }
