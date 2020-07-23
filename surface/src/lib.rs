@@ -568,59 +568,100 @@ pub trait ViewBounds {
     fn view_bounds(self, size: usize) -> Option<(usize, usize)>;
 }
 
-impl ViewBounds for Range<i32> {
-    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
-        range_bounds(self, size)
-    }
-}
-
-impl ViewBounds for RangeFrom<i32> {
-    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
-        range_bounds(self, size)
-    }
-}
-
-impl ViewBounds for RangeTo<i32> {
-    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
-        range_bounds(self, size)
-    }
-}
-
-impl ViewBounds for RangeInclusive<i32> {
-    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
-        range_bounds(self, size)
-    }
-}
-
-impl ViewBounds for RangeToInclusive<i32> {
-    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
-        range_bounds(self, size)
-    }
-}
-
 impl ViewBounds for RangeFull {
     fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
         range_bounds(self, size)
     }
 }
 
-impl ViewBounds for i32 {
-    fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
-        let size = size as i32;
-        if self < -size || self >= size {
-            None
-        } else {
-            let start = clamp(self + size, 0, 2 * size - 1) % size;
-            Some((start as usize, (start + 1) as usize))
-        }
+macro_rules! impl_signed_ints(
+    ($($int_type:ident),+) => {
+        $(
+            impl ViewBounds for $int_type {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    let size = size as $int_type;
+                    if self < -size || self >= size {
+                        None
+                    } else {
+                        let start = clamp(self + size, 0, 2 * size - 1) % size;
+                        Some((start as usize, (start + 1) as usize))
+                    }
+                }
+            }
+        )+
     }
-}
+);
+impl_signed_ints!(i8, i16, i32, i64, isize);
 
-fn range_bounds(bound: impl RangeBounds<i32>, size: usize) -> Option<(usize, usize)> {
+macro_rules! impl_unsigned_ints(
+    ($($int_type:ident),+) => {
+        $(
+            impl ViewBounds for $int_type {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    let index = self as usize;
+                    if index >= size {
+                        None
+                    } else {
+                        Some((index, index + 1))
+                    }
+                }
+            }
+        )+
+    }
+);
+impl_unsigned_ints!(u8, u16, u32, u64, usize);
+
+macro_rules! impl_range_ints(
+    ($($int_type:ident),+) => {
+        $(
+            impl ViewBounds for Range<$int_type> {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    range_bounds(
+                        Range {
+                            start: self.start as i64,
+                            end: self.end as i64,
+                        },
+                        size,
+                    )
+                }
+            }
+
+            impl ViewBounds for RangeFrom<$int_type> {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    range_bounds(RangeFrom { start: self.start as i64 }, size)
+                }
+            }
+
+            impl ViewBounds for RangeTo<$int_type> {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    range_bounds(RangeTo { end: self.end as i64 }, size)
+                }
+            }
+
+            impl ViewBounds for RangeInclusive<$int_type> {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    let start = *self.start() as i64;
+                    let end = *self.end() as i64;
+                    range_bounds(start..=end, size)
+                }
+            }
+
+            impl ViewBounds for RangeToInclusive<$int_type> {
+                fn view_bounds(self, size: usize) -> Option<(usize, usize)> {
+                    let end = self.end as i64;
+                    range_bounds(..=end, size)
+                }
+            }
+        )+
+    }
+);
+impl_range_ints!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize);
+
+fn range_bounds(bound: impl RangeBounds<i64>, size: usize) -> Option<(usize, usize)> {
     //  (index + size) % size - almost works
     //  0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5  6  7  8  9
     //-10 -9 -8 -7 -6 -5 -4 -3 -2 -1  0  1  2  3  4  5  6  7  8  9
-    let size = size as i32;
+    let size = size as i64;
     if size == 0 {
         return None;
     }
