@@ -32,6 +32,52 @@ impl Image {
     pub fn size(&self) -> usize {
         self.surf.height() * self.surf.width() * 4
     }
+
+    /// Qunatize image
+    ///
+    /// Perform palette extraction and Floyd–Steinberg dithering.
+    pub fn quantize(
+        &self,
+        palette_size: usize,
+        dither: bool,
+    ) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
+        let mut palette = ColorPalette::from_image(self, palette_size)?;
+        let mut qimg = SurfaceOwned::new(self.height(), self.width());
+
+        // quantize and dither
+        let mut errors: Vec<ColorError> = Vec::new();
+        let ewidth = self.width() + 2; // to evaoid check for first and the last pixels
+        errors.resize_with(ewidth * 2, || ColorError::new());
+        for row in 0..self.height() {
+            if dither {
+                // swap error rows
+                for col in 0..ewidth {
+                    errors[col] = errors[col + ewidth];
+                    errors[col + ewidth] = ColorError::new();
+                }
+            }
+            // qunatize and spread the error
+            for col in 0..self.width() {
+                let mut color = self.get(row, col).unwrap().clone();
+                if dither {
+                    color = errors[col + 1].add(color); // account for error
+                }
+                let (qindex, qcolor) = palette.find(color);
+                qimg.set(row, col, qindex);
+                if dither {
+                    // spread the error according to Floyd–Steinberg dithering matrix:
+                    // [[0   , X   , 7/16],
+                    // [3/16, 5/16, 1/16]]
+                    let error = ColorError::between(color, qcolor);
+                    errors[col + 2] += error * 0.4375; // 7/16
+                    errors[col + ewidth] += error * 0.1875; // 3/16
+                    errors[col + ewidth + 1] += error * 0.3125; // 5/16
+                    errors[col + ewidth + 2] += error * 0.0625; // 1/16
+                }
+            }
+        }
+        Some((palette, qimg))
+    }
 }
 
 impl PartialEq for Image {
@@ -218,48 +264,11 @@ impl Iterator for RGBAIter {
     }
 }
 
-/// Qunatize image
+/// Color like object to track quantization
 ///
-/// Performs palette extraction with `OcTreeQuantizer` and apply Floyd–Steinberg dithering.
-pub fn quantize_and_dither(
-    img: impl Surface<Item = RGBA>,
-    palette_size: usize,
-) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
-    let mut quantizer = OcTreeQuantizer::new(&img, palette_size)?;
-    let mut qimg = SurfaceOwned::new(img.height(), img.width());
-
-    // quantize and dither
-    let mut errors: Vec<ColorError> = Vec::new();
-    let ewidth = img.width() + 2; // to evaoid check for first and the last pixels
-    errors.resize_with(ewidth * 2, || ColorError::new());
-    for row in 0..img.height() {
-        // swap error rows
-        for col in 0..ewidth {
-            errors[col] = errors[col + ewidth];
-            errors[col + ewidth] = ColorError::new();
-        }
-        // qunatize and spread the error
-        for col in 0..img.width() {
-            let color = img.get(row, col).unwrap().clone();
-            let color = errors[col + 1].add(color); // account for error
-            let (qindex, qcolor) = quantizer.quantize(color);
-            qimg.set(row, col, qindex);
-            // spread the error according to Floyd–Steinberg dithering matrix:
-            // [[0   , X   , 7/16],
-            // [3/16, 5/16, 1/16]]
-            let error = ColorError::between(color, qcolor);
-            errors[col + 2] += error * 0.4375; // 7/16
-            errors[col + ewidth] += error * 0.1875; // 3/16
-            errors[col + ewidth + 1] += error * 0.3125; // 5/16
-            errors[col + ewidth + 2] += error * 0.0625; // 1/16
-        }
-    }
-
-    Some((quantizer.into_palette(), qimg))
-}
-
+/// Used in Floyd–Steinberg dithering.
 #[derive(Clone, Copy)]
-pub struct ColorError([f32; 3]);
+struct ColorError([f32; 3]);
 
 impl ColorError {
     fn new() -> Self {
@@ -314,45 +323,6 @@ impl Mul<f32> for ColorError {
     fn mul(self, val: f32) -> Self::Output {
         let Self([r, g, b]) = self;
         Self([r * val, g * val, b * val])
-    }
-}
-
-pub struct OcTreeQuantizer {
-    octree: OcTree,
-    palette: ColorPalette,
-}
-
-impl OcTreeQuantizer {
-    pub fn new(img: impl Surface<Item = RGBA>, palette_size: usize) -> Option<Self> {
-        let sample: u32 = (img.height() * img.width() / (palette_size * 100)) as u32;
-        let mut octree: OcTree = if sample < 2 {
-            img.iter().copied().collect()
-        } else {
-            let mut octree = OcTree::new();
-            let mut rnd = Rnd::new(5);
-            let mut colors = img.iter().copied();
-            while let Some(color) = colors.nth((rnd.next_u32() % sample) as usize) {
-                octree.insert(color);
-            }
-            octree
-        };
-        octree.prune_until(palette_size);
-        // octree.prune_empty();
-        // octree.prune_until(palette_size);
-
-        let palette = octree.build_palette()?;
-        Some(Self { octree, palette })
-    }
-
-    pub fn quantize(&mut self, color: RGBA) -> (usize, RGBA) {
-        match self.octree.find(color) {
-            Some(result) => result,
-            None => self.palette.find(color),
-        }
-    }
-
-    pub fn into_palette(self) -> ColorPalette {
-        self.palette
     }
 }
 
@@ -496,7 +466,7 @@ impl OcTreeNode {
     }
 }
 
-/// Oc(tet)Tree use for color quantization
+/// Oc(tet)Tree used for color quantization
 ///
 /// References:
 /// - https://www.cubic.org/docs/octree.htm
@@ -539,7 +509,10 @@ impl OcTree {
     }
 
     /// Find nearest color inside the octree
-    /// NOTE: to get correct palette index call build_palette first.
+    ///
+    /// NOTE:
+    ///  - to get correct palette index call build_palette first.
+    ///  - prefer KD-Tree as it produces better result, and can not return None.
     pub fn find(&self, color: RGBA) -> Option<(usize, RGBA)> {
         use OcTreeNode::*;
         let mut tree = self;
@@ -553,8 +526,8 @@ impl OcTree {
         None
     }
 
-    /// All color present in the octree
-    pub fn build_palette(&mut self) -> Option<ColorPalette> {
+    /// Exteract all colors present in the octree and update leaf color indices
+    pub fn build_palette(&mut self) -> Vec<RGBA> {
         fn palette_rec(node: &mut OcTreeNode, palette: &mut Vec<RGBA>) {
             use OcTreeNode::*;
             match node {
@@ -575,7 +548,7 @@ impl OcTree {
         for child in self.children.iter_mut() {
             palette_rec(child, &mut palette);
         }
-        ColorPalette::new(palette)
+        palette
     }
 
     /// Update node with provided function.
@@ -619,34 +592,6 @@ impl OcTree {
         let mut path = OcTreePath::new(color);
         let index = path.next().expect("OcTreePath can not be empty");
         self.node_update(index, |node| insert_rec(node, path));
-    }
-
-    /// Replace all empty nodes with corresponding colors
-    pub fn prune_empty(&mut self) {
-        fn prune_empty_rec(node: OcTreeNode, path: &mut Vec<usize>) -> OcTreeNode {
-            use OcTreeNode::*;
-            match node {
-                Empty => Leaf(OcTreeLeaf::from_rgba(color_from_path(path))),
-                Leaf(_) => return node,
-                Tree(mut tree) => {
-                    for index in 0..8 {
-                        path.push(index);
-                        tree.children[index] = prune_empty_rec(tree.children[index].take(), path);
-                        path.pop();
-                    }
-                    tree.info = OcTreeInfo::from_slice(&tree.children);
-                    Tree(tree)
-                }
-            }
-        }
-
-        let mut path = Vec::with_capacity(8);
-        for index in 0..8 {
-            path.push(index);
-            self.children[index] = prune_empty_rec(self.children[index].take(), &mut path);
-            path.pop();
-        }
-        self.info = OcTreeInfo::from_slice(&self.children);
     }
 
     /// Prune until desired number of colors is left
@@ -713,94 +658,67 @@ impl OcTree {
         }
     }
 
-    /// Render octree as graphviz digraph.
-    pub fn to_digraph(&self) -> String {
-        let mut next = 1;
-        let mut out = Vec::new();
-        let mut run = || -> Result<String, Error> {
-            writeln!(&mut out, "digraph OcTree {{")?;
-            writeln!(&mut out, "  rankdir=\"LR\"")?;
-            writeln!(
-                &mut out,
-                "  0 [label=\"{} {}\"]",
-                self.info.leaf_count,
-                self.info.min_color_count.unwrap_or(0),
-            )?;
-            self.to_digraph_rec(0, &mut next, &mut out)?;
-            writeln!(&mut out, "}}")?;
-            Ok(String::from_utf8_lossy(&out).into())
-        };
-        run().expect("memory write failed")
-    }
+    /// Render octree as graphviz digraph (for debugging)
+    pub fn to_digraph<W: Write>(&self, mut out: W) -> std::io::Result<()> {
+        pub fn to_digraph_rec<W: Write>(
+            tree: &OcTree,
+            parent: usize,
+            next: &mut usize,
+            out: &mut W,
+        ) -> std::io::Result<()> {
+            use OcTreeNode::*;
+            for child in tree.children.iter() {
+                match child {
+                    Empty => continue,
+                    Leaf(leaf) => {
+                        let id = *next;
+                        *next += 1;
 
-    pub fn to_digraph_rec(
-        &self,
-        parent: usize,
-        next: &mut usize,
-        out: &mut Vec<u8>,
-    ) -> Result<(), Error> {
-        use OcTreeNode::*;
-        for child in self.children.iter() {
-            match child {
-                Empty => continue,
-                Leaf(leaf) => {
-                    let id = *next;
-                    *next += 1;
+                        let fg = leaf
+                            .to_rgba()
+                            .best_contrast(RGBA::new(255, 255, 255, 255), RGBA::new(0, 0, 0, 255));
+                        writeln!(
+                            out,
+                            "  {} [style=filled, fontcolor=\"{}\" fillcolor=\"{}\", label=\"{}\"]",
+                            id,
+                            fg,
+                            leaf.to_rgba(),
+                            leaf.color_count
+                        )?;
+                        writeln!(out, "  {} -> {}", parent, id)?;
+                    }
+                    Tree(child) => {
+                        let id = *next;
+                        *next += 1;
 
-                    let fg = leaf
-                        .to_rgba()
-                        .best_contrast(RGBA::new(255, 255, 255, 255), RGBA::new(0, 0, 0, 255));
-                    writeln!(
-                        out,
-                        "  {} [style=filled, fontcolor=\"{}\" fillcolor=\"{}\", label=\"{}\"]",
-                        id,
-                        fg,
-                        leaf.to_rgba(),
-                        leaf.color_count
-                    )?;
-                    writeln!(out, "  {} -> {}", parent, id)?;
-                }
-                Tree(tree) => {
-                    let id = *next;
-                    *next += 1;
-
-                    writeln!(
-                        out,
-                        "  {} [label=\"{} {}\"]",
-                        id,
-                        tree.info.leaf_count,
-                        tree.info.min_color_count.unwrap_or(0),
-                    )?;
-                    writeln!(out, "  {} -> {}", parent, id)?;
-                    tree.to_digraph_rec(id, next, out)?
+                        writeln!(
+                            out,
+                            "  {} [label=\"{} {}\"]",
+                            id,
+                            child.info.leaf_count,
+                            child.info.min_color_count.unwrap_or(0),
+                        )?;
+                        writeln!(out, "  {} -> {}", parent, id)?;
+                        to_digraph_rec(child, id, next, out)?
+                    }
                 }
             }
+            Ok(())
         }
+
+        let mut next = 1;
+        writeln!(&mut out, "digraph OcTree {{")?;
+        writeln!(&mut out, "  rankdir=\"LR\"")?;
+        writeln!(
+            &mut out,
+            "  0 [label=\"{} {}\"]",
+            self.info.leaf_count,
+            self.info.min_color_count.unwrap_or(0),
+        )?;
+        to_digraph_rec(self, 0, &mut next, &mut out)?;
+        writeln!(&mut out, "}}")?;
         Ok(())
     }
-}
-
-/// Convert path generated by OcTreePath back to RGBA color
-fn color_from_path(path: &Vec<usize>) -> RGBA {
-    let mut r: u8 = 0;
-    let mut g: u8 = 0;
-    let mut b: u8 = 0;
-    for index in 0..8 {
-        r <<= 1;
-        g <<= 1;
-        b <<= 1;
-        let bits = path.get(index).unwrap_or(&0);
-        if bits & 0b100 != 0 {
-            r |= 1;
-        }
-        if bits & 0b010 != 0 {
-            g |= 1;
-        }
-        if bits & 0b001 != 0 {
-            b |= 1;
-        }
-    }
-    RGBA::new(r, g, b, 255)
 }
 
 /// Iterator which goes over all most significant bits of the color
@@ -856,180 +774,182 @@ impl Iterator for OcTreePath {
     }
 }
 
-/// Simple KDTree implementation used to find nearest color in the palette.
 pub struct KDTree {
-    nodes: Vec<KDTreeNode>,
+    stat_dist: usize,
+    stat_find: usize,
+    nodes: Vec<KDNode>,
 }
 
-enum KDTreeNode {
-    Leaf {
-        color: RGBA,
-        color_index: usize,
-    },
-    Tree {
-        // index of the color dimation
-        dim: usize,
-        // split value
-        split: f32,
-        // left node index
-        left: usize,
-        // right node index
-        right: usize,
-    },
+#[derive(Debug, Clone, Copy)]
+struct KDNode {
+    color: [u8; 3],
+    color_index: usize,
+    dim: usize,
+    left: Option<usize>,
+    right: Option<usize>,
 }
 
 impl KDTree {
     pub fn new(colors: &Vec<RGBA>) -> Self {
-        assert!(
-            !colors.is_empty(),
-            "KDTree can not be build from an empty set"
-        );
-
-        // find dimension with largest difference
-        fn find_largest_dim(colors: &[(usize, [u8; 3])]) -> usize {
-            let (_, [r, g, b]) = colors[0];
-            let mut bounds = [(r, r), (g, g), (b, b)];
-            for color in colors[1..].iter() {
-                // TODO: use luma coefficients to adjust dimension
-                let (_, [r, g, b]) = color;
-                bounds[0] = (bounds[0].0.min(*r), bounds[0].1.max(*r));
-                bounds[1] = (bounds[1].0.min(*g), bounds[1].1.max(*g));
-                bounds[2] = (bounds[2].0.min(*b), bounds[2].1.max(*b));
+        fn build_rec(
+            dim: usize,
+            nodes: &mut Vec<KDNode>,
+            colors: &mut [(usize, [u8; 3])],
+        ) -> Option<usize> {
+            match colors {
+                [] => return None,
+                [(color_index, color)] => {
+                    nodes.push(KDNode {
+                        color: *color,
+                        color_index: *color_index,
+                        dim,
+                        left: None,
+                        right: None,
+                    });
+                    return Some(nodes.len() - 1);
+                }
+                _ => (),
             }
-            let (dim, _) = bounds
-                .iter()
-                .enumerate()
-                .max_by_key(|(_, (min, max))| *max - *min)
-                .unwrap();
-            dim
-        }
-
-        fn build_rec(nodes: &mut Vec<KDTreeNode>, colors: &mut [(usize, [u8; 3])]) -> usize {
-            if let [(color_index, [r, g, b])] = colors {
-                nodes.push(KDTreeNode::Leaf {
-                    color: RGBA::new(*r, *g, *b, 255),
-                    color_index: *color_index,
-                });
-                return nodes.len() - 1;
-            }
-            let dim = find_largest_dim(colors);
             colors.sort_by_key(|(_, c)| c[dim]);
-            let split =
-                (colors[0].1[dim] as f32 + colors[colors.len() - 1].1[dim] as f32) / 2.0 + 0.1;
-            let index = match colors
-                .binary_search_by(|(_, c)| (c[dim] as f32).partial_cmp(&split).unwrap())
-            {
-                Ok(index) => index,
-                Err(index) => index,
-            };
-
-            /*
-            let mut index = colors.len() / 2;
-            let median = colors[index].1[dim];
-            if colors[0].1[dim] != median {
-                while colors[index].1[dim] == median {
-                    index -= 1;
-                }
-                index += 1;
-            } else if colors[colors.len() - 1].1[dim] != median {
-                while colors[index].1[dim] == median {
-                    index += 1;
-                }
-            } else {
-                panic!("maximum dimenstion is empty");
-            }
-            let split = (colors[index - 1].1[dim] as f32 + colors[index].1[dim] as f32) / 2.0;
-            */
-
-            // let split = (colors[index - 1].1[dim] as f32 + colors[index].1[dim] as f32) / 2.0;
-            let left = build_rec(nodes, &mut colors[..index]);
-            let right = build_rec(nodes, &mut colors[index..]);
-            nodes.push(KDTreeNode::Tree {
+            let index = colors.len() / 2;
+            let dim_next = (dim + 1) % 3;
+            let left = build_rec(dim_next, nodes, &mut colors[..index]);
+            let right = build_rec(dim_next, nodes, &mut colors[(index + 1)..]);
+            let (color_index, color) = colors[index];
+            nodes.push(KDNode {
+                color,
+                color_index,
                 dim,
-                split,
                 left,
                 right,
             });
-            nodes.len() - 1
-        };
+            Some(nodes.len() - 1)
+        }
 
         let mut nodes = Vec::new();
         let mut colors: Vec<_> = colors.iter().map(|c| c.rgb_u8()).enumerate().collect();
-        build_rec(&mut nodes, &mut colors);
-        Self { nodes }
+        build_rec(0, &mut nodes, &mut colors);
+        Self {
+            nodes,
+            stat_dist: 0,
+            stat_find: 0,
+        }
     }
 
-    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
-        let mut index = self.nodes.len() - 1;
-        let rgb = color.rgb_u8();
-        loop {
-            match self.nodes[index] {
-                KDTreeNode::Leaf { color, color_index } => return (color_index, color),
-                KDTreeNode::Tree {
-                    dim,
-                    split,
-                    left,
-                    right,
-                } => {
-                    if rgb[dim] as f32 >= split {
-                        index = right;
+    /// Mean value of distance lookups per find call.
+    pub fn dist_per_find(&self) -> f32 {
+        self.stat_dist as f32 / self.stat_find as f32
+    }
+
+    /// find nearest neigh neighbour color (euclidian distance) in the palette
+    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
+        fn dist(count: &mut usize, rgb: [u8; 3], node: &KDNode) -> i32 {
+            *count += 1;
+            let [r0, g0, b0] = rgb;
+            let [r1, g1, b1] = node.color;
+            (r0 as i32 - r1 as i32).pow(2)
+                + (g0 as i32 - g1 as i32).pow(2)
+                + (b0 as i32 - b1 as i32).pow(2)
+        }
+
+        fn find_rec(
+            count: &mut usize,
+            nodes: &Vec<KDNode>,
+            index: usize,
+            target: [u8; 3],
+        ) -> (KDNode, i32) {
+            let node = nodes[index];
+            let node_dist = dist(count, target, &node);
+            let (next, other) = if target[node.dim] < node.color[node.dim] {
+                (node.left, node.right)
+            } else {
+                (node.right, node.left)
+            };
+            let (guess, guess_dist) = match next {
+                None => (node, node_dist),
+                Some(next_index) => {
+                    let (guess, guess_dist) = find_rec(count, nodes, next_index, target);
+                    if guess_dist > node_dist {
+                        (node, node_dist)
                     } else {
-                        index = left;
+                        (guess, guess_dist)
+                    }
+                }
+            };
+            let other_dist = (target[node.dim] as i32 - node.color[node.dim] as i32).pow(2);
+            if other_dist >= guess_dist {
+                return (guess, guess_dist);
+            }
+            match other {
+                None => (guess, guess_dist),
+                Some(other_index) => {
+                    let (other, other_dist) = find_rec(count, nodes, other_index, target);
+                    if other_dist < guess_dist {
+                        (other, other_dist)
+                    } else {
+                        (guess, guess_dist)
                     }
                 }
             }
         }
+
+        let mut count = 0;
+        let node = find_rec(
+            &mut count,
+            &self.nodes,
+            self.nodes.len() - 1,
+            color.rgb_u8(),
+        )
+        .0;
+        let [r, g, b] = node.color;
+        self.stat_dist += count;
+        self.stat_find += 1;
+        (node.color_index, RGBA::new(r, g, b, 255))
     }
 
-    pub fn to_digraph(&self) -> Result<String, Error> {
+    /// Render k-d tree as graphviz digraph (for debugging)
+    pub fn to_digraph(&self, mut out: impl Write) -> std::io::Result<()> {
         fn to_digraph_rec(
-            out: &mut Vec<u8>,
-            nodes: &Vec<KDTreeNode>,
+            out: &mut impl Write,
+            nodes: &Vec<KDNode>,
             index: usize,
-        ) -> Result<(), Error> {
-            match nodes[index] {
-                KDTreeNode::Leaf { color, .. } => {
-                    let fg =
-                        color.best_contrast(RGBA::new(255, 255, 255, 255), RGBA::new(0, 0, 0, 255));
-                    writeln!(
-                        out,
-                        "  {} [style=filled, fontcolor=\"{}\" fillcolor=\"{}\", label=\"{}\"]",
-                        index, fg, color, color,
-                    )?;
-                }
-                KDTreeNode::Tree {
-                    dim,
-                    split,
-                    left,
-                    right,
-                } => {
-                    let d = match dim {
-                        0 => "R",
-                        1 => "G",
-                        2 => "B",
-                        _ => unreachable!(),
-                    };
-                    writeln!(out, "  {} [label=\"{} {}\"]", index, d, split)?;
-                    writeln!(out, "  {} -> {} [color=green]", index, left)?;
-                    writeln!(out, "  {} -> {} [color=red]", index, right)?;
-                    to_digraph_rec(out, nodes, left)?;
-                    to_digraph_rec(out, nodes, right)?;
-                }
+        ) -> std::io::Result<()> {
+            let node = nodes[index];
+            let d = match node.dim {
+                0 => "R",
+                1 => "G",
+                2 => "B",
+                _ => unreachable!(),
+            };
+            let [r, g, b] = node.color;
+            let color = RGBA::new(r, g, b, 255);
+            let fg = color.best_contrast(RGBA::new(255, 255, 255, 255), RGBA::new(0, 0, 0, 255));
+            writeln!(
+                out,
+                "  {} [style=filled, fontcolor=\"{}\" fillcolor=\"{}\", label=\"{} {} {:?}\"]",
+                index, fg, color, d, node.color[node.dim], node.color,
+            )?;
+            if let Some(left) = node.left {
+                writeln!(out, "  {} -> {} [color=green]", index, left)?;
+                to_digraph_rec(out, nodes, left)?;
+            }
+            if let Some(right) = node.right {
+                writeln!(out, "  {} -> {} [color=red]", index, right)?;
+                to_digraph_rec(out, nodes, right)?;
             }
             Ok(())
         }
 
-        let mut out = Vec::new();
         writeln!(&mut out, "digraph KDTree {{")?;
         writeln!(&mut out, "  rankdir=\"LR\"")?;
         to_digraph_rec(&mut out, &self.nodes, self.nodes.len() - 1)?;
         writeln!(&mut out, "}}")?;
-        Ok(String::from_utf8_lossy(&out).into())
+        Ok(())
     }
 }
 
+/// Color palette which implements fast NNS with euclidian distance.
 pub struct ColorPalette {
-    // there is no point in adding cache here as it always misses
     colors: Vec<RGBA>,
     kdtree: KDTree,
 }
@@ -1040,16 +960,29 @@ impl ColorPalette {
             None
         } else {
             let kdtree = KDTree::new(&colors);
-            {
-                use std::fs::File;
-                let mut dot = File::create("/tmp/kdtree.dot").unwrap();
-                write!(dot, "{}", kdtree.to_digraph().unwrap()).unwrap();
-            }
-            for color in colors.iter() {
-                assert_eq!(*color, kdtree.find(*color).1);
-            }
             Some(Self { colors, kdtree })
         }
+    }
+
+    /// Extract palette from image using `OcTree`
+    pub fn from_image(img: impl Surface<Item = RGBA>, palette_size: usize) -> Option<Self> {
+        if img.is_empty() {
+            return None;
+        }
+        let sample: u32 = (img.height() * img.width() / (palette_size * 100)) as u32;
+        let mut octree: OcTree = if sample < 2 {
+            img.iter().copied().collect()
+        } else {
+            let mut octree = OcTree::new();
+            let mut rnd = Rnd::new(5);
+            let mut colors = img.iter().copied();
+            while let Some(color) = colors.nth((rnd.next_u32() % sample) as usize) {
+                octree.insert(color);
+            }
+            octree
+        };
+        octree.prune_until(palette_size);
+        Self::new(octree.build_palette())
     }
 
     pub fn size(&self) -> usize {
@@ -1064,11 +997,11 @@ impl ColorPalette {
         &self.colors
     }
 
-    pub fn find_new(&self, color: RGBA) -> (usize, RGBA) {
+    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
         self.kdtree.find(color)
     }
 
-    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
+    pub fn find_naive(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
             let [r0, g0, b0] = c0.rgb_u8();
             let [r1, g1, b1] = c1.rgb_u8();
@@ -1093,6 +1026,29 @@ impl ColorPalette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Convert path generated by OcTreePath back to RGBA color
+    fn color_from_path(path: &Vec<usize>) -> RGBA {
+        let mut r: u8 = 0;
+        let mut g: u8 = 0;
+        let mut b: u8 = 0;
+        for index in 0..8 {
+            r <<= 1;
+            g <<= 1;
+            b <<= 1;
+            let bits = path.get(index).unwrap_or(&0);
+            if bits & 0b100 != 0 {
+                r |= 1;
+            }
+            if bits & 0b010 != 0 {
+                g |= 1;
+            }
+            if bits & 0b001 != 0 {
+                b |= 1;
+            }
+        }
+        RGBA::new(r, g, b, 255)
+    }
 
     #[test]
     fn test_octree_path() -> Result<(), Error> {
