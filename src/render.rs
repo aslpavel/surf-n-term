@@ -212,8 +212,8 @@ where
 
     // draw image using unicode uppper half block symbol \u{2580}
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>) {
-        let height = (img.height() / 2 + img.height() % 2) as i32;
-        let width = img.width() as i32;
+        let height = img.height() / 2 + img.height() % 2;
+        let width = img.width();
         self.view_mut(..height, ..width).fill_with(|row, col, _| {
             let fg = img.get(row * 2, col).copied();
             let bg = img.get(row * 2 + 1, col).copied();

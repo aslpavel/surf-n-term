@@ -294,7 +294,11 @@ impl<T: ListItems> List<T> {
             }
             _ => (),
         }
-        self.cursor = clamp(self.cursor, 0, self.items.len() - 1);
+        if self.items.len() > 0 {
+            self.cursor = clamp(self.cursor, 0, self.items.len() - 1);
+        } else {
+            self.cursor = 0;
+        }
     }
 
     pub fn render(
