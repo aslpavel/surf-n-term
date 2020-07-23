@@ -856,9 +856,182 @@ impl Iterator for OcTreePath {
     }
 }
 
+/// Simple KDTree implementation used to find nearest color in the palette.
+pub struct KDTree {
+    nodes: Vec<KDTreeNode>,
+}
+
+enum KDTreeNode {
+    Leaf {
+        color: RGBA,
+        color_index: usize,
+    },
+    Tree {
+        // index of the color dimation
+        dim: usize,
+        // split value
+        split: f32,
+        // left node index
+        left: usize,
+        // right node index
+        right: usize,
+    },
+}
+
+impl KDTree {
+    pub fn new(colors: &Vec<RGBA>) -> Self {
+        assert!(
+            !colors.is_empty(),
+            "KDTree can not be build from an empty set"
+        );
+
+        // find dimension with largest difference
+        fn find_largest_dim(colors: &[(usize, [u8; 3])]) -> usize {
+            let (_, [r, g, b]) = colors[0];
+            let mut bounds = [(r, r), (g, g), (b, b)];
+            for color in colors[1..].iter() {
+                // TODO: use luma coefficients to adjust dimension
+                let (_, [r, g, b]) = color;
+                bounds[0] = (bounds[0].0.min(*r), bounds[0].1.max(*r));
+                bounds[1] = (bounds[1].0.min(*g), bounds[1].1.max(*g));
+                bounds[2] = (bounds[2].0.min(*b), bounds[2].1.max(*b));
+            }
+            let (dim, _) = bounds
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, (min, max))| *max - *min)
+                .unwrap();
+            dim
+        }
+
+        fn build_rec(nodes: &mut Vec<KDTreeNode>, colors: &mut [(usize, [u8; 3])]) -> usize {
+            if let [(color_index, [r, g, b])] = colors {
+                nodes.push(KDTreeNode::Leaf {
+                    color: RGBA::new(*r, *g, *b, 255),
+                    color_index: *color_index,
+                });
+                return nodes.len() - 1;
+            }
+            let dim = find_largest_dim(colors);
+            colors.sort_by_key(|(_, c)| c[dim]);
+            let split =
+                (colors[0].1[dim] as f32 + colors[colors.len() - 1].1[dim] as f32) / 2.0 + 0.1;
+            let index = match colors
+                .binary_search_by(|(_, c)| (c[dim] as f32).partial_cmp(&split).unwrap())
+            {
+                Ok(index) => index,
+                Err(index) => index,
+            };
+
+            /*
+            let mut index = colors.len() / 2;
+            let median = colors[index].1[dim];
+            if colors[0].1[dim] != median {
+                while colors[index].1[dim] == median {
+                    index -= 1;
+                }
+                index += 1;
+            } else if colors[colors.len() - 1].1[dim] != median {
+                while colors[index].1[dim] == median {
+                    index += 1;
+                }
+            } else {
+                panic!("maximum dimenstion is empty");
+            }
+            let split = (colors[index - 1].1[dim] as f32 + colors[index].1[dim] as f32) / 2.0;
+            */
+
+            // let split = (colors[index - 1].1[dim] as f32 + colors[index].1[dim] as f32) / 2.0;
+            let left = build_rec(nodes, &mut colors[..index]);
+            let right = build_rec(nodes, &mut colors[index..]);
+            nodes.push(KDTreeNode::Tree {
+                dim,
+                split,
+                left,
+                right,
+            });
+            nodes.len() - 1
+        };
+
+        let mut nodes = Vec::new();
+        let mut colors: Vec<_> = colors.iter().map(|c| c.rgb_u8()).enumerate().collect();
+        build_rec(&mut nodes, &mut colors);
+        Self { nodes }
+    }
+
+    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
+        let mut index = self.nodes.len() - 1;
+        let rgb = color.rgb_u8();
+        loop {
+            match self.nodes[index] {
+                KDTreeNode::Leaf { color, color_index } => return (color_index, color),
+                KDTreeNode::Tree {
+                    dim,
+                    split,
+                    left,
+                    right,
+                } => {
+                    if rgb[dim] as f32 >= split {
+                        index = right;
+                    } else {
+                        index = left;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn to_digraph(&self) -> Result<String, Error> {
+        fn to_digraph_rec(
+            out: &mut Vec<u8>,
+            nodes: &Vec<KDTreeNode>,
+            index: usize,
+        ) -> Result<(), Error> {
+            match nodes[index] {
+                KDTreeNode::Leaf { color, .. } => {
+                    let fg =
+                        color.best_contrast(RGBA::new(255, 255, 255, 255), RGBA::new(0, 0, 0, 255));
+                    writeln!(
+                        out,
+                        "  {} [style=filled, fontcolor=\"{}\" fillcolor=\"{}\", label=\"{}\"]",
+                        index, fg, color, color,
+                    )?;
+                }
+                KDTreeNode::Tree {
+                    dim,
+                    split,
+                    left,
+                    right,
+                } => {
+                    let d = match dim {
+                        0 => "R",
+                        1 => "G",
+                        2 => "B",
+                        _ => unreachable!(),
+                    };
+                    writeln!(out, "  {} [label=\"{} {}\"]", index, d, split)?;
+                    writeln!(out, "  {} -> {} [color=green]", index, left)?;
+                    writeln!(out, "  {} -> {} [color=red]", index, right)?;
+                    to_digraph_rec(out, nodes, left)?;
+                    to_digraph_rec(out, nodes, right)?;
+                }
+            }
+            Ok(())
+        }
+
+        let mut out = Vec::new();
+        writeln!(&mut out, "digraph KDTree {{")?;
+        writeln!(&mut out, "  rankdir=\"LR\"")?;
+        to_digraph_rec(&mut out, &self.nodes, self.nodes.len() - 1)?;
+        writeln!(&mut out, "}}")?;
+        Ok(String::from_utf8_lossy(&out).into())
+    }
+}
+
 pub struct ColorPalette {
     // there is no point in adding cache here as it always misses
     colors: Vec<RGBA>,
+    kdtree: KDTree,
 }
 
 impl ColorPalette {
@@ -866,7 +1039,16 @@ impl ColorPalette {
         if colors.is_empty() {
             None
         } else {
-            Some(Self { colors })
+            let kdtree = KDTree::new(&colors);
+            {
+                use std::fs::File;
+                let mut dot = File::create("/tmp/kdtree.dot").unwrap();
+                write!(dot, "{}", kdtree.to_digraph().unwrap()).unwrap();
+            }
+            for color in colors.iter() {
+                assert_eq!(*color, kdtree.find(*color).1);
+            }
+            Some(Self { colors, kdtree })
         }
     }
 
@@ -882,7 +1064,11 @@ impl ColorPalette {
         &self.colors
     }
 
-    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
+    pub fn find_new(&self, color: RGBA) -> (usize, RGBA) {
+        self.kdtree.find(color)
+    }
+
+    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
             let [r0, g0, b0] = c0.rgb_u8();
             let [r1, g1, b1] = c1.rgb_u8();
@@ -890,16 +1076,6 @@ impl ColorPalette {
                 + (g0 as i32 - g1 as i32).pow(2)
                 + (b0 as i32 - b1 as i32).pow(2)
         }
-        /*
-        let (qindex, qcolor) = self
-            .colors
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, c)| dist(**c, color))
-            .unwrap();
-        (qindex, *qcolor)
-        */
-
         let best_dist = dist(color, self.colors[0]);
         let (best_index, _) =
             (1..self.colors.len()).fold((0, best_dist), |(best_index, best_dist), index| {
