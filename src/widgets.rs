@@ -243,9 +243,9 @@ pub trait ListItems {
 
 pub struct List<T> {
     items: T,
-    offset: i32,
-    cursor: i32,
-    height_hint: i32,
+    offset: usize,
+    cursor: usize,
+    height_hint: usize,
 }
 
 impl<T: ListItems> List<T> {
@@ -269,7 +269,7 @@ impl<T: ListItems> List<T> {
     }
 
     pub fn current(&self) -> Option<T::Item> {
-        self.items.get(self.cursor as usize)
+        self.items.get(self.cursor)
     }
 
     pub fn handle(&mut self, event: &TerminalEvent) {
@@ -277,24 +277,24 @@ impl<T: ListItems> List<T> {
             TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::EMPTY => {
                 if name == KeyName::Down {
                     self.cursor += 1;
-                } else if name == KeyName::Up {
+                } else if name == KeyName::Up && self.cursor > 0 {
                     self.cursor -= 1;
                 } else if name == KeyName::PageDown {
                     self.cursor += self.height_hint;
-                } else if name == KeyName::PageUp {
+                } else if name == KeyName::PageUp && self.cursor >= self.height_hint {
                     self.cursor -= self.height_hint;
                 }
             }
             TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::CTRL => {
                 if name == KeyName::Char('n') {
                     self.cursor += 1;
-                } else if name == KeyName::Char('p') {
+                } else if name == KeyName::Char('p') && self.cursor > 0 {
                     self.cursor -= 1;
                 }
             }
             _ => (),
         }
-        self.cursor = clamp(self.cursor, 0, self.items.len() as i32 - 1);
+        self.cursor = clamp(self.cursor, 0, self.items.len() - 1);
     }
 
     pub fn render(
@@ -308,15 +308,15 @@ impl<T: ListItems> List<T> {
         }
         if self.offset > self.cursor {
             self.offset = self.cursor;
-        } else if self.offset + surf.height() as i32 - 1 < self.cursor {
-            self.offset = self.cursor - surf.height() as i32 + 1;
+        } else if self.offset + surf.height() - 1 < self.cursor {
+            self.offset = self.cursor - surf.height() + 1;
         }
 
         // items
         let width = surf.width() - 4; // exclude left border and scroll bar
-        let items: Vec<_> = (self.offset..self.offset + surf.height() as i32)
+        let items: Vec<_> = (self.offset..self.offset + surf.height())
             .filter_map(|index| {
-                let item = self.items.get(index as usize)?;
+                let item = self.items.get(index)?;
                 let height = item.length_hint().unwrap_or(0) / width + 1;
                 Some((index, height, item))
             })
@@ -338,12 +338,12 @@ impl<T: ListItems> List<T> {
             }
             cursor_found = cursor_found || *index == self.cursor;
         }
-        self.height_hint = items.len() as i32;
-        self.offset += first as i32;
+        self.height_hint = items.len();
+        self.offset += first;
         // render items
         let mut row = 0;
         for (index, height, item) in items[first..].iter() {
-            let mut item_surf = surf.view_mut((row as i32)..((row + height) as i32), ..-1);
+            let mut item_surf = surf.view_mut(row..row + height, ..-1);
             row += height;
             if item_surf.is_empty() {
                 break;
@@ -373,14 +373,13 @@ impl<T: ListItems> List<T> {
                 surf.height() * items.len() / self.items.len(),
                 1,
                 surf.height(),
-            ) as i32;
-            let sb_offset =
-                (surf.height() as i32 - sb_filled) * (self.cursor + 1) / self.items.len() as i32;
+            );
+            let sb_offset = (surf.height() - sb_filled) * (self.cursor + 1) / self.items.len();
             (sb_offset, sb_filled + sb_offset)
         } else {
-            (0, surf.height() as i32)
+            (0, surf.height())
         };
-        let range = 0..(surf.height() as i32);
+        let range = 0..surf.height();
         let mut sb = surf.view_mut(.., -1);
         let mut sb_writer = sb.writer();
         for i in range {
