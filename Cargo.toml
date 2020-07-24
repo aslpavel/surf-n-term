@@ -14,8 +14,12 @@ lazy_static = "1.4.0"
 miniz_oxide = "0.3.6"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.3.*"
 
 [[bench]]
 name = "decoder"
+harness = false
+
+[[bench]]
+name = "quantize"
 harness = false
