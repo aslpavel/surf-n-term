@@ -956,7 +956,7 @@ impl KDTree {
                 None => (node, node_dist),
                 Some(next_index) => {
                     let (guess, guess_dist) = find_rec(nodes, next_index, target);
-                    if guess_dist > node_dist {
+                    if guess_dist >= node_dist {
                         (node, node_dist)
                     } else {
                         (guess, guess_dist)
@@ -1201,5 +1201,58 @@ mod tests {
         assert_eq!(tree.find(c1), Some((0, c1)));
 
         Ok(())
+    }
+
+    struct ColorGen {
+        rnd: Rnd,
+    }
+
+    impl ColorGen {
+        fn new() -> Self {
+            Self { rnd: Rnd::new(0) }
+        }
+    }
+
+    impl Iterator for ColorGen {
+        type Item = RGBA;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let value = self.rnd.next_u32();
+            Some(RGBA::new(
+                (value & 0xff) as u8,
+                ((value >> 8) & 0xff) as u8,
+                ((value >> 16) & 0xff) as u8,
+                255,
+            ))
+        }
+    }
+
+    #[test]
+    pub fn test_palette() {
+        // make sure that k-d tree can actually find nearest neighbor
+        fn dist(c0: RGBA, c1: RGBA) -> i32 {
+            let [r0, g0, b0] = c0.rgb_u8();
+            let [r1, g1, b1] = c1.rgb_u8();
+            (r0 as i32 - r1 as i32).pow(2)
+                + (g0 as i32 - g1 as i32).pow(2)
+                + (b0 as i32 - b1 as i32).pow(2)
+        }
+
+        let mut gen = ColorGen::new();
+        let palette = ColorPalette::new((&mut gen).take(256).collect()).unwrap();
+        let mut colors: Vec<_> = gen.take(65536).collect();
+        colors.extend(palette.colors().iter().copied());
+        for (index, color) in colors.iter().enumerate() {
+            let (_, find) = palette.find(*color);
+            let (_, find_naive) = palette.find_naive(*color);
+            if find != find_naive && dist(*color, find) != dist(*color, find_naive) {
+                dbg!(dist(*color, find));
+                dbg!(dist(*color, find_naive));
+                panic!(
+                    "failed to find colors[{}]={:?}: find_naive={:?} find={:?}",
+                    index, color, find_naive, find
+                );
+            }
+        }
     }
 }
