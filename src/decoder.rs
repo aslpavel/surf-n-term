@@ -405,7 +405,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
             key_value.clone(),
             NFA::sequence(vec![NFA::from(","), key_value]).many(),
             NFA::from(";"),
-            NFA::predicate(|b| b.is_ascii_alphanumeric() || b == b' ').many(),
+            NFA::predicate(|b| b != b'\x1b').many(),
             NFA::from("\x1b\\"),
         ])
     };
@@ -541,8 +541,13 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
                     id = number_decode(value)?;
                 }
             }
-            let success = iter.next()? == b"OK";
-            TerminalEvent::KittyImage { id, success }
+            let msg = iter.next()?;
+            let error = if msg == b"OK" {
+                None
+            } else {
+                Some(String::from_utf8_lossy(msg).to_string())
+            };
+            TerminalEvent::KittyImage { id, error }
         }
         Terminfo => {
             // "\x1bP(0|1)+rkey=value(;key=value)\x1b\\"
@@ -953,11 +958,11 @@ mod tests {
             vec![
                 TerminalEvent::KittyImage {
                     id: 127,
-                    success: true
+                    error: None
                 },
                 TerminalEvent::KittyImage {
                     id: 31,
-                    success: false
+                    error: Some("error message".to_string())
                 },
             ]
         );

@@ -11,6 +11,7 @@ use std::{
     iter::FromIterator,
     ops::{Add, AddAssign, Mul},
     sync::Arc,
+    time::Duration,
 };
 
 /// Arc wrapped RGBA surface with precomputed hash
@@ -136,9 +137,23 @@ pub trait ImageHandler {
 
 /// Detect appropriate image handler for provided termainl
 pub fn image_handler_detect(
-    _term: &mut dyn Terminal,
+    term: &mut dyn Terminal,
 ) -> Result<Option<Box<dyn ImageHandler>>, Error> {
-    Ok(Some(Box::new(KittyImageHandler::new(true))))
+    // drain terminal
+    while let Some(_) = term.poll(Some(Duration::new(0, 0)))? {}
+    // Send kitty query and DA1 request
+    term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?;
+    term.write_all(b"\x1b[c")?;
+    let handler: Box<dyn ImageHandler> = match term.poll(Some(Duration::from_millis(50)))? {
+        Some(TerminalEvent::KittyImage { .. }) => Box::new(KittyImageHandler::new(true)),
+        Some(TerminalEvent::DeviceAttrs(attrs)) if attrs.contains(&4) => {
+            Box::new(SixelImageHandler::new())
+        }
+        _ => return Ok(None),
+    };
+    // drain terminal
+    term.poll(Some(Duration::new(0, 0)))?;
+    Ok(Some(handler))
 }
 
 /// Image handler for kitty graphic protocol

@@ -246,7 +246,7 @@ pub enum TerminalEvent {
     // Kitty image result
     KittyImage {
         id: usize,
-        success: bool,
+        error: Option<String>,
     },
     // Terminal have been woken by waker object
     Wake,
