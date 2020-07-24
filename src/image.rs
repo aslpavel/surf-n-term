@@ -5,7 +5,7 @@ use crate::{
     RGBA,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     io::{Cursor, Read, Write},
     iter::FromIterator,
@@ -41,13 +41,15 @@ impl Image {
         palette_size: usize,
         dither: bool,
     ) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
-        let mut palette = ColorPalette::from_image(self, palette_size)?;
+        let palette = ColorPalette::from_image(self, palette_size)?;
         let mut qimg = SurfaceOwned::new(self.height(), self.width());
 
         // quantize and dither
         let mut errors: Vec<ColorError> = Vec::new();
         let ewidth = self.width() + 2; // to evaoid check for first and the last pixels
-        errors.resize_with(ewidth * 2, || ColorError::new());
+        if dither {
+            errors.resize_with(ewidth * 2, || ColorError::new());
+        }
         for row in 0..self.height() {
             if dither {
                 // swap error rows
@@ -237,6 +239,108 @@ impl ImageHandler for KittyImageHandler {
             TerminalEvent::KittyImage { .. } => Ok(true),
             _ => Ok(false),
         }
+    }
+}
+
+pub struct SixelImageHandler;
+
+impl SixelImageHandler {
+    pub fn new() -> Self {
+        SixelImageHandler
+    }
+}
+
+impl ImageHandler for SixelImageHandler {
+    fn name(&self) -> &str {
+        "sixel"
+    }
+
+    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+        // TODO:
+        //   - correctly blend with background
+        //   - use background as default color in extracted sixel
+        let (palette, qimg) = match img.quantize(256, true) {
+            None => return Ok(()),
+            Some(qimg) => qimg,
+        };
+
+        // header
+        out.write_all(b"\x1bPq")?;
+        write!(out, "1;1;{};{}", img.width(), img.height())?;
+        // palette
+        for (index, color) in palette.colors().iter().enumerate() {
+            let [red, green, blue] = color.rgb_u8();
+            let red = (red as f32 / 2.55).round() as u8;
+            let green = (green as f32 / 2.55).round() as u8;
+            let blue = (blue as f32 / 2.55).round() as u8;
+            write!(out, "#{};2;{};{};{}", index, red, green, blue)?;
+        }
+
+        // color_index -> [(offset, sixel_code)]
+        let mut lines: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
+        let mut colors: HashSet<usize> = HashSet::with_capacity(6);
+        for row in (0..img.height()).step_by(6) {
+            lines.clear();
+            // extract sixel line
+            for col in 0..img.width() {
+                // extract sixel
+                let mut sixel = [0usize; 6];
+                for i in 0..6 {
+                    if let Some(index) = qimg.get(row + i, col) {
+                        sixel[i] = *index;
+                    }
+                }
+                // construct sixel
+                colors.clear();
+                colors.extend(sixel.iter().copied());
+                for color in colors.iter() {
+                    let mut code = 0;
+                    for (s_index, s_color) in sixel.iter().enumerate() {
+                        if s_color == color {
+                            code |= 1 << s_index;
+                        }
+                    }
+                    lines
+                        .entry(*color)
+                        .or_insert_with(Vec::new)
+                        .push((col, code + 63));
+                }
+            }
+            // render sixel line
+            for (color, line) in lines.iter() {
+                write!(out, "#{}", color)?;
+                let mut offset = 0;
+                for (col, code) in line.iter() {
+                    let shift = col - offset;
+                    if shift > 0 {
+                        if shift < 4 {
+                            for _ in 0..shift {
+                                out.write_all(b"?")?;
+                            }
+                        } else {
+                            write!(out, "!{}?", shift)?;
+                        }
+                    }
+                    // TODO: compress identical codes with `!{count}{code}`
+                    out.write_all(&[*code])?;
+                    offset = col + 1;
+                }
+                out.write_all(b"$")?;
+            }
+            out.write_all(b"-")?;
+        }
+        // EOF sixel
+        out.write_all(b"\x1b\\")?;
+
+        Ok(())
+    }
+
+    fn erase(&mut self, _pos: Position, _out: &mut dyn Write) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
+        Ok(false)
     }
 }
 
@@ -775,8 +879,6 @@ impl Iterator for OcTreePath {
 }
 
 pub struct KDTree {
-    stat_dist: usize,
-    stat_find: usize,
     nodes: Vec<KDNode>,
 }
 
@@ -829,22 +931,12 @@ impl KDTree {
         let mut nodes = Vec::new();
         let mut colors: Vec<_> = colors.iter().map(|c| c.rgb_u8()).enumerate().collect();
         build_rec(0, &mut nodes, &mut colors);
-        Self {
-            nodes,
-            stat_dist: 0,
-            stat_find: 0,
-        }
-    }
-
-    /// Mean value of distance lookups per find call.
-    pub fn dist_per_find(&self) -> f32 {
-        self.stat_dist as f32 / self.stat_find as f32
+        Self { nodes }
     }
 
     /// find nearest neigh neighbour color (euclidian distance) in the palette
-    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
-        fn dist(count: &mut usize, rgb: [u8; 3], node: &KDNode) -> i32 {
-            *count += 1;
+    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
+        fn dist(rgb: [u8; 3], node: &KDNode) -> i32 {
             let [r0, g0, b0] = rgb;
             let [r1, g1, b1] = node.color;
             (r0 as i32 - r1 as i32).pow(2)
@@ -852,14 +944,9 @@ impl KDTree {
                 + (b0 as i32 - b1 as i32).pow(2)
         }
 
-        fn find_rec(
-            count: &mut usize,
-            nodes: &Vec<KDNode>,
-            index: usize,
-            target: [u8; 3],
-        ) -> (KDNode, i32) {
+        fn find_rec(nodes: &Vec<KDNode>, index: usize, target: [u8; 3]) -> (KDNode, i32) {
             let node = nodes[index];
-            let node_dist = dist(count, target, &node);
+            let node_dist = dist(target, &node);
             let (next, other) = if target[node.dim] < node.color[node.dim] {
                 (node.left, node.right)
             } else {
@@ -868,7 +955,7 @@ impl KDTree {
             let (guess, guess_dist) = match next {
                 None => (node, node_dist),
                 Some(next_index) => {
-                    let (guess, guess_dist) = find_rec(count, nodes, next_index, target);
+                    let (guess, guess_dist) = find_rec(nodes, next_index, target);
                     if guess_dist > node_dist {
                         (node, node_dist)
                     } else {
@@ -883,7 +970,7 @@ impl KDTree {
             match other {
                 None => (guess, guess_dist),
                 Some(other_index) => {
-                    let (other, other_dist) = find_rec(count, nodes, other_index, target);
+                    let (other, other_dist) = find_rec(nodes, other_index, target);
                     if other_dist < guess_dist {
                         (other, other_dist)
                     } else {
@@ -893,17 +980,8 @@ impl KDTree {
             }
         }
 
-        let mut count = 0;
-        let node = find_rec(
-            &mut count,
-            &self.nodes,
-            self.nodes.len() - 1,
-            color.rgb_u8(),
-        )
-        .0;
+        let node = find_rec(&self.nodes, self.nodes.len() - 1, color.rgb_u8()).0;
         let [r, g, b] = node.color;
-        self.stat_dist += count;
-        self.stat_find += 1;
         (node.color_index, RGBA::new(r, g, b, 255))
     }
 
@@ -997,7 +1075,7 @@ impl ColorPalette {
         &self.colors
     }
 
-    pub fn find(&mut self, color: RGBA) -> (usize, RGBA) {
+    pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         self.kdtree.find(color)
     }
 

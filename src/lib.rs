@@ -19,7 +19,7 @@ pub mod widgets;
 
 pub use color::{Blend, Color, ColorLinear, RGBA};
 pub use error::Error;
-pub use image::{Image, ImageHandler, KittyImageHandler};
+pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImageHandler};
 pub use keys::{Key, KeyMap, KeyMod, KeyName};
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt, TerminalWritable, TerminalWriter};
 pub use style::{Face, FaceAttrs};

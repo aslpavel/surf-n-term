@@ -486,6 +486,20 @@ impl<T> SurfaceOwned<T> {
         };
         Self { shape, data }
     }
+
+    /// Create owned surface from vector and sizes.
+    pub fn from_vec(height: usize, width: usize, data: Vec<T>) -> Self {
+        assert_eq!(height * width, data.len());
+        let shape = Shape {
+            row_stride: width,
+            col_stride: 1,
+            height,
+            width,
+            start: 0,
+            end: data.len(),
+        };
+        Self { shape, data }
+    }
 }
 
 impl<T> Surface for SurfaceOwned<T> {

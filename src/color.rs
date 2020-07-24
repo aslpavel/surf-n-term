@@ -141,7 +141,7 @@ impl Color for ColorLinear {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RGBA([u8; 4]);
+pub struct RGBA(pub [u8; 4]);
 
 impl Default for RGBA {
     fn default() -> Self {
