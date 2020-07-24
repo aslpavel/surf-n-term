@@ -436,6 +436,17 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     };
     cmds.push(terminfo_response.tag(TTYTag::Terminfo));
 
+    // DA1 Deivece attributes https://vt100.net/docs/vt510-rm/DA1.html
+    // "\x1b[?<attr_1>;...<attr_n>c"
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b[?"),
+            (NFA::number() + NFA::from(";").optional()).some(),
+            NFA::from("c"),
+        ])
+        .tag(TTYTag::DeviceAttrs),
+    );
+
     NFA::choice(cmds).compile()
 }
 
@@ -550,6 +561,14 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             }
             TerminalEvent::Termcap(termcap)
         }
+        DeviceAttrs => {
+            // "\x1b[?<attr_1>;...<attr_n>c"
+            TerminalEvent::DeviceAttrs(
+                numbers_decode(&data[3..data.len() - 1])
+                    .filter(|v| v > &0)
+                    .collect(),
+            )
+        }
     };
     Some(event)
 }
@@ -565,6 +584,7 @@ enum TTYTag {
     DecMode,
     KittyImage,
     Terminfo,
+    DeviceAttrs,
 }
 
 impl fmt::Debug for TTYTag {
@@ -580,6 +600,7 @@ impl fmt::Debug for TTYTag {
             DecMode => write!(f, "DCM")?,
             KittyImage => write!(f, "KI")?,
             Terminfo => write!(f, "CAP")?,
+            DeviceAttrs => write!(f, "DA1")?,
         }
         Ok(())
     }
@@ -982,6 +1003,26 @@ mod tests {
                         .map(|k| (k.to_string(), None))
                         .collect()
                 ),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_da1() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[?62;c\x1b[?64;4c")?;
+
+        let mut result = Vec::new();
+        decoder.decode_into(&mut cursor, &mut result)?;
+        assert_eq!(
+            result,
+            vec![
+                TerminalEvent::DeviceAttrs(Some(62).into_iter().collect()),
+                TerminalEvent::DeviceAttrs(vec![64, 4].into_iter().collect()),
             ]
         );
 

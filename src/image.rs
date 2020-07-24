@@ -1240,7 +1240,7 @@ mod tests {
 
         let mut gen = ColorGen::new();
         let palette = ColorPalette::new((&mut gen).take(256).collect()).unwrap();
-        let mut colors: Vec<_> = gen.take(65536).collect();
+        let mut colors: Vec<_> = gen.take(65_536).collect();
         colors.extend(palette.colors().iter().copied());
         for (index, color) in colors.iter().enumerate() {
             let (_, find) = palette.find(*color);

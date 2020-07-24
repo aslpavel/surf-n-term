@@ -3,7 +3,13 @@ use crate::{
     render::{TerminalRenderer, TerminalSurface},
     Face, Image, Key, KeyMod, KeyName,
 };
-use std::{collections::BTreeMap, fmt, io::Write, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    io::Write,
+    sync::Arc,
+    time::Duration,
+};
 
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
@@ -246,6 +252,8 @@ pub enum TerminalEvent {
     Wake,
     // Termcap/Terminfo repsponse to XTGETTCAP
     Termcap(BTreeMap<String, Option<String>>),
+    // Terminal Attributes DA1 response
+    DeviceAttrs(BTreeSet<usize>),
     // Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
 }
