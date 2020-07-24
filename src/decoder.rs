@@ -538,7 +538,7 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             let mut id = 0; // id can not be zero according to the spec
             for (key, value) in key_value_decode(b',', iter.next()?) {
                 if key == b"i" {
-                    id = number_decode(value)?;
+                    id = number_decode(value)? as u64;
                 }
             }
             let msg = iter.next()?;

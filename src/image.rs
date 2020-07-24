@@ -218,7 +218,7 @@ impl ImageHandler for KittyImageHandler {
                         more,
                     )?;
                     if self.cache {
-                        write!(out, "i={}", id)?;
+                        write!(out, ",i={}", id)?;
                     }
                     out.write_all(b";")?;
                     out.write_all(&buf[..size])?;
@@ -246,12 +246,18 @@ impl ImageHandler for KittyImageHandler {
     }
 
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
-        // TODO:
-        //   - we should probably resend image again if it failed to draw by id (pushed out of cache)
-        //   - probably means we should track where image is supposed to be drawn or whole frame should
-        //     be re-drawn
         match event {
-            TerminalEvent::KittyImage { .. } => Ok(true),
+            TerminalEvent::KittyImage { id, error } => {
+                let filter = if !error.is_none() {
+                    // remove elemnt from cache, and propagate event to
+                    // the user which will cause the redraw
+                    self.imgs.remove(&id);
+                    false
+                } else {
+                    true
+                };
+                Ok(filter)
+            }
             _ => Ok(false),
         }
     }
