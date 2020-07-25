@@ -2,7 +2,6 @@
 #![deny(warnings)]
 
 use std::{
-    collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     ops::{
         Bound, Range, RangeBounds, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
@@ -88,7 +87,7 @@ pub trait Surface {
     where
         Self::Item: Hash,
     {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = fnv::FnvHasher::default();
         hasher.write_usize(self.height());
         hasher.write_usize(self.width());
         for item in self.iter() {

@@ -5,4 +5,4 @@ authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-
+fnv = "1.0.7"
