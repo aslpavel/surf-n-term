@@ -69,6 +69,11 @@ fn main() -> Result<(), Error> {
     term.run_render(|_term, event, mut view| -> Result<_, Error> {
         mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);
         view.draw_image_ascii(&img);
+        // It can also be rendered on supported terminals as a real image
+        // {
+        //     use surf_n_term::{Image, Surface};
+        //     view.draw_image(Image::new(img.to_owned_surf()));
+        // }
         count += 1;
 
         // quit
@@ -84,6 +89,7 @@ fn main() -> Result<(), Error> {
         mode: DecMode::AltScreen,
     })?;
     term.execute(TerminalCommand::CursorRestore)?;
+    term.poll(Some(Duration::from_millis(50)))?;
 
     Ok(())
 }
