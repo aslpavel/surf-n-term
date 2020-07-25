@@ -152,16 +152,16 @@ pub enum ColorDepth {
 }
 
 /// Color cube grid [0, 95, 135, 175, 215, 255] converted to linear RGB colors space.
-const CUBE: &[f32] = &[0.0, 0.114435, 0.242281, 0.42869, 0.679542, 1.0];
+const CUBE: &[f64] = &[0.0, 0.114435, 0.242281, 0.42869, 0.679542, 1.0];
 
 /// Grey colors available in 256 color mode converted to linear RGB color space.
-const GREYS: &[f32] = &[
+const GREYS: &[f64] = &[
     0.002428, 0.006049, 0.011612, 0.019382, 0.029557, 0.042311, 0.057805, 0.076185, 0.097587,
     0.122139, 0.14996, 0.181164, 0.215861, 0.254152, 0.296138, 0.341914, 0.391572, 0.445201,
     0.502886, 0.564712, 0.630757, 0.701102, 0.775822, 0.854993,
 ];
 
-fn nearest(v: f32, vs: &[f32]) -> usize {
+fn nearest(v: f64, vs: &[f64]) -> usize {
     match vs.binary_search_by(|c| c.partial_cmp(&v).unwrap()) {
         Ok(index) => index,
         Err(index) => {

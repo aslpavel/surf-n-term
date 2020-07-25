@@ -25,7 +25,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
         if a == 255 {
             [r, g, b]
         } else {
-            let alpha = a as f32 / 255.0;
+            let alpha = a as f64 / 255.0;
             let [r, g, b, _] = ColorLinear([0.0, 0.0, 0.0, 1.0])
                 .lerp(self, alpha)
                 .rgba_u8();
@@ -53,7 +53,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     }
 
     /// Linear interpolation between self and other colors.
-    fn lerp(self, other: impl Color, t: f32) -> Self {
+    fn lerp(self, other: impl Color, t: f64) -> Self {
         let start = self.into();
         let end = other.into();
         let color = start * (1.0 - t) + end * t;
@@ -61,9 +61,9 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     }
 
     /// Calculate luma of the color.
-    fn luma(self) -> f32 {
+    fn luma(self) -> f64 {
         let [r, g, b] = self.rgb_u8();
-        0.2126 * (r as f32 / 255.0) + 0.7152 * (g as f32 / 255.0) + 0.0722 * (b as f32 / 255.0)
+        0.2126 * (r as f64 / 255.0) + 0.7152 * (g as f64 / 255.0) + 0.0722 * (b as f64 / 255.0)
     }
 
     /// Pick color that produces the best contrast with self
@@ -80,7 +80,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
 }
 
 /// Convert SRGB color component into a Linear RGB color component.
-fn srgb_to_linear(value: f32) -> f32 {
+pub fn srgb_to_linear(value: f64) -> f64 {
     if value <= 0.04045 {
         value / 12.92
     } else {
@@ -89,7 +89,7 @@ fn srgb_to_linear(value: f32) -> f32 {
 }
 
 /// Convert Linear RGB color component into a SRGB color component.
-fn linear_to_srgb(value: f32) -> f32 {
+pub fn linear_to_srgb(value: f64) -> f64 {
     if value <= 0.0031308 {
         value * 12.92
     } else {
@@ -99,13 +99,13 @@ fn linear_to_srgb(value: f32) -> f32 {
 
 /// Color in linear RGB color space with premultiplied alpha
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct ColorLinear(pub [f32; 4]);
+pub struct ColorLinear(pub [f64; 4]);
 
-impl Mul<f32> for ColorLinear {
+impl Mul<f64> for ColorLinear {
     type Output = Self;
 
     #[inline]
-    fn mul(self, val: f32) -> Self::Output {
+    fn mul(self, val: f64) -> Self::Output {
         let Self([r, g, b, a]) = self;
         Self([r * val, g * val, b * val, a * val])
     }
@@ -123,11 +123,11 @@ impl Add<Self> for ColorLinear {
 }
 
 impl ColorLinear {
-    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+    pub fn new(r: f64, g: f64, b: f64, a: f64) -> Self {
         Self([r, g, b, a])
     }
 
-    pub fn distance(&self, other: &Self) -> f32 {
+    pub fn distance(&self, other: &Self) -> f64 {
         let Self([r0, g0, b0, _]) = *self;
         let Self([r1, g1, b1, _]) = *other;
         ((r0 - r1).powi(2) + (g0 - g1).powi(2) + (b0 - b1).powi(2)).sqrt()
@@ -154,7 +154,7 @@ impl RGBA {
         RGBA([r, g, b, a])
     }
 
-    pub fn with_alpha(self, alpha: f32) -> Self {
+    pub fn with_alpha(self, alpha: f64) -> Self {
         let Self([r, g, b, _]) = self;
         let a = (clamp(alpha, 0.0, 1.0) * 255.0).round() as u8;
         Self([r, g, b, a])
@@ -183,10 +183,10 @@ impl Color for RGBA {
 impl From<RGBA> for ColorLinear {
     fn from(color: RGBA) -> Self {
         let [r, g, b, a] = color.rgba_u8();
-        let a = (a as f32) / 255.0;
-        let r = srgb_to_linear((r as f32) / 255.0) * a;
-        let g = srgb_to_linear((g as f32) / 255.0) * a;
-        let b = srgb_to_linear((b as f32) / 255.0) * a;
+        let a = (a as f64) / 255.0;
+        let r = srgb_to_linear((r as f64) / 255.0) * a;
+        let g = srgb_to_linear((g as f64) / 255.0) * a;
+        let b = srgb_to_linear((b as f64) / 255.0) * a;
         ColorLinear([r, g, b, a])
     }
 }
@@ -194,13 +194,13 @@ impl From<RGBA> for ColorLinear {
 impl From<ColorLinear> for RGBA {
     fn from(color: ColorLinear) -> Self {
         let ColorLinear([r, g, b, a]) = color;
-        if a < std::f32::EPSILON {
+        if a < std::f64::EPSILON {
             Self([0, 0, 0, 0])
         } else {
             let a = clamp(a, 0.0, 1.0);
-            let r = (linear_to_srgb(clamp(r / a, 0.0, 1.0)) * 255.0) as u8;
-            let g = (linear_to_srgb(clamp(g / a, 0.0, 1.0)) * 255.0) as u8;
-            let b = (linear_to_srgb(clamp(b / a, 0.0, 1.0)) * 255.0) as u8;
+            let r = (linear_to_srgb(clamp(r / a, 0.0, 1.0)) * 255.0).round() as u8;
+            let g = (linear_to_srgb(clamp(g / a, 0.0, 1.0)) * 255.0).round() as u8;
+            let b = (linear_to_srgb(clamp(b / a, 0.0, 1.0)) * 255.0).round() as u8;
             let a = (a * 255.0) as u8;
             Self([r, g, b, a])
         }

@@ -263,11 +263,15 @@ impl ImageHandler for KittyImageHandler {
     }
 }
 
-pub struct SixelImageHandler;
+pub struct SixelImageHandler {
+    imgs: HashMap<u64, Vec<u8>>,
+}
 
 impl SixelImageHandler {
     pub fn new() -> Self {
-        SixelImageHandler
+        SixelImageHandler {
+            imgs: Default::default(),
+        }
     }
 }
 
@@ -277,6 +281,10 @@ impl ImageHandler for SixelImageHandler {
     }
 
     fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+        if let Some(sixel_image) = self.imgs.get(&img.hash()) {
+            out.write_all(sixel_image.as_slice())?;
+            return Ok(());
+        }
         // TODO:
         //   - correctly blend with background
         //   - use background as default color in extracted sixel
@@ -285,16 +293,18 @@ impl ImageHandler for SixelImageHandler {
             Some(qimg) => qimg,
         };
 
+        let mut sixel_image = Vec::new();
+
         // header
-        out.write_all(b"\x1bPq")?;
-        write!(out, "1;1;{};{}", img.width(), img.height())?;
+        sixel_image.write_all(b"\x1bPq")?;
+        write!(sixel_image, "1;1;{};{}", img.width(), img.height())?;
         // palette
         for (index, color) in palette.colors().iter().enumerate() {
             let [red, green, blue] = color.rgb_u8();
             let red = (red as f32 / 2.55).round() as u8;
             let green = (green as f32 / 2.55).round() as u8;
             let blue = (blue as f32 / 2.55).round() as u8;
-            write!(out, "#{};2;{};{};{}", index, red, green, blue)?;
+            write!(sixel_image, "#{};2;{};{};{}", index, red, green, blue)?;
         }
 
         // color_index -> [(offset, sixel_code)]
@@ -329,29 +339,32 @@ impl ImageHandler for SixelImageHandler {
             }
             // render sixel line
             for (color, line) in lines.iter() {
-                write!(out, "#{}", color)?;
+                write!(sixel_image, "#{}", color)?;
                 let mut offset = 0;
                 for (col, code) in line.iter() {
                     let shift = col - offset;
                     if shift > 0 {
                         if shift < 4 {
                             for _ in 0..shift {
-                                out.write_all(b"?")?;
+                                sixel_image.write_all(b"?")?;
                             }
                         } else {
-                            write!(out, "!{}?", shift)?;
+                            write!(sixel_image, "!{}?", shift)?;
                         }
                     }
                     // TODO: compress identical codes with `!{count}{code}`
-                    out.write_all(&[*code])?;
+                    sixel_image.write_all(&[*code])?;
                     offset = col + 1;
                 }
-                out.write_all(b"$")?;
+                sixel_image.write_all(b"$")?;
             }
-            out.write_all(b"-")?;
+            sixel_image.write_all(b"-")?;
         }
         // EOF sixel
-        out.write_all(b"\x1b\\")?;
+        sixel_image.write_all(b"\x1b\\")?;
+
+        out.write_all(sixel_image.as_slice())?;
+        self.imgs.insert(img.hash(), sixel_image);
 
         Ok(())
     }
@@ -955,7 +968,7 @@ impl KDTree {
         Self { nodes }
     }
 
-    /// find nearest neigh neighbour color (euclidian distance) in the palette
+    /// find nearest neighbour color (euclidian distance) in the palette
     pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(rgb: [u8; 3], node: &KDNode) -> i32 {
             let [r0, g0, b0] = rgb;
