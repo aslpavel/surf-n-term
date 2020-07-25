@@ -33,7 +33,7 @@ fn mandelbrot(
     img.fill_with(|row, col, _| {
         let x = lerp(&xs, (col as f64 + 0.5) / width);
         let y = lerp(&ys, (row as f64 + 0.5) / height);
-        let ratio = mandelbrot_at(x, y, count) as f32 / (count as f32);
+        let ratio = mandelbrot_at(x, y, count) as f64 / (count as f64);
         colors.start.lerp(colors.end, ratio).into()
     })
 }
