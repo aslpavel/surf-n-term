@@ -534,6 +534,9 @@ dependencies = [
 [[package]]
 name = "surface"
 version = "0.1.0"
+dependencies = [
+ "fnv",
+]
 
 [[package]]
 name = "syn"

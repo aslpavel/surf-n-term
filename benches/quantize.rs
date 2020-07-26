@@ -1,11 +1,15 @@
 use criterion::{
-    criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode, Throughput,
+    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode, Throughput,
 };
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read},
     path::Path,
     time::Duration,
+};
+use surf_n_term::{
+    color::{Color, ColorLinear},
+    common::clamp,
 };
 use surf_n_term::{ColorPalette, Image, Surface, SurfaceOwned, RGBA};
 
@@ -69,9 +73,74 @@ fn palette_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
+fn srgb_to_linear(color: RGBA) -> ColorLinear {
+    fn s2l(x: f64) -> f64 {
+        if x <= 0.04045 {
+            x / 12.92
+        } else {
+            ((x + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    let [r, g, b, a] = color.rgba_u8();
+    let a = (a as f64) / 255.0;
+    let r = s2l((r as f64) / 255.0) * a;
+    let g = s2l((g as f64) / 255.0) * a;
+    let b = s2l((b as f64) / 255.0) * a;
+    ColorLinear([r, g, b, a])
+}
+
+fn linear_to_srgb(color: ColorLinear) -> RGBA {
+    fn l2s(x: f64) -> f64 {
+        if x <= 0.0031308 {
+            x * 12.92
+        } else {
+            1.055 * x.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    let ColorLinear([r, g, b, a]) = color;
+    if a < std::f64::EPSILON {
+        RGBA([0, 0, 0, 0])
+    } else {
+        let a = clamp(a, 0.0, 1.0);
+        let r = (l2s(r / a) * 255.0).round() as u8;
+        let g = (l2s(g / a) * 255.0).round() as u8;
+        let b = (l2s(b / a) * 255.0).round() as u8;
+        let a = (a * 255.0) as u8;
+        RGBA([r, g, b, a])
+    }
+}
+
+fn srgb_and_linear_benchmark(c: &mut Criterion) {
+    let colors: Vec<_> = RGBA::random().take(1024).collect();
+
+    for color in colors.iter() {
+        assert_eq!(*color, linear_to_srgb(srgb_to_linear(*color)));
+    }
+
+    let mut group = c.benchmark_group("srgb_and_linear");
+    group.sampling_mode(SamplingMode::Flat);
+    group.throughput(Throughput::Elements(1024 as u64));
+    group.bench_function("naive", |b| {
+        b.iter(|| {
+            for color in colors.iter() {
+                black_box(linear_to_srgb(black_box(srgb_to_linear(*color))));
+            }
+        })
+    });
+    group.bench_function("fast", |b| {
+        b.iter(|| {
+            for color in colors.iter() {
+                black_box(RGBA::from(black_box(ColorLinear::from(*color))));
+            }
+        })
+    });
+}
+
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(30).warm_up_time(Duration::new(2, 0));
-    targets = palette_benchmark,
+    config = Criterion::default(); // .sample_size(30).warm_up_time(Duration::new(2, 0));
+    targets = palette_benchmark, srgb_and_linear_benchmark,
 );
 criterion_main!(benches);

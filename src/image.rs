@@ -1237,30 +1237,6 @@ mod tests {
         Ok(())
     }
 
-    struct ColorGen {
-        rnd: Rnd,
-    }
-
-    impl ColorGen {
-        fn new() -> Self {
-            Self { rnd: Rnd::new(0) }
-        }
-    }
-
-    impl Iterator for ColorGen {
-        type Item = RGBA;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            let value = self.rnd.next_u32();
-            Some(RGBA::new(
-                (value & 0xff) as u8,
-                ((value >> 8) & 0xff) as u8,
-                ((value >> 16) & 0xff) as u8,
-                255,
-            ))
-        }
-    }
-
     #[test]
     pub fn test_palette() {
         // make sure that k-d tree can actually find nearest neighbor
@@ -1272,7 +1248,7 @@ mod tests {
                 + (b0 as i32 - b1 as i32).pow(2)
         }
 
-        let mut gen = ColorGen::new();
+        let mut gen = RGBA::random();
         let palette = ColorPalette::new((&mut gen).take(256).collect()).unwrap();
         let mut colors: Vec<_> = gen.take(65_536).collect();
         colors.extend(palette.colors().iter().copied());

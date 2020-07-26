@@ -10,7 +10,7 @@ pub fn small_decoder_benchmark(c: &mut Criterion) {
     cursor.get_mut().write_all(SMALL_SET.as_ref()).unwrap();
     let count = decoder.decode_into(&mut cursor, &mut Vec::new()).unwrap();
 
-    let mut group = c.benchmark_group("small");
+    let mut group = c.benchmark_group("small_decoder");
     group.throughput(Throughput::Elements(count as u64));
     group.bench_function("decode", |b| {
         b.iter(|| {
