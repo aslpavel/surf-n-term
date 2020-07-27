@@ -10,7 +10,7 @@ use crate::{
     },
     DecMode, ImageHandler,
 };
-use std::os::unix::io::{AsRawFd, IntoRawFd};
+use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
     fs::File,
@@ -83,12 +83,11 @@ impl UnixTerminal {
 
         // self-pipe trick to implement waker
         let (waker_read, waker_write) = nix::UnixStream::pair()?;
-        let waker_handle = IOHandle::new(waker_write.into_raw_fd());
-        waker_handle.set_blocking(false)?;
+        set_blocking(waker_write.as_raw_fd(), false)?;
         let waker = TerminalWaker::new(move || {
             const WAKE: &[u8] = b"\x00";
-            // use write syscall instead of locking so it would be safe to use in signal handler
-            match nix::write(waker_handle.as_raw_fd(), WAKE) {
+            // use write syscall instead of locking so it would be safe to use in a signal handler
+            match nix::write(waker_write.as_raw_fd(), WAKE) {
                 Ok(_) => Ok(()),
                 Err(_) => Err(std::io::Error::last_os_error().into()),
             }
