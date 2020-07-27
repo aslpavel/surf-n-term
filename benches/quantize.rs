@@ -5,7 +5,6 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Read},
     path::Path,
-    time::Duration,
 };
 use surf_n_term::{
     color::{Color, ColorLinear},

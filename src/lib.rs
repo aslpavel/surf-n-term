@@ -1,6 +1,6 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::reversed_empty_ranges)]
-// #![deny(warnings)]
+#![deny(warnings)]
 
 pub mod automata;
 pub mod color;

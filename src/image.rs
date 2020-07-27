@@ -997,6 +997,7 @@ impl KDTree {
                     }
                 }
             };
+            // check if the other branch is closer then best match we have found so far.
             let other_dist = (target[node.dim] as i32 - node.color[node.dim] as i32).pow(2);
             if other_dist >= guess_dist {
                 return (guess, guess_dist);
