@@ -321,7 +321,7 @@ impl<T: ListItems> List<T> {
         let items: Vec<_> = (self.offset..self.offset + surf.height())
             .filter_map(|index| {
                 let item = self.items.get(index)?;
-                let height = item.length_hint().unwrap_or(0) / width + 1;
+                let height = item.height_hint(width).unwrap_or(1);
                 Some((index, height, item))
             })
             .collect();

@@ -241,8 +241,8 @@ where
 pub trait TerminalWritable {
     fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()>;
 
-    /// Approximate number of cells taken by formated content
-    fn length_hint(&self) -> Option<usize> {
+    /// Estimate height occupied given with of the available surface
+    fn height_hint(&self, _width: usize) -> Option<usize> {
         None
     }
 }
@@ -255,8 +255,8 @@ where
         (*self).fmt(writer)
     }
 
-    fn length_hint(&self) -> Option<usize> {
-        (*self).length_hint()
+    fn height_hint(&self, width: usize) -> Option<usize> {
+        (*self).height_hint(width)
     }
 }
 
