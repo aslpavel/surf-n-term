@@ -262,10 +262,10 @@ impl<T: ListItems> List<T> {
         &self.items
     }
 
-    pub fn items_set(&mut self, items: T) {
+    pub fn items_set(&mut self, items: T) -> T {
         self.offset = 0;
         self.cursor = 0;
-        self.items = items
+        std::mem::replace(&mut self.items, items)
     }
 
     pub fn current(&self) -> Option<T::Item> {
