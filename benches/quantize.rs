@@ -38,9 +38,10 @@ fn load_ppm(path: impl AsRef<Path>) -> Result<Image, Box<dyn std::error::Error>>
 fn palette_benchmark(c: &mut Criterion) {
     let img = load_ppm("benches/flamingo.ppm").expect("failed to load flamingo.ppm");
     let img_colors: Vec<_> = img.iter().copied().collect();
-    let p128 = ColorPalette::from_image(&img, 128).unwrap();
-    let p256 = ColorPalette::from_image(&img, 256).unwrap();
-    let p512 = ColorPalette::from_image(&img, 512).unwrap();
+    let bg = RGBA::new(0, 0, 0, 255);
+    let p128 = ColorPalette::from_image(&img, 128, bg).unwrap();
+    let p256 = ColorPalette::from_image(&img, 256, bg).unwrap();
+    let p512 = ColorPalette::from_image(&img, 512, bg).unwrap();
 
     let mut group = c.benchmark_group("palette");
     group.sampling_mode(SamplingMode::Flat);

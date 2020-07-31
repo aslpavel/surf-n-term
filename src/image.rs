@@ -1,8 +1,8 @@
 use crate::{
     common::{clamp, Rnd},
     encoder::base64_encode,
-    Color, Error, Position, Shape, Surface, SurfaceMut, SurfaceOwned, Terminal, TerminalEvent,
-    RGBA,
+    Blend, Color, Error, Position, Shape, Surface, SurfaceMut, SurfaceOwned, Terminal,
+    TerminalEvent, RGBA,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -42,8 +42,10 @@ impl Image {
         &self,
         palette_size: usize,
         dither: bool,
+        bg: Option<RGBA>,
     ) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
-        let palette = ColorPalette::from_image(self, palette_size)?;
+        let bg = bg.unwrap_or(RGBA::new(0, 0, 0, 255));
+        let palette = ColorPalette::from_image(self, palette_size, bg)?;
         let mut qimg = SurfaceOwned::new(self.height(), self.width());
 
         // quantize and dither
@@ -63,6 +65,9 @@ impl Image {
             // qunatize and spread the error
             for col in 0..self.width() {
                 let mut color = self.get(row, col).unwrap().clone();
+                if color.rgba_u8()[3] < 255 {
+                    color = bg.blend(color, Blend::Over);
+                }
                 if dither {
                     color = errors[col + 1].add(color); // account for error
                 }
@@ -143,18 +148,31 @@ pub fn image_handler_detect(
     // drain terminal
     while let Some(_) = term.poll(Some(Duration::new(0, 0)))? {}
     // Send kitty query and DA1 request
-    term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?;
-    term.write_all(b"\x1b[c")?;
-    let handler: Box<dyn ImageHandler> = match term.poll(Some(Duration::from_millis(50)))? {
-        Some(TerminalEvent::KittyImage { .. }) => Box::new(KittyImageHandler::new(true)),
-        Some(TerminalEvent::DeviceAttrs(attrs)) if attrs.contains(&4) => {
-            Box::new(SixelImageHandler::new())
+    term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?; // kitty image
+    term.write_all(b"\x1b]11;?\x1b\\")?; // background color
+    term.write_all(b"\x1b[c")?; // we expect to see response at least for this one or there will be 1s deley
+    let mut handler: Option<Box<dyn ImageHandler>> = None;
+    let mut bg: Option<RGBA> = None;
+    for _ in 0..3 {
+        match term.poll(Some(Duration::from_secs(1)))? {
+            Some(TerminalEvent::KittyImage { .. }) => {
+                handler.replace(Box::new(KittyImageHandler::new(true)));
+            }
+            Some(TerminalEvent::DeviceAttrs(attrs)) => {
+                if handler.is_none() && attrs.contains(&4) {
+                    handler.replace(Box::new(SixelImageHandler::new(bg)));
+                }
+                break;
+            }
+            Some(TerminalEvent::Color { color, .. }) => {
+                bg.replace(color);
+            }
+            _ => return Ok(None),
         }
-        _ => return Ok(None),
-    };
+    }
     // drain terminal
-    term.poll(Some(Duration::new(0, 0)))?;
-    Ok(Some(handler))
+    while let Some(_) = term.poll(Some(Duration::new(0, 0)))? {}
+    Ok(handler)
 }
 
 /// Image handler for kitty graphic protocol
@@ -266,12 +284,14 @@ impl ImageHandler for KittyImageHandler {
 
 pub struct SixelImageHandler {
     imgs: HashMap<u64, Vec<u8>>,
+    bg: Option<RGBA>,
 }
 
 impl SixelImageHandler {
-    pub fn new() -> Self {
+    pub fn new(bg: Option<RGBA>) -> Self {
         SixelImageHandler {
             imgs: Default::default(),
+            bg,
         }
     }
 }
@@ -289,7 +309,7 @@ impl ImageHandler for SixelImageHandler {
         // TODO:
         //   - correctly blend with background
         //   - use background as default color in extracted sixel
-        let (palette, qimg) = match img.quantize(256, true) {
+        let (palette, qimg) = match img.quantize(256, true, self.bg) {
             None => return Ok(()),
             Some(qimg) => qimg,
         };
@@ -1080,19 +1100,31 @@ impl ColorPalette {
     }
 
     /// Extract palette from image using `OcTree`
-    pub fn from_image(img: impl Surface<Item = RGBA>, palette_size: usize) -> Option<Self> {
+    pub fn from_image(
+        img: impl Surface<Item = RGBA>,
+        palette_size: usize,
+        bg: RGBA,
+    ) -> Option<Self> {
+        fn blend(bg: RGBA, color: RGBA) -> RGBA {
+            if color.rgba_u8()[3] < 255 {
+                bg.blend(color, Blend::Over)
+            } else {
+                color
+            }
+        }
+
         if img.is_empty() {
             return None;
         }
         let sample: u32 = (img.height() * img.width() / (palette_size * 100)) as u32;
         let mut octree: OcTree = if sample < 2 {
-            img.iter().copied().collect()
+            img.iter().map(|c| blend(bg, *c)).collect()
         } else {
             let mut octree = OcTree::new();
             let mut rnd = Rnd::new(5);
             let mut colors = img.iter().copied();
             while let Some(color) = colors.nth((rnd.next_u32() % sample) as usize) {
-                octree.insert(color);
+                octree.insert(blend(bg, color));
             }
             octree
         };
