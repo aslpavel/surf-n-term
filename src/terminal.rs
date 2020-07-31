@@ -111,7 +111,10 @@ pub enum TerminalCommand {
     /// Set current face (foreground/background colors and text attributes)
     Face(Face),
     /// Control specified DEC mode (DECSET|DECRST)
-    DecModeSet { enable: bool, mode: DecMode },
+    DecModeSet {
+        enable: bool,
+        mode: DecMode,
+    },
     /// Report specified DEC mode (DECRQM)
     DecModeGet(DecMode),
     /// Request current cursor postion
@@ -145,6 +148,8 @@ pub enum TerminalCommand {
         name: TerminalColor,
         color: Option<RGBA>,
     },
+    // Set terminal title
+    Title(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

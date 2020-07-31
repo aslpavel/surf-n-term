@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "Co".to_string(),
     ]))?;
     term.write_all(b"\x1b[14t")?;
+    term.execute(TerminalCommand::Title("events test title".to_string()))?;
 
     // read terminal events
     let timeout = Duration::from_secs(10);

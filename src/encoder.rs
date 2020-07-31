@@ -121,6 +121,9 @@ impl Encoder for TTYEncoder {
                 }
                 write!(out, "\x1b\\")?;
             }
+            Title(title) => {
+                write!(out, "\x1b]0;{}\x1b\\", title)?;
+            }
         }
 
         Ok(())
