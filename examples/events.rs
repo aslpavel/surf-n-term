@@ -1,6 +1,6 @@
-use std::{boxed::Box, error::Error, time::Duration};
+use std::{boxed::Box, error::Error, io::Write, time::Duration};
 use surf_n_term::{
-    DecMode, Key, KeyName, SystemTerminal, Terminal, TerminalCommand, TerminalEvent,
+    DecMode, Key, KeyName, SystemTerminal, Terminal, TerminalColor, TerminalCommand, TerminalEvent,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -19,6 +19,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     term.execute(DecModeGet(DecMode::MouseMotions))?;
     term.execute(DecModeGet(DecMode::AltScreen))?;
     term.execute(DecModeGet(DecMode::KittyKeyboard))?;
+    term.execute(Color {
+        name: TerminalColor::Palette(1),
+        color: None,
+    })?;
     term.execute(CursorGet)?;
 
     // enable mouse
@@ -35,7 +39,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         mode: DecMode::MouseSGR,
     })?;
 
-    use std::io::Write;
     term.execute(TerminalCommand::Termcap(vec![
         "bel".to_string(),
         "smcup".to_string(),

@@ -1,4 +1,4 @@
-use crate::{error::Error, Color, ColorLinear, FaceAttrs, TerminalCommand};
+use crate::{error::Error, Color, ColorLinear, FaceAttrs, TerminalColor, TerminalCommand};
 use std::{cmp::Ordering, io::Write};
 
 pub trait Encoder {
@@ -105,6 +105,19 @@ impl Encoder for TTYEncoder {
                     for b in cap.as_bytes() {
                         write!(out, "{:x}", b)?;
                     }
+                }
+                write!(out, "\x1b\\")?;
+            }
+            Color { name, color } => {
+                write!(out, "\x1b]")?;
+                match name {
+                    TerminalColor::Background => write!(out, "11;")?,
+                    TerminalColor::Foreground => write!(out, "10;")?,
+                    TerminalColor::Palette(index) => write!(out, "4;{};", index)?,
+                }
+                match color {
+                    Some(color) => write!(out, "{}", color)?,
+                    None => write!(out, "?")?,
                 }
                 write!(out, "\x1b\\")?;
             }

@@ -28,8 +28,8 @@ pub use surface::{
     SurfaceOwnedView, SurfaceView,
 };
 pub use terminal::{
-    DecMode, DecModeStatus, Position, Terminal, TerminalAction, TerminalCommand, TerminalEvent,
-    TerminalWaker,
+    DecMode, DecModeStatus, Position, Terminal, TerminalAction, TerminalColor, TerminalCommand,
+    TerminalEvent, TerminalWaker,
 };
 
 pub type SystemTerminal = unix::UnixTerminal;

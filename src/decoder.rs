@@ -1,7 +1,7 @@
 use crate::{
     automata::{DFAState, DFA, NFA},
     error::Error,
-    terminal::{DecModeStatus, Mouse, TerminalEvent, TerminalSize},
+    terminal::{DecModeStatus, Mouse, TerminalColor, TerminalEvent, TerminalSize},
     Key, KeyMod, KeyName,
 };
 use lazy_static::lazy_static;
@@ -423,14 +423,20 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
             // success
             NFA::sequence(vec![
                 NFA::from("\x1bP1+r"),
-                key_value.clone(),
-                NFA::sequence(vec![NFA::from(";"), key_value]).many(),
+                NFA::sequence(vec![
+                    key_value.clone(),
+                    NFA::sequence(vec![NFA::from(";"), key_value]).many(),
+                ])
+                .optional(),
             ]),
             // failure
             NFA::sequence(vec![
                 NFA::from("\x1bP0+r"),
-                hex.clone().some(),
-                NFA::sequence(vec![NFA::from(";"), hex.some()]).many(),
+                NFA::sequence(vec![
+                    hex.clone().some(),
+                    NFA::sequence(vec![NFA::from(";"), hex.some()]).many(),
+                ])
+                .optional(),
             ]),
         ]) + NFA::from("\x1b\\")
     };
@@ -445,6 +451,19 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
             NFA::from("c"),
         ])
         .tag(TTYTag::DeviceAttrs),
+    );
+
+    // OSC response
+    // "\x1b]<number>;.*\x1b\\"
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1b]"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::predicate(|c| c != b'\x1b' && c != b'\x07').some(),
+            (NFA::from("\x1b\\") | NFA::from("\x07")),
+        ])
+        .tag(TTYTag::OperatingSystemControl),
     );
 
     NFA::choice(cmds).compile()
@@ -574,6 +593,24 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
                     .collect(),
             )
         }
+        OperatingSystemControl => {
+            // "\x1b]<number>;.*(\x1b\\|\x07)"
+            let data = if data[data.len() - 1] == b'\x07' {
+                &data[2..data.len() - 1]
+            } else {
+                &data[2..data.len() - 2]
+            };
+            let mut args = data.split(|c| *c == b';');
+            let id = number_decode(args.next()?)?;
+            let name = match id {
+                10 => TerminalColor::Foreground,
+                11 => TerminalColor::Background,
+                4 => TerminalColor::Palette(number_decode(args.next()?)?),
+                _ => return None,
+            };
+            let color = std::str::from_utf8(args.next()?).ok()?.parse().ok()?;
+            TerminalEvent::Color { name, color }
+        }
     };
     Some(event)
 }
@@ -590,6 +627,7 @@ enum TTYTag {
     KittyImage,
     Terminfo,
     DeviceAttrs,
+    OperatingSystemControl,
 }
 
 impl fmt::Debug for TTYTag {
@@ -606,6 +644,7 @@ impl fmt::Debug for TTYTag {
             KittyImage => write!(f, "KI")?,
             Terminfo => write!(f, "CAP")?,
             DeviceAttrs => write!(f, "DA1")?,
+            OperatingSystemControl => write!(f, "OSC")?,
         }
         Ok(())
     }
@@ -1028,6 +1067,35 @@ mod tests {
             vec![
                 TerminalEvent::DeviceAttrs(Some(62).into_iter().collect()),
                 TerminalEvent::DeviceAttrs(vec![64, 4].into_iter().collect()),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_osc() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(
+            cursor.get_mut(),
+            "\x1b]4;1;rgb:cc/24/1d\x1b\\\x1b]10;#ebdbb2\x07"
+        )?;
+
+        let mut result = Vec::new();
+        decoder.decode_into(&mut cursor, &mut result)?;
+        assert_eq!(
+            result,
+            vec![
+                TerminalEvent::Color {
+                    name: TerminalColor::Palette(1),
+                    color: "#cc241d".parse()?,
+                },
+                TerminalEvent::Color {
+                    name: TerminalColor::Foreground,
+                    color: "#ebdbb2".parse()?,
+                }
             ]
         );
 

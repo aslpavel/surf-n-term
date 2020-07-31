@@ -180,15 +180,37 @@ impl RGBA {
 
     pub fn from_str_opt(rgba: &str) -> Option<Self> {
         let rgba = rgba.trim_matches('"');
-        if rgba.len() < 7 || !rgba.starts_with('#') || rgba.len() > 9 {
-            return None;
+        if rgba.starts_with('#') && (rgba.len() == 7 || rgba.len() == 9) {
+            // #RRGGBB(AA)
+            let mut hex = crate::decoder::hex_decode(rgba[1..].as_bytes());
+            let red = hex.next()?;
+            let green = hex.next()?;
+            let blue = hex.next()?;
+            let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
+            Some(Self([red, green, blue, alpha]))
+        } else if rgba.starts_with("rgb:") {
+            // rgb:r{1-4}/g{1-4}/b{1-4}
+            // This format is used when querying colors with OCS,
+            // refrence [xparsecolor](https://linux.die.net/man/3/xparsecolor)
+            fn parse_component(string: &str) -> Option<u8> {
+                let value = usize::from_str_radix(string, 16).ok()?;
+                let value = match string.len() {
+                    4 => value / 256,
+                    3 => value / 16,
+                    2 => value,
+                    1 => value * 17,
+                    _ => return None,
+                };
+                Some(clamp(value, 0, 255) as u8)
+            }
+            let mut iter = rgba[4..].split('/');
+            let red = parse_component(iter.next()?)?;
+            let green = parse_component(iter.next()?)?;
+            let blue = parse_component(iter.next()?)?;
+            Some(Self([red, green, blue, 255]))
+        } else {
+            None
         }
-        let mut hex = crate::decoder::hex_decode(rgba[1..].as_bytes());
-        let red = hex.next()?;
-        let green = hex.next()?;
-        let blue = hex.next()?;
-        let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
-        Some(Self([red, green, blue, alpha]))
     }
 }
 
@@ -547,6 +569,10 @@ mod tests {
     #[test]
     fn test_parse_color() -> Result<(), Error> {
         assert_eq!("#d3869b".parse::<RGBA>()?, RGBA([211, 134, 155, 255]));
+        assert_eq!(
+            "rgb:d3d3/86/9b".parse::<RGBA>()?,
+            RGBA([211, 134, 155, 255])
+        );
         assert_eq!("#b8bb2680".parse::<RGBA>()?, RGBA([184, 187, 38, 128]));
         Ok(())
     }

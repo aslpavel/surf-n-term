@@ -22,6 +22,7 @@ pub struct Image {
 }
 
 impl Image {
+    /// Create new image from the RGBA surface
     pub fn new(surf: impl Surface<Item = RGBA> + 'static) -> Self {
         Self {
             hash: surf.hash(),
@@ -650,7 +651,7 @@ impl OcTree {
     ///
     /// NOTE:
     ///  - to get correct palette index call build_palette first.
-    ///  - prefer KD-Tree as it produces better result, and can not return None.
+    ///  - prefer `ColorPalette::find` as it produces better result, and can not return None.
     pub fn find(&self, color: RGBA) -> Option<(usize, RGBA)> {
         use OcTreeNode::*;
         let mut tree = self;
@@ -1068,6 +1069,7 @@ pub struct ColorPalette {
 }
 
 impl ColorPalette {
+    /// Create new palette for the list of colors
     pub fn new(colors: Vec<RGBA>) -> Option<Self> {
         if colors.is_empty() {
             None
@@ -1098,22 +1100,32 @@ impl ColorPalette {
         Self::new(octree.build_palette())
     }
 
+    // Number of color in the palette
     pub fn size(&self) -> usize {
         self.colors.len()
     }
 
+    /// Get color by the index
     pub fn get(&self, index: usize) -> RGBA {
         self.colors[index]
     }
 
+    /// List of colors available in the palette
     pub fn colors(&self) -> &[RGBA] {
         &self.colors
     }
 
+    /// Find nearest color in the palette
+    ///
+    /// Returns index of the color and color itself
     pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         self.kdtree.find(color)
     }
 
+    /// Find nearest color in the palete by going over all colors
+    ///
+    /// This is a slower version of the find method, used only for testing
+    /// find correctness and speed.
     pub fn find_naive(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
             let [r0, g0, b0] = c0.rgb_u8();

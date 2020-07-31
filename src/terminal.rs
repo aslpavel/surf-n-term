@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     render::{TerminalRenderer, TerminalSurface},
-    Face, Image, Key, KeyMod, KeyName,
+    Face, Image, Key, KeyMod, KeyName, RGBA,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -140,6 +140,18 @@ pub enum TerminalCommand {
     ImageErase(Position),
     /// Request Termcap/Terminfo XTGETTCAP
     Termcap(Vec<String>),
+    /// Set or query terminal colors
+    Color {
+        name: TerminalColor,
+        color: Option<RGBA>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TerminalColor {
+    Background,
+    Foreground,
+    Palette(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -256,6 +268,10 @@ pub enum TerminalEvent {
     DeviceAttrs(BTreeSet<usize>),
     // Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
+    Color {
+        name: TerminalColor,
+        color: RGBA,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
