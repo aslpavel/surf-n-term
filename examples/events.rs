@@ -23,6 +23,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         name: TerminalColor::Palette(1),
         color: None,
     })?;
+    term.execute(Color {
+        name: TerminalColor::Foreground,
+        color: None,
+    })?;
     term.execute(CursorGet)?;
 
     // enable mouse
@@ -45,7 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "TN".to_string(),
         "Co".to_string(),
     ]))?;
-    term.write_all(b"\x1b[14t")?;
+    term.write_all(b"\x1b[14t\x1b[18t")?;
     term.execute(TerminalCommand::Title("events test title".to_string()))?;
 
     // read terminal events

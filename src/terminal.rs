@@ -280,19 +280,41 @@ pub enum TerminalEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TerminalSize {
-    pub width: usize,
+pub struct Size {
     pub height: usize,
-    pub width_pixels: usize,
-    pub height_pixels: usize,
+    pub width: usize,
+}
+
+impl Size {
+    pub fn empty() -> Self {
+        Self::new(0, 0)
+    }
+
+    pub fn new(height: usize, width: usize) -> Self {
+        Self { height, width }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TerminalSize {
+    pub cells: Size,
+    pub pixels: Size,
 }
 
 impl TerminalSize {
-    pub fn cell_size(&self) -> (usize, usize) {
-        (
-            self.height_pixels / self.height,
-            self.width_pixels / self.width,
-        )
+    pub fn cell_size(&self) -> Size {
+        Size {
+            height: self.pixels.height / self.cells.height,
+            width: self.pixels.width / self.cells.width,
+        }
+    }
+
+    pub fn cells_in_pixels(&self, cells: Size) -> Size {
+        let cell_size = self.cell_size();
+        Size {
+            height: cells.height * cell_size.height,
+            width: cells.width * cell_size.width,
+        }
     }
 }
 

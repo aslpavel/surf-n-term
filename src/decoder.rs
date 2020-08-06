@@ -1,7 +1,7 @@
 use crate::{
     automata::{DFAState, DFA, NFA},
     error::Error,
-    terminal::{DecModeStatus, Mouse, TerminalColor, TerminalEvent, TerminalSize},
+    terminal::{DecModeStatus, Mouse, Size, TerminalColor, TerminalEvent, TerminalSize},
     Key, KeyMod, KeyName,
 };
 use lazy_static::lazy_static;
@@ -498,17 +498,19 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             let width = nums.next()?;
             if tag == &TerminalSizeCells {
                 TerminalEvent::Size(TerminalSize {
-                    height,
-                    width,
-                    width_pixels: 0,
-                    height_pixels: 0,
+                    cells: Size { height, width },
+                    pixels: Size {
+                        height: 0,
+                        width: 0,
+                    },
                 })
             } else {
                 TerminalEvent::Size(TerminalSize {
-                    height: 0,
-                    width: 0,
-                    width_pixels: width,
-                    height_pixels: height,
+                    cells: Size {
+                        height: 0,
+                        width: 0,
+                    },
+                    pixels: Size { width, height },
                 })
             }
         }
@@ -820,10 +822,14 @@ mod tests {
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::Size(TerminalSize {
-                width: 0,
-                height: 0,
-                width_pixels: 1482,
-                height_pixels: 3104,
+                cells: Size {
+                    width: 0,
+                    height: 0,
+                },
+                pixels: Size {
+                    width: 1482,
+                    height: 3104,
+                }
             })),
         );
 
@@ -831,10 +837,14 @@ mod tests {
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::Size(TerminalSize {
-                width: 202,
-                height: 101,
-                width_pixels: 0,
-                height_pixels: 0,
+                cells: Size {
+                    width: 202,
+                    height: 101,
+                },
+                pixels: Size {
+                    width: 0,
+                    height: 0,
+                }
             })),
         );
 

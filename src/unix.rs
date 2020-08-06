@@ -6,7 +6,7 @@ use crate::{
     error::Error,
     image::image_handler_detect,
     terminal::{
-        Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
+        Size, Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
     },
     DecMode, ImageHandler,
 };
@@ -320,10 +320,14 @@ impl Terminal for UnixTerminal {
                 return Err(nix::Error::last().into());
             }
             Ok(TerminalSize {
-                height: winsize.ws_row as usize,
-                width: winsize.ws_col as usize,
-                height_pixels: winsize.ws_ypixel as usize,
-                width_pixels: winsize.ws_xpixel as usize,
+                cells: Size {
+                    height: winsize.ws_row as usize,
+                    width: winsize.ws_col as usize,
+                },
+                pixels: Size {
+                    height: winsize.ws_ypixel as usize,
+                    width: winsize.ws_xpixel as usize,
+                },
             })
         }
     }

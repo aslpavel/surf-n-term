@@ -65,14 +65,14 @@ impl TerminalRenderer {
         let size = term.size()?;
         term.execute(TerminalCommand::Face(Default::default()))?;
         term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
-        let mut back = SurfaceOwned::new(size.height, size.width);
+        let mut back = SurfaceOwned::new(size.cells.height, size.cells.width);
         if clear {
             back.fill(Cell::new_damnaged());
         }
         Ok(Self {
             face: Default::default(),
             cursor: Position::new(0, 0),
-            front: SurfaceOwned::new(size.height, size.width),
+            front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back,
         })
     }
@@ -124,6 +124,8 @@ impl TerminalRenderer {
                 if src.image != dst.image {
                     if let Some(image) = src.image.clone() {
                         term.execute(TerminalCommand::Image(image))?;
+                        // set position large enough so it would tirgger update position
+                        self.cursor = Position::new(100000, 1000000);
                     }
                 }
                 // identify glyph
@@ -357,7 +359,7 @@ mod tests {
     use super::*;
     use crate::{
         encoder::{Encoder, TTYEncoder},
-        terminal::{TerminalEvent, TerminalSize, TerminalWaker},
+        terminal::{Size, TerminalEvent, TerminalSize, TerminalWaker},
     };
     use std::io::Write;
 
@@ -400,10 +402,11 @@ mod tests {
         fn new(height: usize, width: usize) -> Self {
             Self {
                 size: TerminalSize {
-                    height,
-                    width,
-                    height_pixels: 0,
-                    width_pixels: 0,
+                    cells: Size { height, width },
+                    pixels: Size {
+                        height: 0,
+                        width: 0,
+                    },
                 },
                 cmds: Default::default(),
                 buffer: Default::default(),
