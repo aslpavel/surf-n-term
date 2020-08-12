@@ -1,6 +1,6 @@
 use crate::{
     decoder::Decoder, error::Error, Face, FaceAttrs, Image, Position, Surface, SurfaceMut,
-    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, RGBA,
+    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +58,7 @@ pub struct TerminalRenderer {
     cursor: Position,
     front: SurfaceOwned<Cell>,
     back: SurfaceOwned<Cell>,
+    size: TerminalSize,
 }
 
 impl TerminalRenderer {
@@ -74,6 +75,7 @@ impl TerminalRenderer {
             cursor: Position::new(0, 0),
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back,
+            size,
         })
     }
 
@@ -84,16 +86,27 @@ impl TerminalRenderer {
 
     /// Render the current frame
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
-        // we have to issue erase commands first since images can overlap and
-        // newly rendered image might be erased by erase command.
+        // Images can overlap and newly rendered image might be erased by erase command
+        // addressed to images of the previous frame. That is why we are erasing all images
+        // of the previous frame before rendering new images.
         for row in 0..self.back.height() {
             for col in 0..self.back.width() {
                 let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
                     (Some(src), Some(dst)) => (src, dst),
                     _ => break,
                 };
-                if src.image != dst.image {
+                if src.image != dst.image && dst.image.is_some() {
                     term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
+                }
+                // mark all cells effected by the image as dameged
+                if let Some(img) = src.image.clone() {
+                    let cell_size = self.size.cell_size();
+                    let heigth = img.height() / cell_size.height;
+                    let width = img.width() / cell_size.width;
+                    let mut view = self.front.view_mut(row..row + heigth, col..col + width);
+                    for cell in view.iter_mut() {
+                        cell.damaged = true;
+                    }
                 }
             }
         }
@@ -121,12 +134,15 @@ impl TerminalRenderer {
                     term.execute(TerminalCommand::CursorTo(self.cursor))?;
                 }
                 // handle image
-                if src.image != dst.image {
-                    if let Some(image) = src.image.clone() {
+                if let Some(image) = src.image.clone() {
+                    if src.image != dst.image {
+                        // issure render command
                         term.execute(TerminalCommand::Image(image))?;
-                        // set position large enough so it would tirgger update position
+                        // set position large enough so it would tirgger position update
                         self.cursor = Position::new(100000, 1000000);
                     }
+                    col += 1;
+                    continue;
                 }
                 // identify glyph
                 let glyph = match src.glyph {

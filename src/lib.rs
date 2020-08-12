@@ -29,7 +29,7 @@ pub use surface::{
 };
 pub use terminal::{
     DecMode, DecModeStatus, Position, Size, Terminal, TerminalAction, TerminalColor,
-    TerminalCommand, TerminalEvent, TerminalWaker,
+    TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker,
 };
 
 pub type SystemTerminal = unix::UnixTerminal;
