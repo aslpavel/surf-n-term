@@ -1,9 +1,10 @@
 use crate::{
     common::{clamp, Rnd},
-    encoder::base64_encode,
+    encoder::Base64Encoder,
     Blend, Color, Error, Position, Shape, Surface, SurfaceMut, SurfaceOwned, Terminal,
     TerminalEvent, RGBA,
 };
+use flate2::{write::ZlibEncoder, Compression};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -211,17 +212,17 @@ impl ImageHandler for KittyImageHandler {
                 write!(out, "\x1b_Ga=p,i={};\x1b\\", id)?;
             }
             None => {
-                let raw: Vec<_> = img.iter().flat_map(|c| RGBAIter::new(*c)).collect();
-                // TODO: stream into base64_encode
-                let compressed =
-                    miniz_oxide::deflate::compress_to_vec_zlib(&raw, /* level */ 5);
-                let mut base64 = Cursor::new(Vec::new());
-                base64_encode(base64.get_mut(), compressed.iter().copied())?;
+                let mut payload =
+                    ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
+                for color in img.iter() {
+                    payload.write_all(&color.rgba_u8())?;
+                }
 
                 let mut buf = [0u8; 4096];
+                let mut payload = Cursor::new(payload.finish()?.finish()?);
                 loop {
-                    let size = base64.read(&mut buf)?;
-                    let more = if base64.position() < base64.get_ref().len() as u64 {
+                    let size = payload.read(&mut buf)?;
+                    let more = if payload.position() < payload.get_ref().len() as u64 {
                         1
                     } else {
                         0
@@ -396,30 +397,6 @@ impl ImageHandler for SixelImageHandler {
 
     fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
         Ok(false)
-    }
-}
-
-struct RGBAIter {
-    color: [u8; 4],
-    index: usize,
-}
-
-impl RGBAIter {
-    fn new(color: RGBA) -> Self {
-        Self {
-            color: color.rgba_u8(),
-            index: 0,
-        }
-    }
-}
-
-impl Iterator for RGBAIter {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.color.get(self.index).copied();
-        self.index += 1;
-        result
     }
 }
 

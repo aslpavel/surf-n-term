@@ -132,14 +132,25 @@ impl Encoder for TTYEncoder {
 
 const BASE64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Encode input as base64
-pub fn base64_encode(
-    mut out: impl Write,
-    input: impl IntoIterator<Item = u8>,
-) -> Result<(), std::io::Error> {
-    let mut iter = input.into_iter();
-    loop {
+/// Writable object which encodes input to base64 and writes it in underlying stream
+pub struct Base64Encoder<W> {
+    inner: W,
+    buffer: Vec<u8>,
+}
+
+impl<W: Write> Base64Encoder<W> {
+    pub fn new(inner: W) -> Self {
+        Self {
+            inner,
+            buffer: Vec::with_capacity(3),
+        }
+    }
+
+    /// finalize base64 stream, returning underlying stream
+    pub fn finish(self) -> std::io::Result<W> {
+        let Self { mut inner, buffer } = self;
         let mut dst = [b'='; 4];
+        let mut iter = buffer.into_iter();
         if let Some(s0) = iter.next() {
             dst[0] = BASE64[(s0 >> 2) as usize];
             if let Some(s1) = iter.next() {
@@ -153,12 +164,37 @@ pub fn base64_encode(
             } else {
                 dst[1] = BASE64[((s0 << 4) & 0x3f) as usize];
             }
-            out.write_all(&dst)?;
-        } else {
-            break;
+            inner.write_all(&dst)?;
         }
+        Ok(inner)
     }
-    Ok(())
+}
+
+impl<W: Write> Write for Base64Encoder<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for b in buf.iter().copied() {
+            self.buffer.push(b);
+            if self.buffer.len() == 3 {
+                match self.buffer.as_slice() {
+                    [s0, s1, s2] => {
+                        let mut dst = [b'='; 4];
+                        dst[0] = BASE64[(s0 >> 2) as usize];
+                        dst[1] = BASE64[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
+                        dst[2] = BASE64[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
+                        dst[3] = BASE64[(s2 & 0x3f) as usize];
+                        self.inner.write_all(&dst)?;
+                    }
+                    _ => unreachable!(),
+                }
+                self.buffer.clear();
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -248,18 +284,18 @@ mod tests {
 
     #[test]
     fn test_base64() -> Result<(), Error> {
-        let mut base64 = Vec::new();
+        let mut base64 = Base64Encoder::new(Vec::new());
+        base64.write_all(b"te")?;
+        base64.write_all(b"rm")?;
+        assert_eq!(base64.finish()?, b"dGVybQ==");
 
-        base64_encode(&mut base64, b"term".iter().copied())?;
-        assert_eq!(base64, b"dGVybQ==");
+        let mut base64 = Base64Encoder::new(Vec::new());
+        base64.write_all(b"ter")?;
+        assert_eq!(base64.finish()?, b"dGVy");
 
-        base64.clear();
-        base64_encode(&mut base64, b"ter".iter().copied())?;
-        assert_eq!(base64, b"dGVy");
-
-        base64.clear();
-        base64_encode(&mut base64, b"ab".iter().copied())?;
-        assert_eq!(base64, b"YWI=");
+        let mut base64 = Base64Encoder::new(Vec::new());
+        base64.write(b"ab")?;
+        assert_eq!(base64.finish()?, b"YWI=");
 
         Ok(())
     }
