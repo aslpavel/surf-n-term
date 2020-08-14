@@ -93,6 +93,13 @@ impl Encoder for TTYEncoder {
                 Ordering::Greater => write!(out, "\x1b[{}S", count)?,
                 _ => (),
             },
+            ScrollRegion(range) => {
+                if range.end > range.start {
+                    write!(out, "\x1b[{};{}r", range.start + 1, range.end + 1)?;
+                } else {
+                    write!(out, "\x1b[r")?;
+                }
+            }
             Image(_) | ImageErase(_) => {
                 // image is ignored and must be handled by image handler
             }

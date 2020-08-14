@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     io::Write,
+    ops::Range,
     sync::Arc,
     time::Duration,
 };
@@ -135,6 +136,8 @@ pub enum TerminalCommand {
     EraseChars(usize),
     /// Scroll, positive is up and negative is down
     Scroll(i32),
+    /// Set scroll region
+    ScrollRegion(Range<usize>),
     /// Full reset of the terminal
     Reset,
     /// Draw image
