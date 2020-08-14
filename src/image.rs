@@ -45,7 +45,7 @@ impl Image {
         dither: bool,
         bg: Option<RGBA>,
     ) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
-        let bg = bg.unwrap_or(RGBA::new(0, 0, 0, 255));
+        let bg = bg.unwrap_or_else(|| RGBA::new(0, 0, 0, 255));
         let palette = ColorPalette::from_image(self, palette_size, bg)?;
         let mut qimg = SurfaceOwned::new(self.height(), self.width());
 
@@ -53,7 +53,7 @@ impl Image {
         let mut errors: Vec<ColorError> = Vec::new();
         let ewidth = self.width() + 2; // to evaoid check for first and the last pixels
         if dither {
-            errors.resize_with(ewidth * 2, || ColorError::new());
+            errors.resize_with(ewidth * 2, ColorError::new);
         }
         for row in 0..self.height() {
             if dither {
@@ -65,7 +65,7 @@ impl Image {
             }
             // qunatize and spread the error
             for col in 0..self.width() {
-                let mut color = self.get(row, col).unwrap().clone();
+                let mut color = *self.get(row, col)?;
                 if color.rgba_u8()[3] < 255 {
                     color = bg.blend(color, Blend::Over);
                 }
@@ -147,7 +147,7 @@ pub fn image_handler_detect(
     term: &mut dyn Terminal,
 ) -> Result<Option<Box<dyn ImageHandler>>, Error> {
     // drain terminal
-    while let Some(_) = term.poll(Some(Duration::new(0, 0)))? {}
+    while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
     // Send kitty query and DA1 request
     term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?; // kitty image
     term.write_all(b"\x1b]11;?\x1b\\")?; // background color
@@ -172,7 +172,7 @@ pub fn image_handler_detect(
         }
     }
     // drain terminal
-    while let Some(_) = term.poll(Some(Duration::new(0, 0)))? {}
+    while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
     Ok(handler)
 }
 
@@ -338,9 +338,9 @@ impl ImageHandler for SixelImageHandler {
             for col in 0..img.width() {
                 // extract sixel
                 let mut sixel = [0usize; 6];
-                for i in 0..6 {
+                for (i, s) in sixel.iter_mut().enumerate() {
                     if let Some(index) = qimg.get(row + i, col) {
-                        sixel[i] = *index;
+                        *s = *index;
                     }
                 }
                 // construct sixel
@@ -529,10 +529,7 @@ enum OcTreeNode {
 
 impl OcTreeNode {
     pub fn is_empty(&self) -> bool {
-        match self {
-            OcTreeNode::Empty => true,
-            _ => false,
-        }
+        matches!(self, OcTreeNode::Empty)
     }
 }
 
@@ -614,6 +611,12 @@ pub struct OcTree {
     children: [OcTreeNode; 8],
 }
 
+impl Default for OcTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Extend<RGBA> for OcTree {
     fn extend<T: IntoIterator<Item = RGBA>>(&mut self, colors: T) {
         for color in colors {
@@ -667,7 +670,7 @@ impl OcTree {
         fn palette_rec(node: &mut OcTreeNode, palette: &mut Vec<RGBA>) {
             use OcTreeNode::*;
             match node {
-                Empty => return,
+                Empty => {}
                 Leaf(ref mut leaf) => {
                     leaf.index = palette.len();
                     palette.push(leaf.to_rgba());
@@ -924,7 +927,7 @@ struct KDNode {
 }
 
 impl KDTree {
-    pub fn new(colors: &Vec<RGBA>) -> Self {
+    pub fn new(colors: &[RGBA]) -> Self {
         fn build_rec(
             dim: usize,
             nodes: &mut Vec<KDNode>,
@@ -976,7 +979,7 @@ impl KDTree {
                 + (b0 as i32 - b1 as i32).pow(2)
         }
 
-        fn find_rec(nodes: &Vec<KDNode>, index: usize, target: [u8; 3]) -> (KDNode, i32) {
+        fn find_rec(nodes: &[KDNode], index: usize, target: [u8; 3]) -> (KDNode, i32) {
             let node = nodes[index];
             let node_dist = dist(target, &node);
             let (next, other) = if target[node.dim] < node.color[node.dim] {
@@ -1022,7 +1025,7 @@ impl KDTree {
     pub fn to_digraph(&self, mut out: impl Write) -> std::io::Result<()> {
         fn to_digraph_rec(
             out: &mut impl Write,
-            nodes: &Vec<KDNode>,
+            nodes: &[KDNode],
             index: usize,
         ) -> std::io::Result<()> {
             let node = nodes[index];

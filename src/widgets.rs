@@ -225,11 +225,7 @@ impl Input {
 }
 
 fn is_word_separator(c: char) -> bool {
-    // TODO: extend word separator set
-    match c {
-        ' ' => true,
-        _ => false,
-    }
+    c.is_ascii_punctuation() || c.is_ascii_whitespace()
 }
 
 pub trait ListItems {

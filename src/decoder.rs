@@ -413,10 +413,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
 
     // Termcap/Terminfo response to XTGETTCAP
     let terminfo_response = {
-        let hex = NFA::predicate(|b| match b {
-            b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9' => true,
-            _ => false,
-        });
+        let hex = NFA::predicate(|b| matches!(b, b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9'));
         let hex = hex.clone() + hex;
         let key_value = NFA::sequence(vec![hex.clone().some(), NFA::from("="), hex.clone().some()]);
         NFA::choice(vec![
