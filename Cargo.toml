@@ -8,7 +8,7 @@ edition = "2018"
 default = []
 
 [dependencies]
-log = "0.4.8"
+log = "0.4.11"
 surface = { path = "../surf-n-term/surface" }
 png = { version = "0.16.4", optional = true }
 
