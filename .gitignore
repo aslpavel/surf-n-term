@@ -1,3 +1,4 @@
 /target
-flamegraph.svg
-perf.data*
+**/*.rs.bk
+*.path
+Cargo.lock
