@@ -1,9 +1,9 @@
 ### Surf-N-Term
 This crate is used to interract with Posix terminal. It can be used to
 - Read events from the terminal
-- Send events to the terminal
+- Send commands to the terminal
 - Render on a surface which will be reconciled with current content of the terminal
-- Issue directo commend to the terminal
+- Issue direct commends to the terminal
 - Supports kitty/sixel image protocol
 
 ### Simple example
