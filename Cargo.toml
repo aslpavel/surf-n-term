@@ -2,7 +2,17 @@
 name = "surf_n_term"
 version = "0.1.0"
 authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
+description = "Posix terminal rendering library"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/aslpavel/surf-n-term.git"
+homepage = "https://github.com/aslpavel/surf-n-term"
 edition = "2018"
+include = [
+    "**/*.rs",
+    "**/Cargo.toml",
+    "**/README.md",
+]
 
 [dependencies]
 surface = { path = "surface" }
