@@ -8,10 +8,10 @@ This crate is used to interract with Posix terminal. It can be used to
 
 ### Simple example
 ```rust
-use surf_n_term::{Terminal, TerminalEvent, Key, KeyName, Error};
+use surf_n_term::{Terminal, TerminalEvent, Error};
 
 fn main() -> Result<(), Error> {
-    let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
+    let ctrl_c = TerminalEvent::Key("ctrl+c".parse()?);
     let mut term = SystemTerminal::new()?;
     term.run_render(|term, event, mut view| -> Result<_, Error> {
         // This function will be executed on each event from terminal
@@ -19,8 +19,8 @@ fn main() -> Result<(), Error> {
         // - event - is a TerminalEvent
         // - view  - is a Suface that can be used to render on, see render module for defails
         match event {
-            Some(event) if &event == &q => {
-                // exit if 'q' is pressed
+            Some(event) if &event == &ctrl_c => {
+                // exit if 'ctrl+c' is pressed
                 Ok(TerminalAction::Quit(()))
             }
             _ => {
