@@ -1,8 +1,7 @@
 use std::{ops::Range, time::Duration};
 use surf_n_term::{
-    Color, ColorLinear, DecMode, Error, Key, KeyMod, KeyName, SurfaceMut, SurfaceOwned,
-    SystemTerminal, Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
-    RGBA,
+    Color, ColorLinear, DecMode, Error, Image, Surface, SurfaceMut, SurfaceOwned, SystemTerminal,
+    Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt, RGBA,
 };
 
 fn mandelbrot_at(x0: f64, y0: f64, count: usize) -> usize {
@@ -43,8 +42,9 @@ fn lerp(vs: &Range<f64>, t: f64) -> f64 {
 }
 
 fn main() -> Result<(), Error> {
-    let q = TerminalEvent::Key(Key::from(KeyName::Char('q')));
-    let ctrl_c = TerminalEvent::Key(Key::new(KeyName::Char('c'), KeyMod::CTRL));
+    let f = TerminalEvent::Key("f".parse()?);
+    let q = TerminalEvent::Key("q".parse()?);
+    let ctrl_c = TerminalEvent::Key("ctrl+c".parse()?);
     let mut term = SystemTerminal::new()?;
     term.duplicate_output("/tmp/surf_n_term.log")?;
 
@@ -66,20 +66,25 @@ fn main() -> Result<(), Error> {
     let color_start = "#000000".parse()?;
     let color_end = "#ffffff".parse()?;
     let colors = color_start..color_end;
+    let mut ascii = true;
     term.run_render(|_term, event, mut view| -> Result<_, Error> {
         mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);
-        view.draw_image_ascii(&img);
-        // It can also be rendered on supported terminals as a real image
-        // {
-        //     use surf_n_term::{Image, Surface};
-        //     view.draw_image(Image::new(img.to_owned_surf()));
-        // }
+        if ascii {
+            view.draw_image_ascii(&img);
+        } else {
+            view.draw_image(Image::new(img.to_owned_surf()));
+        }
         count += 1;
 
         // quit
-        match event {
-            Some(event) if &event == &q || &event == &ctrl_c => Ok(TerminalAction::Quit(())),
-            _ => Ok(TerminalAction::Sleep(delay)),
+
+        if event.as_ref() == Some(&q) || event.as_ref() == Some(&ctrl_c) {
+            Ok(TerminalAction::Quit(()))
+        } else {
+            if event.as_ref() == Some(&f) {
+                ascii = !ascii;
+            }
+            Ok(TerminalAction::Sleep(delay))
         }
     })?;
 
