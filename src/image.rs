@@ -360,7 +360,7 @@ impl ImageHandler for SixelImageHandler {
 
         // header
         sixel_image.write_all(b"\x1bPq")?;
-        write!(sixel_image, "1;1;{};{}", img.width(), img.height())?;
+        write!(sixel_image, "\"1;1;{};{}", img.width(), img.height())?;
         // palette
         for (index, color) in palette.colors().iter().enumerate() {
             let [red, green, blue] = color.rgb_u8();
