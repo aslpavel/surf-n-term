@@ -79,6 +79,13 @@ impl TerminalRenderer {
         })
     }
 
+    pub fn clear(&mut self) {
+        self.face = Face::default().with_fg(Some(RGBA::new(254, 0, 253, 252)));
+        self.cursor = Position::new(100_000, 100_000);
+        self.front.fill(Cell::new_damnaged());
+        self.back.fill(Cell::new_damnaged());
+    }
+
     /// View associated with the current frame
     pub fn view(&mut self) -> TerminalSurface<'_> {
         self.front.view_mut(.., ..)
@@ -465,6 +472,12 @@ mod tests {
         fn waker(&self) -> TerminalWaker {
             TerminalWaker::new(|| Ok(()))
         }
+
+        fn frames_pending(&self) -> usize {
+            0
+        }
+
+        fn frames_drop(&mut self) {}
     }
 
     #[test]

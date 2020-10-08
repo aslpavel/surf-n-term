@@ -12,6 +12,9 @@ use std::{
     time::Duration,
 };
 
+/// How many frames needs to be pending before we start dropping them
+const TERMINAL_FRAMES_DROP: usize = 32;
+
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write {
     /// Schedue command for execution
@@ -72,14 +75,31 @@ pub trait Terminal: Write {
         let mut renderer = TerminalRenderer::new(self, false)?;
         // run with render event handler
         self.run(Some(Duration::new(0, 0)), move |term, event| {
+            // allocate new renderer on resize
             if let Some(TerminalEvent::Resize(_)) = event {
                 renderer = TerminalRenderer::new(term, true)?;
             }
+            // handle event
             let result = handler(term, event, renderer.view())?;
+            // drop frames if we are too far behind
+            if term.frames_pending() > TERMINAL_FRAMES_DROP {
+                term.frames_drop();
+                renderer.clear();
+            }
+            // render frame
             renderer.frame(term)?;
             Ok(result)
         })
     }
+
+    /// Number of pending frames (equal to number of flush calls) to be rendered
+    ///
+    /// This information can be usefull to provide back pressure, if terminal
+    /// is not fast enough.
+    fn frames_pending(&self) -> usize;
+
+    /// Drop all pending frames (equal to number of flush calls)
+    fn frames_drop(&mut self);
 }
 
 #[derive(Clone)]

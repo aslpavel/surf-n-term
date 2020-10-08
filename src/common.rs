@@ -20,6 +20,7 @@ where
 pub struct IOQueue {
     chunks: VecDeque<Vec<u8>>,
     offset: usize,
+    length: usize,
 }
 
 impl IOQueue {
@@ -27,11 +28,26 @@ impl IOQueue {
         Self {
             chunks: Default::default(),
             offset: 0,
+            length: 0,
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.chunks.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    pub fn clear_but_last(&mut self) {
+        if self.chunks.len() > 1 {
+            self.chunks.drain(1..);
+        }
+    }
+
+    pub fn chunks_count(&self) -> usize {
+        self.chunks.len()
     }
 
     /// Remaining slice at the front of the queue
@@ -45,10 +61,13 @@ impl IOQueue {
     /// Consume bytes from the front of the queue
     pub fn consume(&mut self, amt: usize) {
         if self.chunks.front().map(|chunk| chunk.len()).unwrap_or(0) > self.offset + amt {
-            self.offset += amt
+            self.offset += amt;
+            self.length -= amt;
         } else {
+            if let Some(chunk) = self.chunks.pop_front() {
+                self.length -= chunk.len() - self.offset
+            }
             self.offset = 0;
-            self.chunks.pop_front();
         }
     }
 
@@ -68,6 +87,7 @@ impl Write for IOQueue {
             self.chunks.push_back(Default::default());
         }
         let chunk = self.chunks.back_mut().unwrap();
+        self.length += buf.len();
         chunk.write(buf)
     }
 
@@ -169,6 +189,7 @@ mod tests {
         let mut out = String::new();
         queue.read_to_string(&mut out)?;
         assert_eq!(out, String::from("one,two"));
+        assert_eq!(queue.len(), 0);
         assert!(queue.is_empty());
 
         // make `BufRead` implementation

@@ -327,6 +327,14 @@ impl Terminal for UnixTerminal {
     fn waker(&self) -> TerminalWaker {
         self.waker.clone()
     }
+
+    fn frames_pending(&self) -> usize {
+        self.write_queue.chunks_count()
+    }
+
+    fn frames_drop(&mut self) {
+        self.write_queue.clear_but_last()
+    }
 }
 
 /// Guard against EAGAIN and EINTR
