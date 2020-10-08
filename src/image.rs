@@ -283,15 +283,19 @@ impl ImageHandler for KittyImageHandler {
     }
 }
 
+const SIXEL_CACHE_SIZE: usize = 134217728; // 128MB
+
 pub struct SixelImageHandler {
-    imgs: HashMap<u64, Vec<u8>>,
+    imgs: lru::LruCache<u64, Vec<u8>>,
+    size: usize,
     bg: Option<RGBA>,
 }
 
 impl SixelImageHandler {
     pub fn new(bg: Option<RGBA>) -> Self {
         SixelImageHandler {
-            imgs: Default::default(),
+            imgs: lru::LruCache::unbounded(),
+            size: 0,
             bg,
         }
     }
@@ -386,7 +390,14 @@ impl ImageHandler for SixelImageHandler {
         sixel_image.write_all(b"\x1b\\")?;
 
         out.write_all(sixel_image.as_slice())?;
-        self.imgs.insert(img.hash(), sixel_image);
+
+        self.size += sixel_image.len();
+        self.imgs.put(img.hash(), sixel_image);
+        if self.size > SIXEL_CACHE_SIZE {
+            if let Some((_, lru_image)) = self.imgs.pop_lru() {
+                self.size -= lru_image.len();
+            }
+        }
 
         Ok(())
     }
