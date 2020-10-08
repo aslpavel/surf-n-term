@@ -140,6 +140,8 @@ impl UnixTerminal {
 
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {
+        self.frames_drop();
+
         // revert descriptors to blocking mode
         self.write_handle.set_blocking(true).unwrap_or(());
         self.read_handle.set_blocking(true).unwrap_or(());

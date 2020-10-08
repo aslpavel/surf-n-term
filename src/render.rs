@@ -107,7 +107,10 @@ impl TerminalRenderer {
                 }
                 // mark all cells effected by the image as dameged
                 if let Some(img) = src.image.clone() {
-                    let cell_size = self.size.cell_size();
+                    let mut cell_size = self.size.cell_size();
+                    if cell_size.width == 0 || cell_size.height == 0 {
+                        cell_size = crate::terminal::Size::new(16, 8);
+                    }
                     let heigth = img.height() / cell_size.height;
                     let width = img.width() / cell_size.width;
                     let mut view = self.front.view_mut(row..row + heigth, col..col + width);
