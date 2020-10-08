@@ -4,7 +4,7 @@ use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    image::image_handler_detect,
+    image::{image_handler_detect, DummyImageHandler},
     terminal::{
         Size, Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
     },
@@ -50,7 +50,7 @@ pub struct UnixTerminal {
     sigwinch_id: signal_hook::SigId,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
-    image_handler: Option<Box<dyn ImageHandler>>,
+    image_handler: Box<dyn ImageHandler>,
 }
 
 impl UnixTerminal {
@@ -115,7 +115,7 @@ impl UnixTerminal {
             sigwinch_id,
             stats: TerminalStats::new(),
             tee: None,
-            image_handler: None,
+            image_handler: Box::new(DummyImageHandler),
         };
         term.image_handler = image_handler_detect(&mut term)?;
         Ok(term)
@@ -131,6 +131,10 @@ impl UnixTerminal {
     /// Statistics collected by terminal.
     pub fn stats(&self) -> &TerminalStats {
         &self.stats
+    }
+
+    pub fn image_handler(&mut self) -> &mut dyn ImageHandler {
+        &mut self.image_handler
     }
 }
 
@@ -279,11 +283,7 @@ impl Terminal for UnixTerminal {
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
                 while let Some(event) = self.decoder.decode(&mut read_queue)? {
-                    if let Some(image_handler) = self.image_handler.as_mut() {
-                        if !image_handler.handle(&event)? {
-                            self.events_queue.push_back(event)
-                        }
-                    } else {
+                    if !self.image_handler.handle(&event)? {
                         self.events_queue.push_back(event)
                     }
                 }
@@ -297,17 +297,9 @@ impl Terminal for UnixTerminal {
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         match cmd {
-            TerminalCommand::Image(image) => {
-                if let Some(image_handler) = self.image_handler.as_mut() {
-                    image_handler.draw(&image, &mut self.write_queue)?;
-                }
-                Ok(())
-            }
+            TerminalCommand::Image(image) => self.image_handler.draw(&image, &mut self.write_queue),
             TerminalCommand::ImageErase(pos) => {
-                if let Some(image_handler) = self.image_handler.as_mut() {
-                    image_handler.erase(pos, &mut self.write_queue)?;
-                }
-                Ok(())
+                self.image_handler.erase(pos, &mut self.write_queue)
             }
             cmd => self.encoder.encode(&mut self.write_queue, cmd),
         }

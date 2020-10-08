@@ -142,10 +142,27 @@ pub trait ImageHandler {
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
+impl<'a> ImageHandler for Box<dyn ImageHandler> {
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+
+    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+        (**self).draw(img, out)
+    }
+
+    fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error> {
+        (**self).erase(pos, out)
+    }
+
+    fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
+        (**self).handle(event)
+    }
+}
+
 /// Detect appropriate image handler for provided termainl
-pub fn image_handler_detect(
-    term: &mut dyn Terminal,
-) -> Result<Option<Box<dyn ImageHandler>>, Error> {
+pub fn image_handler_detect(term: &mut dyn Terminal) -> Result<Box<dyn ImageHandler>, Error> {
+    // NOTE: this function will not work on the second call, kitty handler will not propaget event
     // drain terminal
     while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
     // Send kitty query and DA1 request
@@ -168,12 +185,32 @@ pub fn image_handler_detect(
             Some(TerminalEvent::Color { color, .. }) => {
                 bg.replace(color);
             }
-            _ => return Ok(None),
+            _ => continue,
         }
     }
     // drain terminal
     while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
-    Ok(handler)
+    Ok(handler.unwrap_or_else(|| Box::new(DummyImageHandler)))
+}
+
+pub struct DummyImageHandler;
+
+impl ImageHandler for DummyImageHandler {
+    fn name(&self) -> &str {
+        "dummy"
+    }
+
+    fn draw(&mut self, _img: &Image, _out: &mut dyn Write) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn erase(&mut self, _pos: Position, _out: &mut dyn Write) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
+        Ok(false)
+    }
 }
 
 /// Image handler for kitty graphic protocol
@@ -1112,7 +1149,7 @@ impl ColorPalette {
             img.iter().map(|c| blend(bg, *c)).collect()
         } else {
             let mut octree = OcTree::new();
-            let mut rnd = Rnd::new(5);
+            let mut rnd = Rnd::new();
             let mut colors = img.iter().copied();
             while let Some(color) = colors.nth((rnd.next_u32() % sample) as usize) {
                 octree.insert(blend(bg, color));

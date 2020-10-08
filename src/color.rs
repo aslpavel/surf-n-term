@@ -148,7 +148,7 @@ pub struct RGBA(pub [u8; 4]);
 impl RGBA {
     /// Generate random opaque colors
     pub fn random() -> impl Iterator<Item = RGBA> {
-        let mut rnd = Rnd::new(0);
+        let mut rnd = Rnd::new();
         std::iter::from_fn(move || {
             let value = rnd.next_u32();
             Some(RGBA::new(

@@ -123,7 +123,11 @@ pub struct Rnd {
 }
 
 impl Rnd {
-    pub fn new(seed: u32) -> Self {
+    pub fn new() -> Self {
+        Self::with_seed(0)
+    }
+
+    pub fn with_seed(seed: u32) -> Self {
         Self { state: seed }
     }
 

@@ -1,14 +1,10 @@
 use std::{boxed::Box, error::Error, io::Write, time::Duration};
 use surf_n_term::{
-    DecMode, Key, KeyName, SystemTerminal, Terminal, TerminalColor, TerminalCommand, TerminalEvent,
+    DecMode, SystemTerminal, Terminal, TerminalColor, TerminalCommand, TerminalEvent,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut term = SystemTerminal::new()?;
-
-    // get size
-    let size = term.size()?;
-    write!(&mut term, "{:?}\r\n", size)?;
 
     // query DEC modes
     use TerminalCommand::*;
@@ -56,10 +52,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let timeout = Duration::from_secs(10);
     write!(
         &mut term,
-        "Program will exit after {:?} of idling ...\r\n",
+        "Program will exit after {:?} of idling or if 'q' is pressed ...\r\n",
         timeout
     )?;
-    let q = Key::from(KeyName::Char('q'));
+
+    // image handler
+    let image_handler_name = term.image_handler().name().to_string();
+    write!(&mut term, "image_handler: {}\r\n", image_handler_name)?;
+
+    // get size
+    let size = term.size()?;
+    write!(&mut term, "{:?}\r\n", size)?;
+
+    let q_key = "q".parse()?;
 
     let waker = term.waker();
     std::thread::spawn(move || {
@@ -72,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         use surf_n_term::terminal::TerminalAction::*;
         match event {
             None => Ok(Quit(())),
-            Some(TerminalEvent::Key(key)) if key == q => Ok(Quit(())),
+            Some(TerminalEvent::Key(key)) if key == q_key => Ok(Quit(())),
             Some(event) => {
                 write!(&mut term, "{:?}\r\n", event)?;
                 Ok(Sleep(timeout))
