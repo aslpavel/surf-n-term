@@ -1,5 +1,5 @@
 use crate::Error;
-use std::{collections::HashMap, fmt, str::FromStr};
+use std::{collections::HashMap, fmt, str::FromStr, sync::Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key {
@@ -319,33 +319,38 @@ impl<V> KeyMap<V> {
         }
     }
 
-    pub fn register(&mut self, chord: &[Key], value: V) {
-        if let Some((key, chord)) = chord.split_last() {
-            self.register_rec(chord).mapping.insert(*key, Ok(value));
-        }
-    }
-
-    fn register_rec(&mut self, chord: &[Key]) -> &mut Self {
-        match chord.split_first() {
-            None => self,
-            Some((key, chord)) => {
-                let next = self
-                    .mapping
-                    .entry(*key)
-                    .and_modify(|r| {
-                        if r.is_ok() {
-                            *r = Err(Self::new())
-                        }
-                    })
-                    .or_insert_with(|| Err(Self::new()))
-                    .as_mut()
-                    .err()
-                    .unwrap();
-                next.register_rec(chord)
+    /// Register key chord to produce the value.
+    ///
+    /// Returns previously registred value or key_map associated with provied chord.
+    pub fn register(&mut self, chord: &[Key], value: V) -> Option<Result<V, KeyMap<V>>> {
+        fn register_rec<'a, V>(key_map: &'a mut KeyMap<V>, chord: &[Key]) -> &'a mut KeyMap<V> {
+            match chord.split_first() {
+                None => key_map,
+                Some((key, chord)) => {
+                    let next = key_map
+                        .mapping
+                        .entry(*key)
+                        .and_modify(|r| {
+                            if r.is_ok() {
+                                *r = Err(KeyMap::new())
+                            }
+                        })
+                        .or_insert_with(|| Err(KeyMap::new()))
+                        .as_mut()
+                        .err()
+                        .unwrap();
+                    register_rec(next, chord)
+                }
             }
         }
+
+        match chord.split_last() {
+            Some((key, chord)) => register_rec(self, chord).mapping.insert(*key, Ok(value)),
+            None => None,
+        }
     }
 
+    /// Lookup value given full chord path
     pub fn lookup(&self, chord: &[Key]) -> KeyMapResult<&V> {
         let result = chord
             .iter()
@@ -370,25 +375,75 @@ impl<V> KeyMap<V> {
         }
     }
 
+    /// The a helper function which manges provied chord state for your
     pub fn lookup_state(&self, chord: &mut Vec<Key>, key: Key) -> Option<&V> {
         chord.push(key);
-        match self.lookup(chord.as_ref()) {
-            KeyMapResult::Continue => None,
-            KeyMapResult::Failure => {
-                chord.clear();
-                None
-            }
-            KeyMapResult::Success(value) => {
-                chord.clear();
-                Some(value)
+        for _ in 0..2 {
+            match self.lookup(chord.as_ref()) {
+                KeyMapResult::Continue => return None,
+                KeyMapResult::Failure => {
+                    chord.clear();
+                    chord.push(key);
+                }
+                KeyMapResult::Success(value) => {
+                    chord.clear();
+                    return Some(value);
+                }
             }
         }
+        None
+    }
+}
+
+pub type KeyHandler<O> = Arc<dyn Fn(&[Key]) -> O>;
+
+pub struct KeyMapHandler<O> {
+    keymap: KeyMap<KeyHandler<O>>,
+    state: Vec<Key>,
+}
+
+impl<O> Default for KeyMapHandler<O> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<O> KeyMapHandler<O> {
+    pub fn new() -> Self {
+        Self {
+            keymap: Default::default(),
+            state: Default::default(),
+        }
+    }
+
+    pub fn register(&mut self, chrod: &[Key], handler: KeyHandler<O>) {
+        self.keymap.register(chrod, handler);
+    }
+
+    pub fn handle(&mut self, key: Key) -> Option<O> {
+        self.state.push(key);
+        for _ in 0..2 {
+            match self.keymap.lookup(self.state.as_ref()) {
+                KeyMapResult::Continue => return None,
+                KeyMapResult::Failure => {
+                    self.state.clear();
+                    self.state.push(key);
+                }
+                KeyMapResult::Success(handler) => {
+                    let handler_result = (handler)(&self.state);
+                    self.state.clear();
+                    return Some(handler_result);
+                }
+            }
+        }
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::BTreeMap, sync::Mutex};
 
     #[test]
     fn test_key_map() -> Result<(), Error> {
@@ -407,6 +462,42 @@ mod tests {
         assert_eq!(key_map.lookup(c0.as_ref()), KeyMapResult::Continue);
         assert_eq!(key_map.lookup(c1.as_ref()), KeyMapResult::Success(&1));
         assert_eq!(key_map.lookup(c2.as_ref()), KeyMapResult::Success(&2));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_key_map_handler() -> Result<(), Error> {
+        let a = "a".parse()?;
+        let b = "b".parse()?;
+        let c = "c".parse()?;
+        let d = "d".parse()?;
+
+        let events = Arc::new(Mutex::new(BTreeMap::new()));
+        let count = Arc::new({
+            let events = events.clone();
+            move |chord: &[Key]| {
+                let mut events = events.lock().unwrap();
+                *events.entry(Vec::from(chord)).or_insert(0) += 1;
+            }
+        });
+        let mut handler = KeyMapHandler::new();
+        handler.register(&[a], count.clone());
+        handler.register(&[b], count.clone());
+        handler.register(&[c, d], count.clone());
+
+        handler.handle(a);
+        handler.handle(b);
+        handler.handle(c);
+        handler.handle(a);
+        handler.handle(c);
+        handler.handle(d);
+
+        let reference: BTreeMap<Vec<Key>, usize> =
+            vec![(vec![a], 2), (vec![b], 1), (vec![c, d], 1)]
+                .into_iter()
+                .collect();
+        assert_eq!(*events.lock().unwrap(), reference);
 
         Ok(())
     }
