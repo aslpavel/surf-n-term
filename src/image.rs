@@ -359,16 +359,12 @@ impl ImageHandler for SixelImageHandler {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
         }
-        // TODO:
-        //   - correctly blend with background
-        //   - use background as default color in extracted sixel
         let (palette, qimg) = match img.quantize(256, true, self.bg) {
             None => return Ok(()),
             Some(qimg) => qimg,
         };
 
         let mut sixel_image = Vec::new();
-
         // header
         sixel_image.write_all(b"\x1bPq")?;
         write!(sixel_image, "\"1;1;{};{}", img.width(), img.height())?;
@@ -380,12 +376,11 @@ impl ImageHandler for SixelImageHandler {
             let blue = (blue as f32 / 2.55).round() as u8;
             write!(sixel_image, "#{};2;{};{};{}", index, red, green, blue)?;
         }
-
         // color_index -> [(offset, sixel_code)]
-        let mut lines: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
+        let mut sixel_lines: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
         let mut colors: HashSet<usize> = HashSet::with_capacity(6);
         for row in (0..img.height()).step_by(6) {
-            lines.clear();
+            sixel_lines.clear();
             // extract sixel line
             for col in 0..img.width() {
                 // extract sixel
@@ -405,30 +400,49 @@ impl ImageHandler for SixelImageHandler {
                             code |= 1 << s_index;
                         }
                     }
-                    lines
+                    sixel_lines
                         .entry(*color)
                         .or_insert_with(Vec::new)
                         .push((col, code + 63));
                 }
             }
             // render sixel line
-            for (color, line) in lines.iter() {
+            for (color, sixel_line) in sixel_lines.iter() {
                 write!(sixel_image, "#{}", color)?;
+
                 let mut offset = 0;
-                for (col, code) in line.iter() {
-                    let shift = col - offset;
+                let mut codes = sixel_line.iter().peekable();
+                while let Some((column, code)) = codes.next() {
+                    // find shift needed to get to the correct offset
+                    let shift = column - offset;
                     if shift > 0 {
-                        if shift < 4 {
+                        if shift > 3 {
+                            write!(sixel_image, "!{}?", shift)?;
+                        } else {
                             for _ in 0..shift {
                                 sixel_image.write_all(b"?")?;
                             }
-                        } else {
-                            write!(sixel_image, "!{}?", shift)?;
                         }
                     }
-                    // TODO: compress identical codes with `!{count}{code}`
-                    sixel_image.write_all(&[*code])?;
-                    offset = col + 1;
+                    // find repeated sixels
+                    let mut repeats = 1;
+                    while let Some((column_next, code_next)) = codes.peek() {
+                        if *column_next != column + repeats || code_next != code {
+                            break;
+                        }
+                        repeats += 1;
+                        codes.next();
+                    }
+                    // write sixel
+                    if repeats > 3 {
+                        write!(sixel_image, "!{}", repeats)?;
+                        sixel_image.write_all(&[*code])?;
+                    } else {
+                        for _ in 0..repeats {
+                            sixel_image.write_all(&[*code])?;
+                        }
+                    }
+                    offset = column + repeats;
                 }
                 sixel_image.write_all(b"$")?;
             }
