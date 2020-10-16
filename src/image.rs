@@ -808,7 +808,8 @@ impl OcTree {
 
     /// Prune until desired number of colors is left
     pub fn prune_until(&mut self, color_count: usize) {
-        while self.info.leaf_count > color_count {
+        let prune_count = color_count.max(8);
+        while self.info.leaf_count > prune_count {
             self.prune();
         }
     }
