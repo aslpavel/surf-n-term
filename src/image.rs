@@ -359,7 +359,16 @@ impl ImageHandler for SixelImageHandler {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
         }
-        let (palette, qimg) = match img.quantize(256, true, self.bg) {
+        // sixel color chanel has a range [0,100] colors, we need to reduce it before
+        // quantization, it will produce smaller or/and better palette for this color depth
+        let dimg = Image::new(img.map(|_, _, color| {
+            let [red, green, blue, alpha] = color.rgba_u8();
+            let red = ((red as f32 / 2.55).round() * 2.55) as u8;
+            let green = ((green as f32 / 2.55).round() * 2.55) as u8;
+            let blue = ((blue as f32 / 2.55).round() * 2.55) as u8;
+            RGBA::new(red, green, blue, alpha)
+        }));
+        let (palette, qimg) = match dimg.quantize(256, true, self.bg) {
             None => return Ok(()),
             Some(qimg) => qimg,
         };
@@ -367,7 +376,7 @@ impl ImageHandler for SixelImageHandler {
         let mut sixel_image = Vec::new();
         // header
         sixel_image.write_all(b"\x1bPq")?;
-        write!(sixel_image, "\"1;1;{};{}", img.width(), img.height())?;
+        write!(sixel_image, "\"1;1;{};{}", qimg.width(), qimg.height())?;
         // palette
         for (index, color) in palette.colors().iter().enumerate() {
             let [red, green, blue] = color.rgb_u8();
@@ -379,7 +388,7 @@ impl ImageHandler for SixelImageHandler {
         // color_index -> [(offset, sixel_code)]
         let mut sixel_lines: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
         let mut colors: HashSet<usize> = HashSet::with_capacity(6);
-        for row in (0..img.height()).step_by(6) {
+        for row in (0..qimg.height()).step_by(6) {
             sixel_lines.clear();
             // extract sixel line
             for col in 0..img.width() {
