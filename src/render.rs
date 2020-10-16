@@ -3,12 +3,22 @@ use crate::{
     SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellKind {
+    /// Contains usefull content
+    Content,
+    /// Must be skiped during rendering
+    Ignore,
+    /// Must be re-rendered
+    Damaged,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
     face: Face,
     glyph: Option<char>,
     image: Option<Image>,
-    damaged: bool,
+    kind: CellKind,
 }
 
 impl Cell {
@@ -17,7 +27,7 @@ impl Cell {
             face,
             glyph,
             image: None,
-            damaged: false,
+            kind: CellKind::Content,
         }
     }
 
@@ -26,7 +36,7 @@ impl Cell {
             face: Default::default(),
             glyph: None,
             image: Some(image),
-            damaged: false,
+            kind: CellKind::Content,
         }
     }
 
@@ -35,7 +45,7 @@ impl Cell {
             face: Default::default(),
             glyph: None,
             image: None,
-            damaged: true,
+            kind: CellKind::Damaged,
         }
     }
 }
@@ -46,7 +56,7 @@ impl Default for Cell {
             face: Default::default(),
             glyph: None,
             image: None,
-            damaged: false,
+            kind: CellKind::Content,
         }
     }
 }
@@ -106,16 +116,12 @@ impl TerminalRenderer {
                     term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
                 }
                 // mark all cells effected by the image as dameged
-                if let Some(img) = src.image.clone() {
-                    let mut cell_size = self.size.cell_size();
-                    if cell_size.width == 0 || cell_size.height == 0 {
-                        cell_size = crate::terminal::Size::new(16, 8);
-                    }
-                    let heigth = img.height() / cell_size.height;
-                    let width = img.width() / cell_size.width;
-                    let mut view = self.front.view_mut(row..row + heigth, col..col + width);
+                if let Some(size) = src.image.as_ref().map(|img| img.size_cells(self.size)) {
+                    let mut view = self
+                        .front
+                        .view_mut(row..row + size.height, col..col + size.width);
                     for cell in view.iter_mut() {
-                        cell.damaged = true;
+                        cell.kind = CellKind::Damaged;
                     }
                 }
             }
@@ -128,7 +134,7 @@ impl TerminalRenderer {
                     (Some(src), Some(dst)) => (src, dst),
                     _ => break,
                 };
-                if src == dst {
+                if src.kind == CellKind::Ignore || src == dst {
                     col += 1;
                     continue;
                 }
@@ -145,7 +151,17 @@ impl TerminalRenderer {
                 }
                 // handle image
                 if let Some(image) = src.image.clone() {
-                    if src.image != dst.image {
+                    let image_changed = src.image != dst.image;
+                    // make sure surface under image is not changed
+                    let size = image.size_cells(self.size);
+                    let mut view = self
+                        .front
+                        .view_mut(row..row + size.height, col..col + size.width);
+                    for cell in view.iter_mut() {
+                        cell.kind = CellKind::Ignore;
+                    }
+                    // render image if changed
+                    if image_changed {
                         // issure render command
                         term.execute(TerminalCommand::Image(image))?;
                         // set position large enough so it would tirgger position update

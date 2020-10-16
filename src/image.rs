@@ -1,8 +1,8 @@
 use crate::{
     common::{clamp, Rnd},
     encoder::Base64Encoder,
-    Blend, Color, Error, Position, Shape, Surface, SurfaceMut, SurfaceOwned, Terminal,
-    TerminalEvent, RGBA,
+    Blend, Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, Terminal,
+    TerminalEvent, TerminalSize, RGBA,
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
@@ -34,6 +34,17 @@ impl Image {
     /// Image size in bytes
     pub fn size(&self) -> usize {
         self.surf.height() * self.surf.width() * 4
+    }
+
+    /// Size in cells
+    pub fn size_cells(&self, term_size: TerminalSize) -> Size {
+        let cell_size = term_size.cell_size();
+        if cell_size.width == 0 || cell_size.height == 0 {
+            return Size::new(0, 0);
+        }
+        let height = self.height() / cell_size.height;
+        let width = self.width() / cell_size.width;
+        Size { height, width }
     }
 
     /// Qunatize image
