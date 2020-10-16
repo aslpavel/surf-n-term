@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 #[derive(Debug)]
 pub enum Error {
@@ -7,6 +7,7 @@ pub enum Error {
     NotATTY,
     ParseError(&'static str, String),
     FeatureNotSupported,
+    Other(Cow<'static, str>),
 }
 
 impl fmt::Display for Error {

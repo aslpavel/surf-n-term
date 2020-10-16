@@ -24,6 +24,7 @@ signal-hook = "0.1"
 lazy_static = "1.1"
 flate2 = "1.0"
 lru = { version = "0.6", default-features = false }
+png = "0.16"
 
 [dev-dependencies]
 criterion = "0.3.*"

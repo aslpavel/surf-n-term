@@ -15,6 +15,8 @@ use std::{
     time::Duration,
 };
 
+const IMAGE_CACHE_SIZE: usize = 134217728; // 128MB
+
 /// Arc wrapped RGBA surface with precomputed hash
 #[derive(Clone)]
 pub struct Image {
@@ -98,6 +100,19 @@ impl Image {
             }
         }
         Some((palette, qimg))
+    }
+
+    pub fn write_png(&self, w: impl Write) -> Result<(), png::EncodingError> {
+        let mut encoder = png::Encoder::new(w, self.width() as u32, self.height() as u32);
+        encoder.set_color(png::ColorType::RGBA);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header()?;
+        let mut stream_writer = writer.stream_writer();
+        for color in self.iter() {
+            stream_writer.write_all(&color.rgba_u8())?;
+        }
+        stream_writer.flush()?;
+        Ok(())
     }
 }
 
@@ -201,6 +216,21 @@ pub fn image_handler_detect(term: &mut dyn Terminal) -> Result<Box<dyn ImageHand
     }
     // drain terminal
     while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
+    // check environment for handler override
+    if let Some(name) = std::env::var("SURF_N_TERM_IMG").ok() {
+        match name.as_ref() {
+            "iterm" => {
+                handler.replace(Box::new(ItermImageHandler::new()));
+            }
+            "kitty" => {
+                handler.replace(Box::new(KittyImageHandler::new(true)));
+            }
+            "sixel" => {
+                handler.replace(Box::new(SixelImageHandler::new(bg)));
+            }
+            _ => {}
+        }
+    }
     Ok(handler.unwrap_or_else(|| Box::new(DummyImageHandler)))
 }
 
@@ -212,6 +242,63 @@ impl ImageHandler for DummyImageHandler {
     }
 
     fn draw(&mut self, _img: &Image, _out: &mut dyn Write) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn erase(&mut self, _pos: Position, _out: &mut dyn Write) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
+        Ok(false)
+    }
+}
+
+pub struct ItermImageHandler {
+    imgs: lru::LruCache<u64, Vec<u8>>,
+    size: usize,
+}
+
+impl ItermImageHandler {
+    fn new() -> Self {
+        Self {
+            imgs: lru::LruCache::unbounded(),
+            size: 0,
+        }
+    }
+}
+
+impl ImageHandler for ItermImageHandler {
+    fn name(&self) -> &str {
+        "iterm"
+    }
+
+    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+        if let Some(data) = self.imgs.get(&img.hash()) {
+            out.write_all(data.as_slice())?;
+            return Ok(());
+        }
+
+        let mut data = Vec::new();
+        write!(data, "\x1b]1337;File=inline=1;width={}px:", img.width())?;
+        let mut base64 = Base64Encoder::new(&mut data);
+        img.write_png(&mut base64).map_err(|err| match err {
+            png::EncodingError::IoError(err) => err.into(),
+            png::EncodingError::Format(err) => Error::Other(err),
+        })?;
+        base64.finish()?;
+        data.write_all(b"\x07")?;
+
+        out.write_all(data.as_slice())?;
+
+        self.size += data.len();
+        self.imgs.put(img.hash(), data);
+        if self.size > IMAGE_CACHE_SIZE {
+            if let Some((_, lru_image)) = self.imgs.pop_lru() {
+                self.size -= lru_image.len();
+            }
+        }
+
         Ok(())
     }
 
@@ -330,8 +417,6 @@ impl ImageHandler for KittyImageHandler {
         }
     }
 }
-
-const SIXEL_CACHE_SIZE: usize = 134217728; // 128MB
 
 pub struct SixelImageHandler {
     imgs: lru::LruCache<u64, Vec<u8>>,
@@ -464,7 +549,7 @@ impl ImageHandler for SixelImageHandler {
 
         self.size += sixel_image.len();
         self.imgs.put(img.hash(), sixel_image);
-        if self.size > SIXEL_CACHE_SIZE {
+        if self.size > IMAGE_CACHE_SIZE {
             if let Some((_, lru_image)) = self.imgs.pop_lru() {
                 self.size -= lru_image.len();
             }
