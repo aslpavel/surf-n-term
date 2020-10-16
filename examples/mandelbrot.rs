@@ -62,22 +62,29 @@ fn main() -> Result<(), Error> {
     // loop
     let delay = Duration::from_millis(20);
     let mut count = 1;
-    let mut img = SurfaceOwned::new(58, 100);
+    let mut img_ascii = SurfaceOwned::new(58, 100);
+    let mut img = SurfaceOwned::new(232, 400);
     let color_start = "#000000".parse()?;
     let color_end = "#ffffff".parse()?;
     let colors = color_start..color_end;
     let mut ascii = true;
     term.run_render(|_term, event, mut view| -> Result<_, Error> {
-        mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);
         if ascii {
-            view.draw_image_ascii(&img);
+            mandelbrot(
+                -2.5..1.0,
+                -1.0..1.0,
+                &colors,
+                1 + (count % 60),
+                &mut img_ascii,
+            );
+            view.draw_image_ascii(&img_ascii);
         } else {
+            mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);
             view.draw_image(Image::new(img.to_owned_surf()));
         }
         count += 1;
 
-        // quit
-
+        // process event
         if event.as_ref() == Some(&q) || event.as_ref() == Some(&ctrl_c) {
             Ok(TerminalAction::Quit(()))
         } else {
