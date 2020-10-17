@@ -1,38 +1,38 @@
 [package]
-name = "surf_n_term"
-version = "0.1.0"
 authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 description = "Posix terminal rendering library"
+edition = "2018"
+homepage = "https://github.com/aslpavel/surf-n-term"
+include = [
+  "**/*.rs",
+  "**/Cargo.toml",
+  "**/README.md",
+]
 license = "MIT"
+name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-homepage = "https://github.com/aslpavel/surf-n-term"
-edition = "2018"
-include = [
-    "**/*.rs",
-    "**/Cargo.toml",
-    "**/README.md",
-]
+version = "0.1.0"
 
 [dependencies]
-surface = { path = "surface" }
-rasterize = { path = "rasterize" }
-nix = "0.18"
-libc = "0.2"
-fnv = "1.0"
-signal-hook = "0.1"
-lazy_static = "1.1"
 flate2 = "1.0"
-lru = { version = "0.6", default-features = false }
+fnv = "1.0"
+lazy_static = "1.1"
+libc = "0.2"
+lru = {version = "0.6", default-features = false}
+nix = "0.18"
 png = "0.16"
+rasterize = {path = "rasterize"}
+signal-hook = "0.1"
+surface = {path = "surface"}
 
 [dev-dependencies]
-criterion = "0.3.*"
+criterion = "0.3"
 
 [[bench]]
+harness = false
 name = "decoder"
-harness = false
 
 [[bench]]
-name = "quantize"
 harness = false
+name = "quantize"
