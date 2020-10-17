@@ -102,6 +102,7 @@ impl Image {
         Some((palette, qimg))
     }
 
+    /// Write image as PNG
     pub fn write_png(&self, w: impl Write) -> Result<(), png::EncodingError> {
         let mut encoder = png::Encoder::new(w, self.width() as u32, self.height() as u32);
         encoder.set_color(png::ColorType::RGBA);
