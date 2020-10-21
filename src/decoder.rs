@@ -2,10 +2,10 @@ use crate::{
     automata::{DFAState, DFA, NFA},
     error::Error,
     terminal::{DecModeStatus, Mouse, Size, TerminalColor, TerminalEvent, TerminalSize},
-    Key, KeyMod, KeyName,
+    Face, FaceAttrs, Key, KeyMod, KeyName, TerminalCommand, RGBA,
 };
 use lazy_static::lazy_static;
-use std::{collections::BTreeMap, fmt, io::BufRead};
+use std::{collections::BTreeMap, convert::TryInto, fmt, io::BufRead};
 
 pub trait Decoder {
     type Item;
@@ -125,6 +125,8 @@ pub struct TTYDecoder {
     rescheduled: Vec<u8>,
     /// Found non-terminal match with its size in the buffer
     possible: Option<(TerminalEvent, usize)>,
+    /// Used when decoding SGR commands, to track current face
+    face: Face,
 }
 
 impl Decoder for TTYDecoder {
@@ -171,6 +173,7 @@ impl TTYDecoder {
             rescheduled: Default::default(),
             buffer: Default::default(),
             possible: None,
+            face: Default::default(),
         }
     }
 
@@ -189,7 +192,7 @@ impl TTYDecoder {
                         .iter()
                         .next()
                         .expect("[TTYDecoder] found untagged accepting state");
-                    let event = tty_decoder_event(tag, &self.buffer)
+                    let event = tty_decoder_event(tag, &self.buffer, &mut self.face)
                         .unwrap_or_else(|| TerminalEvent::Raw(self.buffer.clone()));
                     if info.terminal {
                         // report event
@@ -450,7 +453,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         .tag(TTYTag::DeviceAttrs),
     );
 
-    // OSC response
+    // OSC (Operating System Command) response
     // "\x1b]<number>;.*\x1b\\"
     cmds.push(
         NFA::sequence(vec![
@@ -463,11 +466,22 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         .tag(TTYTag::OperatingSystemControl),
     );
 
+    // SGR (Set Graphic Rendition) sequence
+    let sgr_sequence = {
+        let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
+        NFA::sequence(vec![
+            NFA::from("\x1b["),
+            (code + NFA::from(";").optional()).some(),
+            NFA::from("m"),
+        ])
+    };
+    cmds.push(sgr_sequence.tag(TTYTag::SetGraphicRendition));
+
     NFA::choice(cmds).compile()
 }
 
 /// Convert tag plus current match to a TerminalEvent
-fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
+fn tty_decoder_event(tag: &TTYTag, data: &[u8], face: &mut Face) -> Option<TerminalEvent> {
     use TTYTag::*;
     let event = match tag {
         Event(event) => event.clone(),
@@ -610,6 +624,40 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8]) -> Option<TerminalEvent> {
             let color = std::str::from_utf8(args.next()?).ok()?.parse().ok()?;
             TerminalEvent::Color { name, color }
         }
+        SetGraphicRendition => {
+            // "\x1b[(<cmd>;?)*m"
+            let mut cmds = data[2..data.len() - 1].split(|c| *c == b';');
+            while let Some(cmd) = cmds.next() {
+                match number_decode(cmd) {
+                    Some(0) | None => *face = Face::default(),
+                    Some(1) => face.attrs |= FaceAttrs::BOLD,
+                    Some(3) => face.attrs |= FaceAttrs::ITALIC,
+                    Some(4) => face.attrs |= FaceAttrs::UNDERLINE,
+                    Some(5) => face.attrs |= FaceAttrs::BLINK,
+                    Some(7) | Some(27) => *face = face.invert(),
+                    Some(9) => face.attrs |= FaceAttrs::STRIKE,
+                    Some(21) => face.attrs = face.attrs.remove(FaceAttrs::BOLD),
+                    Some(23) => face.attrs = face.attrs.remove(FaceAttrs::ITALIC),
+                    Some(24) => face.attrs = face.attrs.remove(FaceAttrs::UNDERLINE),
+                    Some(25) => face.attrs = face.attrs.remove(FaceAttrs::BLINK),
+                    Some(29) => face.attrs = face.attrs.remove(FaceAttrs::STRIKE),
+                    Some(38) => face.fg = sgr_color(&mut cmds),
+                    Some(48) => face.bg = sgr_color(&mut cmds),
+                    Some(v) if v >= 30 && v <= 37 => face.fg = Some(COLORS[v - 30]),
+                    Some(v) if v >= 90 && v <= 97 => face.fg = Some(COLORS[v - 82]),
+                    Some(v) if v >= 40 && v <= 48 => face.bg = Some(COLORS[v - 40]),
+                    Some(v) if v >= 100 && v <= 107 => face.bg = Some(COLORS[v - 92]),
+                    _ => {
+                        // TODO:
+                        //   - de jure standard (ITU-T T.416)
+                        //   - different types of underline
+                        // [reference](https://github.com/csdvrx/sixel-testsuite/blob/master/ansi-vte52.sh)
+                        continue;
+                    }
+                }
+            }
+            TerminalEvent::Command(TerminalCommand::Face(*face))
+        }
     };
     Some(event)
 }
@@ -627,6 +675,7 @@ enum TTYTag {
     Terminfo,
     DeviceAttrs,
     OperatingSystemControl,
+    SetGraphicRendition,
 }
 
 impl fmt::Debug for TTYTag {
@@ -644,6 +693,7 @@ impl fmt::Debug for TTYTag {
             Terminfo => write!(f, "CAP")?,
             DeviceAttrs => write!(f, "DA1")?,
             OperatingSystemControl => write!(f, "OSC")?,
+            SetGraphicRendition => write!(f, "SGR")?,
         }
         Ok(())
     }
@@ -652,6 +702,63 @@ impl fmt::Debug for TTYTag {
 impl From<TerminalEvent> for TTYTag {
     fn from(event: TerminalEvent) -> TTYTag {
         TTYTag::Event(event)
+    }
+}
+
+const CUBE: [u8; 6] = [0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff];
+const GREYS: [u8; 24] = [
+    0x08, 0x12, 0x1c, 0x26, 0x30, 0x3a, 0x44, 0x4e, 0x58, 0x62, 0x6c, 0x76, 0x80, 0x8a, 0x94, 0x9e,
+    0xa8, 0xb2, 0xbc, 0xc6, 0xd0, 0xda, 0xe4, 0xee,
+];
+const COLORS: [RGBA; 16] = [
+    RGBA::new(0, 0, 0, 255),
+    RGBA::new(128, 0, 0, 255),
+    RGBA::new(0, 128, 0, 255),
+    RGBA::new(128, 128, 0, 255),
+    RGBA::new(0, 0, 128, 255),
+    RGBA::new(128, 0, 128, 255),
+    RGBA::new(0, 128, 128, 255),
+    RGBA::new(192, 192, 192, 255),
+    RGBA::new(128, 128, 128, 255),
+    RGBA::new(255, 0, 0, 255),
+    RGBA::new(0, 255, 0, 255),
+    RGBA::new(255, 255, 0, 255),
+    RGBA::new(0, 0, 255, 255),
+    RGBA::new(255, 0, 255, 255),
+    RGBA::new(0, 255, 255, 255),
+    RGBA::new(255, 255, 255, 255),
+];
+
+fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
+    match number_decode(cmds.next()?)? {
+        5 => {
+            // color from 256 color palette
+            let mut index = number_decode(cmds.next()?)?;
+            if index < 16 {
+                Some(COLORS[index])
+            } else if index < 232 {
+                index -= 16;
+                let ri = index / 36;
+                index -= ri * 36;
+                let gi = index / 6;
+                index -= gi * 6;
+                let bi = index;
+                Some(RGBA::new(CUBE[ri], CUBE[gi], CUBE[bi], 255))
+            } else if index < 256 {
+                let v = GREYS[index - 232];
+                Some(RGBA::new(v, v, v, 255))
+            } else {
+                None
+            }
+        }
+        2 => {
+            // true color
+            let r = number_decode(cmds.next()?)?.try_into().ok()?;
+            let g = number_decode(cmds.next()?)?.try_into().ok()?;
+            let b = number_decode(cmds.next()?)?.try_into().ok()?;
+            Some(RGBA::new(r, g, b, 255))
+        }
+        _ => None,
     }
 }
 
@@ -1103,6 +1210,39 @@ mod tests {
                     name: TerminalColor::Foreground,
                     color: "#ebdbb2".parse()?,
                 }
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sgr() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(
+            cursor.get_mut(),
+            "\x1b[48;5;150m\x1b[1m\x1b[38;2;255;128;64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m"
+        )?;
+
+        let mut result = Vec::new();
+        decoder.decode_into(&mut cursor, &mut result)?;
+        let face = |string: &str| -> Result<_, Error> {
+            Ok(TerminalEvent::Command(TerminalCommand::Face(
+                string.parse()?,
+            )))
+        };
+        assert_eq!(
+            result,
+            vec![
+                face("bg=#afd787")?,
+                face("bg=#afd787,bold")?,
+                face("bg=#afd787,fg=#ff8040,bold")?,
+                face("")?,
+                face("fg=#008000")?,
+                face("fg=#ff0000,bg=#00ff00,bold,underline")?,
+                face("fg=#ff0000,bg=#00ff00,bold")?,
             ]
         );
 

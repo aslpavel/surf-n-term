@@ -7,7 +7,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     io::Write,
-    ops::Range,
     sync::Arc,
     time::Duration,
 };
@@ -125,7 +124,7 @@ pub enum TerminalAction<R> {
     Sleep(Duration),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalCommand {
     /// Put character
     Char(char),
@@ -157,7 +156,10 @@ pub enum TerminalCommand {
     /// Scroll, positive is up and negative is down
     Scroll(i32),
     /// Set scroll region
-    ScrollRegion(Range<usize>),
+    ScrollRegion {
+        start: usize,
+        end: usize,
+    },
     /// Full reset of the terminal
     Reset,
     /// Draw image
@@ -300,6 +302,8 @@ pub enum TerminalEvent {
         name: TerminalColor,
         color: RGBA,
     },
+    // So we can use single decoder for commands and events
+    Command(TerminalCommand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

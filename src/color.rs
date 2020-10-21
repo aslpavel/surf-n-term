@@ -145,7 +145,23 @@ impl Color for ColorLinear {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RGBA(pub [u8; 4]);
 
+impl Default for RGBA {
+    fn default() -> Self {
+        Self([0, 0, 0, 0])
+    }
+}
+
 impl RGBA {
+    pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        RGBA([r, g, b, a])
+    }
+
+    pub fn with_alpha(self, alpha: f64) -> Self {
+        let Self([r, g, b, _]) = self;
+        let a = (clamp(alpha, 0.0, 1.0) * 255.0).round() as u8;
+        Self([r, g, b, a])
+    }
+
     /// Generate random opaque colors
     pub fn random() -> impl Iterator<Item = RGBA> {
         let mut rnd = Rnd::new();
@@ -158,24 +174,6 @@ impl RGBA {
                 255,
             ))
         })
-    }
-}
-
-impl Default for RGBA {
-    fn default() -> Self {
-        Self([0, 0, 0, 0])
-    }
-}
-
-impl RGBA {
-    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
-        RGBA([r, g, b, a])
-    }
-
-    pub fn with_alpha(self, alpha: f64) -> Self {
-        let Self([r, g, b, _]) = self;
-        let a = (clamp(alpha, 0.0, 1.0) * 255.0).round() as u8;
-        Self([r, g, b, a])
     }
 
     pub fn from_str_opt(rgba: &str) -> Option<Self> {

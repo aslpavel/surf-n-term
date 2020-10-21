@@ -73,11 +73,12 @@ impl Encoder for TTYEncoder {
                 }
                 if !face.attrs.is_empty() {
                     for (flag, code) in &[
-                        (FaceAttrs::BOLD, b";01"),
-                        (FaceAttrs::ITALIC, b";03"),
-                        (FaceAttrs::UNDERLINE, b";04"),
-                        (FaceAttrs::BLINK, b";05"),
-                        (FaceAttrs::REVERSE, b";07"),
+                        (FaceAttrs::BOLD, b";1"),
+                        (FaceAttrs::ITALIC, b";3"),
+                        (FaceAttrs::UNDERLINE, b";4"),
+                        (FaceAttrs::BLINK, b";5"),
+                        (FaceAttrs::REVERSE, b";7"),
+                        (FaceAttrs::STRIKE, b";9"),
                     ] {
                         if face.attrs.contains(*flag) {
                             out.write_all(*code)?;
@@ -93,9 +94,9 @@ impl Encoder for TTYEncoder {
                 Ordering::Greater => write!(out, "\x1b[{}S", count)?,
                 _ => (),
             },
-            ScrollRegion(range) => {
-                if range.end > range.start {
-                    write!(out, "\x1b[{};{}r", range.start + 1, range.end + 1)?;
+            ScrollRegion { start, end } => {
+                if end > start {
+                    write!(out, "\x1b[{};{}r", start + 1, end + 1)?;
                 } else {
                     write!(out, "\x1b[r")?;
                 }

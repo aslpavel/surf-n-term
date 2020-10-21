@@ -6,6 +6,7 @@ use crate::{
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt,
     io::{Cursor, Read, Write},
@@ -124,6 +125,24 @@ impl PartialEq for Image {
 }
 
 impl Eq for Image {}
+
+impl PartialOrd for Image {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.hash.partial_cmp(&other.hash)
+    }
+}
+
+impl Ord for Image {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.hash.cmp(&other.hash)
+    }
+}
+
+impl std::hash::Hash for Image {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash)
+    }
+}
 
 impl fmt::Debug for Image {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

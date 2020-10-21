@@ -1,5 +1,9 @@
 use crate::{Blend, Color, Error, RGBA};
-use std::{fmt, str::FromStr};
+use std::{
+    fmt,
+    ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign},
+    str::FromStr,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceAttrs {
@@ -13,6 +17,8 @@ impl FaceAttrs {
     pub const UNDERLINE: Self = FaceAttrs { bits: 4 };
     pub const BLINK: Self = FaceAttrs { bits: 8 };
     pub const REVERSE: Self = FaceAttrs { bits: 16 };
+    pub const STRIKE: Self = FaceAttrs { bits: 32 }; // aka Crossed-Out
+    const ALL: Self = FaceAttrs { bits: 63 };
 
     pub fn is_empty(self) -> bool {
         self == Self::EMPTY
@@ -22,6 +28,14 @@ impl FaceAttrs {
         self.bits & other.bits == other.bits
     }
 
+    pub fn insert(self, other: Self) -> Self {
+        self | other
+    }
+
+    pub fn remove(self, other: Self) -> Self {
+        self & (other ^ Self::ALL)
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &'static str> {
         let names = [
             (Self::BOLD, "bold"),
@@ -29,29 +43,68 @@ impl FaceAttrs {
             (Self::UNDERLINE, "underline"),
             (Self::BLINK, "blink"),
             (Self::REVERSE, "reverse"),
+            (Self::STRIKE, "strike"),
         ];
         let mut index = 0;
         let flags = *self;
         std::iter::from_fn(move || {
             while index < names.len() {
                 let (flag, name) = names[index];
+                index += 1;
                 if flags.contains(flag) {
                     return Some(name);
                 }
-                index += 1;
             }
             None
         })
     }
 }
 
-impl std::ops::BitOr for FaceAttrs {
+impl BitAnd for FaceAttrs {
     type Output = Self;
 
-    fn bitor(self, rhs: Self) -> Self {
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self {
+            bits: self.bits & rhs.bits,
+        }
+    }
+}
+
+impl BitAndAssign for FaceAttrs {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.bits &= rhs.bits
+    }
+}
+
+impl BitOr for FaceAttrs {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
         Self {
             bits: self.bits | rhs.bits,
         }
+    }
+}
+
+impl BitOrAssign for FaceAttrs {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.bits |= rhs.bits
+    }
+}
+
+impl BitXor for FaceAttrs {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self {
+            bits: self.bits ^ rhs.bits,
+        }
+    }
+}
+
+impl BitXorAssign for FaceAttrs {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.bits ^= rhs.bits
     }
 }
 
@@ -133,11 +186,13 @@ impl FromStr for Face {
                 match key.as_str() {
                     "fg" => face.fg = Some(value.parse()?),
                     "bg" => face.bg = Some(value.parse()?),
-                    "bold" => face.attrs = face.attrs | FaceAttrs::BOLD,
-                    "italic" => face.attrs = face.attrs | FaceAttrs::ITALIC,
-                    "underline" => face.attrs = face.attrs | FaceAttrs::UNDERLINE,
-                    "blink" => face.attrs = face.attrs | FaceAttrs::BLINK,
-                    "reverse" => face.attrs = face.attrs | FaceAttrs::REVERSE,
+                    "bold" => face.attrs |= FaceAttrs::BOLD,
+                    "italic" => face.attrs |= FaceAttrs::ITALIC,
+                    "underline" => face.attrs |= FaceAttrs::UNDERLINE,
+                    "blink" => face.attrs |= FaceAttrs::BLINK,
+                    "reverse" => face.attrs |= FaceAttrs::REVERSE,
+                    "strike" => face.attrs |= FaceAttrs::STRIKE,
+                    "" => {}
                     _ => return Err(Error::ParseError("Face", string.to_string())),
                 }
                 Ok(face)
