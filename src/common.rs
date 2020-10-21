@@ -142,6 +142,12 @@ pub struct Rnd {
     state: u32,
 }
 
+impl Default for Rnd {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Rnd {
     pub fn new() -> Self {
         Self::with_seed(0)

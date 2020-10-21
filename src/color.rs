@@ -186,7 +186,7 @@ impl RGBA {
             let blue = hex.next()?;
             let alpha = if rgba.len() == 9 { hex.next()? } else { 255 };
             Some(Self([red, green, blue, alpha]))
-        } else if rgba.starts_with("rgb:") {
+        } else if let Some(rgba) = rgba.strip_prefix("rgb:") {
             // rgb:r{1-4}/g{1-4}/b{1-4}
             // This format is used when querying colors with OCS,
             // refrence [xparsecolor](https://linux.die.net/man/3/xparsecolor)
@@ -201,7 +201,7 @@ impl RGBA {
                 };
                 Some(clamp(value, 0, 255) as u8)
             }
-            let mut iter = rgba[4..].split('/');
+            let mut iter = rgba.split('/');
             let red = parse_component(iter.next()?)?;
             let green = parse_component(iter.next()?)?;
             let blue = parse_component(iter.next()?)?;

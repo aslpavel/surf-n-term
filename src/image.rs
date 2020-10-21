@@ -237,7 +237,7 @@ pub fn image_handler_detect(term: &mut dyn Terminal) -> Result<Box<dyn ImageHand
     // drain terminal
     while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
     // check environment for handler override
-    if let Some(name) = std::env::var("SURF_N_TERM_IMG").ok() {
+    if let Ok(name) = std::env::var("SURF_N_TERM_IMG") {
         match name.as_ref() {
             "iterm" => {
                 handler.replace(Box::new(ItermImageHandler::new()));
