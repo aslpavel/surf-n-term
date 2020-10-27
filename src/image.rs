@@ -21,13 +21,13 @@ const IMAGE_CACHE_SIZE: usize = 134217728; // 128MB
 /// Arc wrapped RGBA surface with precomputed hash
 #[derive(Clone)]
 pub struct Image {
-    surf: Arc<dyn Surface<Item = RGBA>>,
+    surf: Arc<dyn Surface<Item = RGBA> + Send + Sync>,
     hash: u64,
 }
 
 impl Image {
     /// Create new image from the RGBA surface
-    pub fn new(surf: impl Surface<Item = RGBA> + 'static) -> Self {
+    pub fn new(surf: impl Surface<Item = RGBA> + Send + Sync + 'static) -> Self {
         Self {
             hash: surf.hash(),
             surf: Arc::new(surf),
@@ -166,7 +166,7 @@ impl Surface for Image {
     }
 }
 
-pub trait ImageHandler {
+pub trait ImageHandler: Send + Sync {
     /// Name
     fn name(&self) -> &str;
 
@@ -207,7 +207,9 @@ impl<'a> ImageHandler for Box<dyn ImageHandler> {
 }
 
 /// Detect appropriate image handler for provided termainl
-pub fn image_handler_detect(term: &mut dyn Terminal) -> Result<Box<dyn ImageHandler>, Error> {
+pub fn image_handler_detect(
+    term: &mut dyn Terminal,
+) -> Result<Box<dyn ImageHandler + 'static>, Error> {
     // NOTE: this function will not work on the second call, kitty handler will not propaget event
     // drain terminal
     while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
@@ -215,7 +217,7 @@ pub fn image_handler_detect(term: &mut dyn Terminal) -> Result<Box<dyn ImageHand
     term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?; // kitty image
     term.write_all(b"\x1b]11;?\x1b\\")?; // background color
     term.write_all(b"\x1b[c")?; // we expect to see response at least for this one or there will be 1s deley
-    let mut handler: Option<Box<dyn ImageHandler>> = None;
+    let mut handler: Option<Box<dyn ImageHandler + 'static>> = None;
     let mut bg: Option<RGBA> = None;
     for _ in 0..3 {
         match term.poll(Some(Duration::from_secs(1)))? {

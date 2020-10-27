@@ -50,7 +50,7 @@ pub struct UnixTerminal {
     sigwinch_id: signal_hook::SigId,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
-    image_handler: Box<dyn ImageHandler>,
+    image_handler: Box<dyn ImageHandler + 'static>,
 }
 
 impl UnixTerminal {
