@@ -87,9 +87,9 @@ impl UnixTerminal {
         let waker = TerminalWaker::new(move || {
             const WAKE: &[u8] = b"\x00";
             // use write syscall instead of locking so it would be safe to use in a signal handler
-            match nix::write(waker_write.as_raw_fd(), WAKE) {
+            match guard_nix(nix::write(waker_write.as_raw_fd(), WAKE), 0) {
                 Ok(_) => Ok(()),
-                Err(_) => Err(std::io::Error::last_os_error().into()),
+                Err(error) => Err(error.into()),
             }
         });
 
