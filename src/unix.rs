@@ -136,15 +136,13 @@ impl UnixTerminal {
     pub fn image_handler(&mut self) -> &mut dyn ImageHandler {
         &mut self.image_handler
     }
-}
 
-impl std::ops::Drop for UnixTerminal {
-    fn drop(&mut self) {
+    fn dispose(&mut self) -> Result<(), Error> {
         self.frames_drop();
 
         // revert descriptors to blocking mode
-        self.write_handle.set_blocking(true).unwrap_or(());
-        self.read_handle.set_blocking(true).unwrap_or(());
+        self.write_handle.set_blocking(true)?;
+        self.read_handle.set_blocking(true)?;
 
         // flush currently queued output and submit the epilogue
         let epilogue = [
@@ -179,7 +177,7 @@ impl std::ops::Drop for UnixTerminal {
                 }
                 Ok(())
             })
-            .unwrap_or(());
+            .unwrap_or(()); // ignore write errors
 
         // disable SIGIWNCH handler
         signal_hook::unregister(self.sigwinch_id);
@@ -189,8 +187,15 @@ impl std::ops::Drop for UnixTerminal {
             self.write_handle.as_raw_fd(),
             nix::SetArg::TCSAFLUSH,
             &self.termios_saved,
-        )
-        .unwrap_or(());
+        )?;
+
+        Ok(())
+    }
+}
+
+impl std::ops::Drop for UnixTerminal {
+    fn drop(&mut self) {
+        self.dispose().unwrap_or(())
     }
 }
 
