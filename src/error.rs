@@ -16,7 +16,19 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use Error::*;
+        match self {
+            IOError(ref error) => Some(error),
+            NixError(ref error) => Some(error),
+            NotATTY => None,
+            ParseError(..) => None,
+            FeatureNotSupported => None,
+            Other(..) => None,
+        }
+    }
+}
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {

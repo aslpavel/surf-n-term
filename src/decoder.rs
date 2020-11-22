@@ -248,6 +248,8 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
 
     cmds.push(basic_key("\x1b", KeyName::Esc));
     cmds.push(basic_key("\x7f", KeyName::Backspace));
+    cmds.push(basic_key("\x00", (KeyName::Char(' '), KeyMod::CTRL)));
+    cmds.push(basic_key("\x1b ", (KeyName::Char(' '), KeyMod::ALT)));
 
     // ascii keys with modifiers
     for byte in (0..=255u8).filter(|c| c.is_ascii_lowercase()) {
