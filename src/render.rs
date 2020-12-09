@@ -171,10 +171,7 @@ impl TerminalRenderer {
                     continue;
                 }
                 // identify glyph
-                let glyph = match src.glyph {
-                    None => ' ',
-                    Some(glyph) => glyph,
-                };
+                let glyph = src.glyph.unwrap_or(' ');
                 // find if it is possible to erase instead of using ' '
                 if glyph == ' ' {
                     let repeats = self.find_repeats(row, col);

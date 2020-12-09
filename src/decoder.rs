@@ -384,7 +384,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
 
     // character event (mostly utf8 but one-byte codes are restricted to the printable set)
     let char_nfa = {
-        let printable = NFA::predicate(|b| b >= b' ' && b <= b'~');
+        let printable = NFA::predicate(|b| (b' '..=b'~').contains(&b));
         let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
         let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
         let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
@@ -645,10 +645,10 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8], face: &mut Face) -> Option<Termi
                     Some(29) => face.attrs = face.attrs.remove(FaceAttrs::STRIKE),
                     Some(38) => face.fg = sgr_color(&mut cmds),
                     Some(48) => face.bg = sgr_color(&mut cmds),
-                    Some(v) if v >= 30 && v <= 37 => face.fg = Some(COLORS[v - 30]),
-                    Some(v) if v >= 90 && v <= 97 => face.fg = Some(COLORS[v - 82]),
-                    Some(v) if v >= 40 && v <= 48 => face.bg = Some(COLORS[v - 40]),
-                    Some(v) if v >= 100 && v <= 107 => face.bg = Some(COLORS[v - 92]),
+                    Some(v) if (30..=37).contains(&v) => face.fg = Some(COLORS[v - 30]),
+                    Some(v) if (90..=97).contains(&v) => face.fg = Some(COLORS[v - 82]),
+                    Some(v) if (40..=48).contains(&v) => face.bg = Some(COLORS[v - 40]),
+                    Some(v) if (100..=107).contains(&v) => face.bg = Some(COLORS[v - 92]),
                     _ => {
                         // TODO:
                         //   - de jure standard (ITU-T T.416)
