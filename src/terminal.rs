@@ -72,23 +72,38 @@ pub trait Terminal: Write {
         Self: Sized,
     {
         let mut renderer = TerminalRenderer::new(self, false)?;
-        // run with render event handler
-        self.run(Some(Duration::new(0, 0)), move |term, event| {
-            // allocate new renderer on resize
-            if let Some(TerminalEvent::Resize(_)) = event {
-                renderer = TerminalRenderer::new(term, true)?;
+        let mut timeout = Some(Duration::new(0, 0)); // run first loop immediately
+        loop {
+            match self.poll(timeout) {
+                Err(error) => {
+                    // cleanup on error
+                    renderer.clear();
+                    renderer.frame(self)?;
+                    return Err(error.into());
+                }
+                Ok(event) => {
+                    // allocate new renderer on resize
+                    if let Some(TerminalEvent::Resize(_)) = event {
+                        renderer = TerminalRenderer::new(self, true)?;
+                    }
+                    // handle event
+                    let action = handler(self, event, renderer.view())?;
+                    // drop frames if we are too far behind
+                    if self.frames_pending() > TERMINAL_FRAMES_DROP {
+                        self.frames_drop();
+                        renderer.clear();
+                    }
+                    // render frame
+                    renderer.frame(self)?;
+                    // handle action
+                    timeout = match action {
+                        TerminalAction::Quit(result) => return Ok(result),
+                        TerminalAction::Wait => None,
+                        TerminalAction::Sleep(timeout) => Some(timeout),
+                    };
+                }
             }
-            // handle event
-            let result = handler(term, event, renderer.view())?;
-            // drop frames if we are too far behind
-            if term.frames_pending() > TERMINAL_FRAMES_DROP {
-                term.frames_drop();
-                renderer.clear();
-            }
-            // render frame
-            renderer.frame(term)?;
-            Ok(result)
-        })
+        }
     }
 
     /// Number of pending frames (equal to number of flush calls) to be rendered

@@ -273,7 +273,7 @@ impl Terminal for UnixTerminal {
                 })?;
                 self.stats.send += send;
             }
-            // process SIGWINCH
+            // process signals
             if read_set.contains(signal_fd) {
                 for signal in self.signal_delivery.pending() {
                     match signal {
