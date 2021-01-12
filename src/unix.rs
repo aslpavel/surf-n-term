@@ -10,6 +10,10 @@ use crate::{
     },
     DecMode, ImageHandler,
 };
+use signal_hook::{
+    consts::SIGWINCH,
+    iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
+};
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::VecDeque,
@@ -46,8 +50,7 @@ pub struct UnixTerminal {
     waker_read: nix::UnixStream,
     waker: TerminalWaker,
     termios_saved: nix::Termios,
-    sigwinch_read: nix::UnixStream,
-    sigwinch_id: signal_hook::SigId,
+    signal_delivery: SignalDelivery<nix::UnixStream, SignalOnly>,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
     image_handler: Box<dyn ImageHandler + 'static>,
@@ -77,9 +80,10 @@ impl UnixTerminal {
         nix::cfmakeraw(&mut termios);
         nix::tcsetattr(write_fd, nix::SetArg::TCSAFLUSH, &termios)?;
 
-        // self-pipe trick to handle SIGWINCH (window resize) signal
-        let (sigwinch_read, sigwinch_write) = nix::UnixStream::pair()?;
-        let sigwinch_id = signal_hook::pipe::register(signal_hook::SIGWINCH, sigwinch_write)?;
+        // signal delivery
+        let (signal_read, signal_write) = nix::UnixStream::pair()?;
+        let signal_delivery =
+            SignalDelivery::with_pipe(signal_read, signal_write, SignalOnly, &[SIGWINCH])?;
 
         // self-pipe trick to implement waker
         let (waker_read, waker_write) = nix::UnixStream::pair()?;
@@ -98,7 +102,6 @@ impl UnixTerminal {
 
         read_handle.set_blocking(false)?;
         write_handle.set_blocking(false)?;
-        set_blocking(sigwinch_read.as_raw_fd(), false)?;
         set_blocking(waker_read.as_raw_fd(), false)?;
 
         let mut term = Self {
@@ -111,8 +114,7 @@ impl UnixTerminal {
             waker_read,
             waker,
             termios_saved,
-            sigwinch_read,
-            sigwinch_id,
+            signal_delivery,
             stats: TerminalStats::new(),
             tee: None,
             image_handler: Box::new(DummyImageHandler),
@@ -179,8 +181,8 @@ impl UnixTerminal {
             })
             .unwrap_or(()); // ignore write errors
 
-        // disable SIGIWNCH handler
-        signal_hook::unregister(self.sigwinch_id);
+        // disable signal handler
+        self.signal_delivery.handle().close();
 
         // restore termios settings
         nix::tcsetattr(
@@ -219,7 +221,7 @@ impl Terminal for UnixTerminal {
         let mut write_set = nix::FdSet::new();
         let write_fd = self.write_handle.as_raw_fd();
         let read_fd = self.read_handle.as_raw_fd();
-        let sigwinch_fd = self.sigwinch_read.as_raw_fd();
+        let signal_fd = self.signal_delivery.get_read().as_raw_fd();
         let waker_fd = self.waker_read.as_raw_fd();
 
         let timeout_instant = timeout.map(|dur| Instant::now() + dur);
@@ -228,7 +230,7 @@ impl Terminal for UnixTerminal {
             // update descriptors sets
             read_set.clear();
             read_set.insert(read_fd);
-            read_set.insert(sigwinch_fd);
+            read_set.insert(signal_fd);
             read_set.insert(waker_fd);
             write_set.clear();
             if !self.write_queue.is_empty() {
@@ -268,11 +270,15 @@ impl Terminal for UnixTerminal {
                 self.stats.send += send;
             }
             // process SIGWINCH
-            if read_set.contains(sigwinch_fd) {
-                let mut buf = [0u8; 1];
-                if guard_io(self.sigwinch_read.read(&mut buf), 0)? != 0 {
-                    self.events_queue
-                        .push_back(TerminalEvent::Resize(self.size()?));
+            if read_set.contains(signal_fd) {
+                for signal in self.signal_delivery.pending() {
+                    match signal {
+                        SIGWINCH => {
+                            self.events_queue
+                                .push_back(TerminalEvent::Resize(self.size()?));
+                        }
+                        _ => {}
+                    }
                 }
             }
             // process waker
