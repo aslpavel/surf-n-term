@@ -2,6 +2,7 @@ use std::{borrow::Cow, fmt};
 
 #[derive(Debug)]
 pub enum Error {
+    Quit,
     IOError(std::io::Error),
     NixError(nix::Error),
     NotATTY,
@@ -20,6 +21,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use Error::*;
         match self {
+            Quit => None,
             IOError(ref error) => Some(error),
             NixError(ref error) => Some(error),
             NotATTY => None,

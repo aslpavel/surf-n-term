@@ -11,7 +11,7 @@ use crate::{
     DecMode, ImageHandler,
 };
 use signal_hook::{
-    consts::SIGWINCH,
+    consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
 };
 use std::os::unix::io::AsRawFd;
@@ -82,8 +82,12 @@ impl UnixTerminal {
 
         // signal delivery
         let (signal_read, signal_write) = nix::UnixStream::pair()?;
-        let signal_delivery =
-            SignalDelivery::with_pipe(signal_read, signal_write, SignalOnly, &[SIGWINCH])?;
+        let signal_delivery = SignalDelivery::with_pipe(
+            signal_read,
+            signal_write,
+            SignalOnly,
+            &[SIGWINCH, SIGTERM, SIGINT, SIGQUIT],
+        )?;
 
         // self-pipe trick to implement waker
         let (waker_read, waker_write) = nix::UnixStream::pair()?;
@@ -276,6 +280,9 @@ impl Terminal for UnixTerminal {
                         SIGWINCH => {
                             self.events_queue
                                 .push_back(TerminalEvent::Resize(self.size()?));
+                        }
+                        SIGTERM | SIGINT | SIGQUIT => {
+                            return Err(Error::Quit);
                         }
                         _ => {}
                     }
