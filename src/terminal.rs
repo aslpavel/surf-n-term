@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    render::{TerminalRenderer, TerminalSurface},
+    render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
     Face, Image, Key, KeyMod, KeyName, RGBA,
 };
 use std::{
@@ -74,11 +74,13 @@ pub trait Terminal: Write {
         let mut renderer = TerminalRenderer::new(self, false)?;
         let mut timeout = Some(Duration::new(0, 0)); // run first loop immediately
         loop {
-            match self.poll(timeout) {
+            let event = self.poll(timeout);
+            match event {
                 Err(error) => {
                     // cleanup on error
-                    renderer.clear();
+                    renderer.view().erase(None);
                     renderer.frame(self)?;
+                    let _ = self.poll(Some(Duration::new(0, 0)));
                     return Err(error.into());
                 }
                 Ok(event) => {
