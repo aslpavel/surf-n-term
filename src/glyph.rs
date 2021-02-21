@@ -1,6 +1,6 @@
 use crate::{Color, ColorLinear, Image, Size};
 pub use rasterize::FillRule;
-use rasterize::{Align, BBox, Path, Point, Transform};
+use rasterize::{Align, BBox, Path, Point, SignedDifferenceRasterizer, Transform};
 use std::{
     hash::{Hash, Hasher},
     io::Write,
@@ -53,8 +53,14 @@ impl Glyph {
 
     pub fn rasterize(&self, fg: impl Color, bg: impl Color, size: Size) -> Image {
         let mut surf = SurfaceOwned::new(size.height, size.width);
-        self.path
-            .rasterize_fit(Transform::default(), self.fill_rule, Align::Mid, &mut surf);
+        let rasterizer = SignedDifferenceRasterizer::default();
+        self.path.rasterize_fit(
+            rasterizer,
+            Transform::default(),
+            self.fill_rule,
+            Align::Mid,
+            &mut surf,
+        );
         let fg: ColorLinear = fg.into();
         let bg: ColorLinear = bg.into();
         let img = surf.map(|_, _, t| bg.lerp(fg, *t).into());
