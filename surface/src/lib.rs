@@ -42,16 +42,12 @@ impl Shape {
     /// Get row and column corresonding to nth element in row-major order
     #[inline]
     pub fn nth(&self, n: usize) -> Option<(usize, usize)> {
-        if self.width == 0 || self.height == 0 {
+        if self.width == 0 {
             return None;
         }
         let row = n / self.width;
         let col = n - row * self.width;
-        if row >= self.height || col >= self.width {
-            None
-        } else {
-            Some((row, col))
-        }
+        (row < self.height).then(move || (row, col))
     }
 }
 
@@ -125,6 +121,13 @@ pub trait Surface {
     {
         SurfaceView {
             shape: view_shape(self.shape(), rows, cols),
+            data: self.data(),
+        }
+    }
+
+    fn as_ref(&self) -> SurfaceView<'_, Self::Item> {
+        SurfaceView {
+            shape: self.shape(),
             data: self.data(),
         }
     }
@@ -235,6 +238,13 @@ pub trait SurfaceMut: Surface {
     {
         SurfaceMutView {
             shape: view_shape(self.shape(), rows, cols),
+            data: self.data_mut(),
+        }
+    }
+
+    fn as_mut(&mut self) -> SurfaceMutView<'_, Self::Item> {
+        SurfaceMutView {
+            shape: self.shape(),
             data: self.data_mut(),
         }
     }
@@ -498,6 +508,10 @@ impl<T> SurfaceOwned<T> {
             end: data.len(),
         };
         Self { shape, data }
+    }
+
+    pub fn to_vec(self) -> Vec<T> {
+        self.data
     }
 }
 

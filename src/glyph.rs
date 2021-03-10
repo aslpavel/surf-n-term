@@ -1,12 +1,15 @@
 use crate::{Color, ColorLinear, Image, Size};
 pub use rasterize::FillRule;
-use rasterize::{Align, BBox, Path, Point, SignedDifferenceRasterizer, Transform};
+use rasterize::{
+    Align, BBox, ImageMutRef, Path, Point, Shape as ImageShape, SignedDifferenceRasterizer,
+    Transform,
+};
 use std::{
     hash::{Hash, Hasher},
     io::Write,
     sync::Arc,
 };
-use surface::{Surface, SurfaceOwned};
+use surface::{Surface, SurfaceMut, SurfaceOwned};
 
 pub struct Glyph {
     /// Path scaled to fit in 1000x1000 grid
@@ -53,13 +56,22 @@ impl Glyph {
 
     pub fn rasterize(&self, fg: impl Color, bg: impl Color, size: Size) -> Image {
         let mut surf = SurfaceOwned::new(size.height, size.width);
+        let mut img = ImageMutRef::new(
+            ImageShape {
+                width: surf.width(),
+                height: surf.height(),
+                row_stride: surf.width(),
+                col_stride: 0,
+            },
+            surf.data_mut(),
+        );
         let rasterizer = SignedDifferenceRasterizer::default();
         self.path.rasterize_fit(
             rasterizer,
             Transform::default(),
             self.fill_rule,
             Align::Mid,
-            &mut surf,
+            &mut img,
         );
         let fg: ColorLinear = fg.into();
         let bg: ColorLinear = bg.into();
