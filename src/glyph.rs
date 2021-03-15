@@ -1,7 +1,7 @@
 use crate::{Color, ColorLinear, Image, Size};
 pub use rasterize::FillRule;
 use rasterize::{
-    Align, BBox, ImageMutRef, Path, Point, Shape as ImageShape, SignedDifferenceRasterizer,
+    Align, BBox, Image as _, ImageMutRef, Path, Shape as ImageShape, SignedDifferenceRasterizer,
     Transform,
 };
 use std::{
@@ -38,13 +38,14 @@ impl Hash for Glyph {
 impl Glyph {
     pub fn new(mut path: Path, fill_rule: FillRule) -> Self {
         if let Some(src_bbox) = path.bbox(Transform::default()) {
-            let dst_bbox = BBox::new(Point::new(0.0, 0.0), Point::new(1000.0, 1000.0));
-            let tr = Transform::fit(src_bbox, dst_bbox, Align::Mid);
+            let dst_bbox = BBox::new((0.0, 0.0), (1000.0, 1000.0));
+            let tr = Transform::fit_bbox(src_bbox, dst_bbox, Align::Mid);
             path.transform(tr);
         }
 
         let mut hasher = GlyphHasher::new();
-        path.save(&mut hasher).expect("in memory write failed");
+        path.write_svg_path(&mut hasher)
+            .expect("in memory write failed");
         let hash = hasher.finish();
 
         Self {
@@ -66,13 +67,12 @@ impl Glyph {
             surf.data_mut(),
         );
         let rasterizer = SignedDifferenceRasterizer::default();
-        self.path.rasterize_fit(
-            rasterizer,
-            Transform::default(),
-            self.fill_rule,
+        let tr = Transform::fit_size(
+            BBox::new((0.0, 0.0), (1000.0, 1000.0)),
+            img.size(),
             Align::Mid,
-            &mut img,
         );
+        self.path.mask(rasterizer, tr, self.fill_rule, &mut img);
         let fg: ColorLinear = fg.into();
         let bg: ColorLinear = bg.into();
         let img = surf.map(|_, _, t| bg.lerp(fg, *t).into());
