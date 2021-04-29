@@ -1,8 +1,0 @@
-[package]
-authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
-edition = "2018"
-name = "surface"
-version = "0.1.0"
-
-[dependencies]
-fnv = "1.0.7"

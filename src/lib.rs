@@ -13,6 +13,7 @@ pub mod image;
 pub mod keys;
 pub mod render;
 pub mod style;
+pub mod surface;
 pub mod terminal;
 mod unix;
 pub mod widgets;

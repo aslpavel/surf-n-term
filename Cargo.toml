@@ -24,7 +24,6 @@ nix = "0.18"
 png = "0.16"
 rasterize = {path = "rasterize"}
 signal-hook = "0.3"
-surface = {path = "surface"}
 
 [dev-dependencies]
 criterion = "0.3"

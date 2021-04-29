@@ -1,4 +1,4 @@
-use crate::{Color, ColorLinear, Image, Size};
+use crate::{Color, ColorLinear, Image, Size, Surface, SurfaceMut, SurfaceOwned};
 pub use rasterize::FillRule;
 use rasterize::{
     Align, BBox, Image as _, ImageMutRef, Path, Shape as ImageShape, SignedDifferenceRasterizer,
@@ -9,7 +9,6 @@ use std::{
     io::Write,
     sync::Arc,
 };
-use surface::{Surface, SurfaceMut, SurfaceOwned};
 
 pub struct Glyph {
     /// Path scaled to fit in 1000x1000 grid
