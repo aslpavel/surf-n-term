@@ -1,6 +1,6 @@
 use crate::{Color, ColorLinear, Image, Size, Surface, SurfaceMut, SurfaceOwned};
-pub use ruster::FillRule;
-use ruster::{
+pub use rasterize::FillRule;
+use rasterize::{
     Align, BBox, Image as _, ImageMutRef, Path, Shape as ImageShape, SignedDifferenceRasterizer,
     Transform,
 };

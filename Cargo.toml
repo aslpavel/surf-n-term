@@ -23,8 +23,8 @@ lru = {version = "0.6", default-features = false}
 nix = "0.18"
 png = "0.16"
 signal-hook = "0.3"
-ruster = { git = "https://github.com/aslpavel/ruster.git", branch = "main" }
-# ruster = { path = "../ruster" }
+rasterize = "0.1"
+# ruster = { path = "../rasterize" }
 
 [dev-dependencies]
 criterion = "0.3"
