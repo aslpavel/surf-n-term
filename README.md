@@ -3,6 +3,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Crate](https://img.shields.io/crates/v/surf-n-term.svg)](https://crates.io/crates/surf-n-term)
 [![API Docs](https://docs.rs/surf-n-term/badge.svg)](https://docs.rs/surf-n-term)
+
 This crate is used to interract with Posix terminal. It can be used to
 - Read events from the terminal
 - Send commands to the terminal
