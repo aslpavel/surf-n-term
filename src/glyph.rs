@@ -1,6 +1,6 @@
 use crate::{Color, ColorLinear, Image, Size, Surface, SurfaceMut, SurfaceOwned};
-pub use rasterize::FillRule;
-use rasterize::{
+pub use ruster::FillRule;
+use ruster::{
     Align, BBox, Image as _, ImageMutRef, Path, Shape as ImageShape, SignedDifferenceRasterizer,
     Transform,
 };
@@ -61,7 +61,7 @@ impl Glyph {
                 width: surf.width(),
                 height: surf.height(),
                 row_stride: surf.width(),
-                col_stride: 0,
+                col_stride: 1,
             },
             surf.data_mut(),
         );
