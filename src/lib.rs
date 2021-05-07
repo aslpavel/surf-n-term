@@ -6,8 +6,8 @@
 //!  - Supports kitty/sixel image protocol
 //!
 //! ### Simple example
-//! ```rust
-//! use surf_n_term::{Terminal, TerminalEvent, Error};
+//! ```no_run
+//! use surf_n_term::{Terminal, TerminalEvent, TerminalAction, SystemTerminal, Error};
 //!
 //! fn main() -> Result<(), Error> {
 //!     let ctrl_c = TerminalEvent::Key("ctrl+c".parse()?);
