@@ -1,8 +1,10 @@
+//! Terminal rendering logic
 use crate::{
     decoder::Decoder, error::Error, Face, FaceAttrs, Image, Position, Surface, SurfaceMut,
     SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
 };
 
+/// Terminal cell kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CellKind {
     /// Contains usefull content
@@ -13,6 +15,7 @@ enum CellKind {
     Damaged,
 }
 
+/// Terminal cell
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
     face: Face,
@@ -22,6 +25,7 @@ pub struct Cell {
 }
 
 impl Cell {
+    /// Create new cell from face and char
     pub fn new(face: Face, glyph: Option<char>) -> Self {
         Self {
             face,
@@ -31,6 +35,7 @@ impl Cell {
         }
     }
 
+    /// Create new cell from image
     pub fn new_image(image: Image) -> Self {
         Self {
             face: Default::default(),
@@ -40,7 +45,8 @@ impl Cell {
         }
     }
 
-    fn new_damnaged() -> Self {
+    /// Create damaged cell
+    fn new_damaged() -> Self {
         Self {
             face: Default::default(),
             glyph: None,
@@ -63,22 +69,32 @@ impl Default for Cell {
 
 pub type TerminalSurface<'a> = SurfaceMutView<'a, Cell>;
 
+/// Terminal renderer
+///
+/// This object keeps two surfaces (front and back) and on each call to frame
+/// generates necessary terminal commands to reconcile them.
 pub struct TerminalRenderer {
+    /// Current face
     face: Face,
+    /// Current cursor position
     cursor: Position,
+    /// Front surface (modified)
     front: SurfaceOwned<Cell>,
+    /// Back surface (keeping previous state)
     back: SurfaceOwned<Cell>,
+    /// Current terminal size
     size: TerminalSize,
 }
 
 impl TerminalRenderer {
+    /// Create new terminal renderer
     pub fn new<T: Terminal + ?Sized>(term: &mut T, clear: bool) -> Result<Self, Error> {
         let size = term.size()?;
         term.execute(TerminalCommand::Face(Default::default()))?;
         term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
         let mut back = SurfaceOwned::new(size.cells.height, size.cells.width);
         if clear {
-            back.fill(Cell::new_damnaged());
+            back.fill(Cell::new_damaged());
         }
         Ok(Self {
             face: Default::default(),
@@ -89,11 +105,12 @@ impl TerminalRenderer {
         })
     }
 
+    /// Clear terminal
     pub fn clear(&mut self) {
         self.face = Face::default().with_fg(Some(RGBA::new(254, 0, 253, 252)));
         self.cursor = Position::new(100_000, 100_000);
-        self.front.fill(Cell::new_damnaged());
-        self.back.fill(Cell::new_damnaged());
+        self.front.fill(Cell::new_damaged());
+        self.back.fill(Cell::new_damaged());
     }
 
     /// View associated with the current frame
@@ -201,6 +218,7 @@ impl TerminalRenderer {
         Ok(())
     }
 
+    /// Find how many identical cells is located starting from provided coordinate
     fn find_repeats(&self, row: usize, col: usize) -> usize {
         let first = self.front.get(row, col);
         if first.is_none() {
@@ -220,11 +238,17 @@ impl TerminalRenderer {
     }
 }
 
+/// Terminal surface extention trait
 pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
+    /// Draw box
     fn draw_box(&mut self, face: Option<Face>);
+    /// Draw image encoded as ascii blocks
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
+    /// Draw image
     fn draw_image(&mut self, img: Image);
+    /// Erase surface with provided color
     fn erase(&mut self, color: Option<RGBA>);
+    /// Write object that can be used to add text to the surface
     fn writer(&mut self) -> TerminalWriter<'_>;
 }
 
@@ -319,14 +343,17 @@ impl<'a> TerminalWriter<'a> {
         }
     }
 
+    /// Create new surface with updated face
     pub fn face(self, face: Face) -> Self {
         Self { face, ..self }
     }
 
+    /// Set current face
     pub fn face_set(&mut self, face: Face) {
         self.face = face;
     }
 
+    /// Skip offset ammount of cells (row major order)
     pub fn skip(mut self, offset: usize) -> Self {
         if offset > 0 {
             self.iter.nth(offset - 1);
@@ -334,6 +361,7 @@ impl<'a> TerminalWriter<'a> {
         self
     }
 
+    /// Get current position
     pub fn position(&self) -> (usize, usize) {
         self.iter.position()
     }
@@ -342,6 +370,7 @@ impl<'a> TerminalWriter<'a> {
         value.fmt(self)
     }
 
+    /// Put cell
     pub fn put(&mut self, cell: Cell) -> bool {
         match self.iter.next() {
             Some(cell_ref) => {
@@ -352,6 +381,7 @@ impl<'a> TerminalWriter<'a> {
         }
     }
 
+    /// Put char
     pub fn put_char(&mut self, c: char, face: Face) -> bool {
         match c {
             '\r' => true,

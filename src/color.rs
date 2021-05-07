@@ -1,3 +1,4 @@
+//! Color definition
 use crate::common::{clamp, Rnd};
 use crate::error::Error;
 use std::{
@@ -6,6 +7,7 @@ use std::{
     str::FromStr,
 };
 
+/// Blend methods
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Blend {
     Over,
@@ -142,6 +144,7 @@ impl Color for ColorLinear {
     }
 }
 
+/// u8 RGBA color
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RGBA(pub [u8; 4]);
 
@@ -156,6 +159,7 @@ impl RGBA {
         RGBA([r, g, b, a])
     }
 
+    /// Override alpha channel
     pub fn with_alpha(self, alpha: f64) -> Self {
         let Self([r, g, b, _]) = self;
         let a = (clamp(alpha, 0.0, 1.0) * 255.0).round() as u8;
@@ -176,6 +180,7 @@ impl RGBA {
         })
     }
 
+    /// Parse color from string
     pub fn from_str_opt(rgba: &str) -> Option<Self> {
         let rgba = rgba.trim_matches('"');
         if rgba.starts_with('#') && (rgba.len() == 7 || rgba.len() == 9) {

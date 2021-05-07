@@ -1,9 +1,13 @@
+/// Key types
 use crate::Error;
 use std::{collections::HashMap, fmt, str::FromStr, sync::Arc};
 
+/// Key descriptor
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key {
+    /// Key name
     pub name: KeyName,
+    /// Key mode
     pub mode: KeyMod,
 }
 
@@ -12,6 +16,7 @@ impl Key {
         Self { name, mode }
     }
 
+    /// Convert string to a vector keys
     pub fn chord(keys: impl AsRef<str>) -> Result<Vec<Key>, Error> {
         let chord = keys
             .as_ref()
@@ -92,6 +97,7 @@ impl FromStr for Key {
     }
 }
 
+/// Key name
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KeyName {
     F1,
@@ -221,6 +227,7 @@ impl FromStr for KeyName {
     }
 }
 
+/// Key mode object
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyMod {
     bits: u8,
@@ -234,14 +241,17 @@ impl KeyMod {
     pub const CTRL: Self = KeyMod { bits: 4 };
     pub const PRESS: Self = KeyMod { bits: 8 };
 
+    /// Key mode is empty
     pub fn is_empty(self) -> bool {
         self == Self::EMPTY
     }
 
+    /// Contains specified mod
     pub fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
     }
 
+    /// Create mod from byte
     pub fn from_bits(bits: u8) -> Self {
         Self { bits }
     }
@@ -295,13 +305,18 @@ impl fmt::Display for KeyMod {
     }
 }
 
+/// Result returned by KeyMap lookup
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum KeyMapResult<V> {
+    /// Key sequence is bound to value V
     Success(V),
+    /// Sequence is not bound to anything
     Failure,
+    /// More key presses is required to determine if it is bound
     Continue,
 }
 
+/// Collection of key bindings
 pub struct KeyMap<V> {
     mapping: HashMap<Key, Result<V, KeyMap<V>>>,
 }
@@ -313,6 +328,7 @@ impl<V> Default for KeyMap<V> {
 }
 
 impl<V> KeyMap<V> {
+    /// Create empty key binding collection
     pub fn new() -> Self {
         Self {
             mapping: Default::default(),

@@ -1,3 +1,4 @@
+//! Type describing foreground/background/style-attrs of the terminal cell
 use crate::{Blend, Color, Error, RGBA};
 use std::{
     fmt,
@@ -5,6 +6,7 @@ use std::{
     str::FromStr,
 };
 
+/// Face style attributes
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceAttrs {
     bits: u16,
@@ -20,22 +22,27 @@ impl FaceAttrs {
     pub const STRIKE: Self = FaceAttrs { bits: 32 }; // aka Crossed-Out
     const ALL: Self = FaceAttrs { bits: 63 };
 
+    /// Empty/Default style
     pub fn is_empty(self) -> bool {
         self == Self::EMPTY
     }
 
+    /// Check if self contains any of the other attributes
     pub fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
     }
 
+    /// Add all attributes set in the other
     pub fn insert(self, other: Self) -> Self {
         self | other
     }
 
+    /// Remove all attributes set in the other
     pub fn remove(self, other: Self) -> Self {
         self & (other ^ Self::ALL)
     }
 
+    /// List names of all set attributes
     pub fn names(&self) -> impl Iterator<Item = &'static str> {
         let names = [
             (Self::BOLD, "bold"),
@@ -115,10 +122,14 @@ impl fmt::Debug for FaceAttrs {
     }
 }
 
+/// Type describing foreground/background/style-attrs of the terminal cell
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Face {
+    /// Foreground color
     pub fg: Option<RGBA>,
+    /// Background color
     pub bg: Option<RGBA>,
+    /// Style attributes
     pub attrs: FaceAttrs,
 }
 
@@ -127,18 +138,22 @@ impl Face {
         Self { fg, bg, attrs }
     }
 
+    /// Override background color
     pub fn with_bg(&self, bg: Option<RGBA>) -> Self {
         Face { bg, ..*self }
     }
 
+    /// Override foreground color
     pub fn with_fg(&self, fg: Option<RGBA>) -> Self {
         Face { fg, ..*self }
     }
 
+    /// Override style attributes
     pub fn with_attrs(&self, attrs: FaceAttrs) -> Self {
         Face { attrs, ..*self }
     }
 
+    /// Swap foreground and background colors
     pub fn invert(&self) -> Self {
         Face {
             fg: self.bg,

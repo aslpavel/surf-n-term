@@ -1,8 +1,10 @@
+//! Common utility funcitons used across different modules
 use std::{
     collections::VecDeque,
     io::{BufRead, Read, Write},
 };
 
+/// Clamp value to the value between `min` and `max`
 #[inline]
 pub fn clamp<T>(val: T, min: T, max: T) -> T
 where
@@ -17,6 +19,7 @@ where
     }
 }
 
+/// Readable and writable IO queue
 pub struct IOQueue {
     chunks: VecDeque<Vec<u8>>,
     offset: usize,
@@ -24,6 +27,7 @@ pub struct IOQueue {
 }
 
 impl IOQueue {
+    /// Create new empty queue
     pub fn new() -> Self {
         Self {
             chunks: Default::default(),
@@ -32,20 +36,24 @@ impl IOQueue {
         }
     }
 
+    /// Check if queue is empty
     pub fn is_empty(&self) -> bool {
         self.chunks.is_empty()
     }
 
+    /// Number of bytes available to be read from the queue
     pub fn len(&self) -> usize {
         self.length
     }
 
+    /// Drop all but last chunks
     pub fn clear_but_last(&mut self) {
         if self.chunks.len() > 1 {
             self.chunks.drain(1..);
         }
     }
 
+    /// Number of avaiable chunks
     pub fn chunks_count(&self) -> usize {
         self.chunks.len()
     }
@@ -71,6 +79,8 @@ impl IOQueue {
         }
     }
 
+    /// Consume single chunk from the queue. Function `consumer` returns number of bytes
+    /// to be removed from the queue.
     pub fn consume_with<F, FE>(&mut self, consumer: F) -> Result<usize, FE>
     where
         F: FnOnce(&[u8]) -> Result<usize, FE>,
@@ -149,10 +159,12 @@ impl Default for Rnd {
 }
 
 impl Rnd {
+    /// Create new random number generator with seed `0`
     pub fn new() -> Self {
         Self::with_seed(0)
     }
 
+    /// Create new randon number generator with provided `seed` value
     pub fn with_seed(seed: u32) -> Self {
         Self { state: seed }
     }
@@ -162,10 +174,12 @@ impl Rnd {
         self.state >> 16
     }
 
+    /// Generate random u32 value
     pub fn next_u32(&mut self) -> u32 {
         (self.step() & 0xffff) << 16 | (self.step() & 0xffff)
     }
 
+    /// Generate random u64 value
     pub fn next_u64(&mut self) -> u64 {
         ((self.next_u32() as u64) << 32) | (self.next_u32() as u64)
     }

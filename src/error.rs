@@ -1,3 +1,4 @@
+//! Error type
 use std::{borrow::Cow, fmt};
 
 #[derive(Debug)]

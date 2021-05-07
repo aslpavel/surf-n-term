@@ -1,13 +1,17 @@
+//! Encoders
 use crate::{error::Error, Color, ColorLinear, FaceAttrs, TerminalColor, TerminalCommand};
 use std::{cmp::Ordering, io::Write};
 
+/// Encoder interface
 pub trait Encoder {
     type Item;
     type Error: From<std::io::Error>;
 
+    /// Encode item and write result to Write object
     fn encode<W: Write>(&mut self, out: W, item: Self::Item) -> Result<(), Self::Error>;
 }
 
+/// TTY capabilities
 #[derive(Debug)]
 pub struct TTYCaps {
     pub depth: ColorDepth,
@@ -23,6 +27,7 @@ impl Default for TTYCaps {
     }
 }
 
+/// TTY encoder
 #[derive(Debug)]
 pub struct TTYEncoder {
     caps: TTYCaps,
@@ -205,6 +210,7 @@ impl<W: Write> Write for Base64Encoder<W> {
     }
 }
 
+/// Color depth
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ColorDepth {
     TrueColor,
@@ -238,6 +244,7 @@ fn nearest(v: f64, vs: &[f64]) -> usize {
     }
 }
 
+/// Encode color as SGR sequence
 pub fn color_sgr_encode<C: Color, W: Write>(
     mut out: W,
     color: C,

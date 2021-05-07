@@ -1,3 +1,4 @@
+//! Decoders
 use crate::{
     automata::{DFAState, DFA, NFA},
     error::Error,
@@ -7,12 +8,15 @@ use crate::{
 use lazy_static::lazy_static;
 use std::{collections::BTreeMap, convert::TryInto, fmt, io::BufRead};
 
+/// Decoder interface
 pub trait Decoder {
     type Item;
     type Error: From<std::io::Error>;
 
+    /// Decode single item from provided buffer
     fn decode<B: BufRead>(&mut self, buf: B) -> Result<Option<Self::Item>, Self::Error>;
 
+    /// Decode all available items from provided buffer and put them into ouput vector
     fn decode_into<B: BufRead>(
         &mut self,
         mut buf: B,
@@ -44,6 +48,7 @@ lazy_static! {
     };
 }
 
+/// UTF-8 decoder
 pub struct Utf8Decoder {
     state: DFAState,
     offset: usize,
@@ -113,6 +118,7 @@ impl Decoder for Utf8Decoder {
     }
 }
 
+/// TTY Decoder
 #[derive(Debug)]
 pub struct TTYDecoder {
     /// DFA that represents all possible states of the parser
@@ -815,6 +821,7 @@ fn utf8_decode(slice: &[u8]) -> char {
     unsafe { std::char::from_u32_unchecked(code) }
 }
 
+/// Decode hex encoded slice
 pub fn hex_decode(slice: &[u8]) -> impl Iterator<Item = u8> + '_ {
     let value = |byte| match byte {
         b'A'..=b'F' => Some(byte - b'A' + 10),

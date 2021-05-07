@@ -1,3 +1,4 @@
+//! Main interface to interact with terminal
 use crate::{
     error::Error,
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
@@ -118,6 +119,10 @@ pub trait Terminal: Write {
     fn frames_drop(&mut self);
 }
 
+/// Waker object
+///
+/// Waker object is a thread safe object that can be called to wake terminal
+/// with TerminalEvent::Wake event
 #[derive(Clone)]
 pub struct TerminalWaker {
     wake: Arc<dyn Fn() -> Result<(), Error> + Sync + Send + 'static>,
@@ -130,17 +135,23 @@ impl TerminalWaker {
         }
     }
 
+    /// Wake terminal
     pub fn wake(&self) -> Result<(), Error> {
         (self.wake)()
     }
 }
 
+/// Object returned by handler function inside run method.
 pub enum TerminalAction<R> {
+    /// Quit run method with result `R`
     Quit(R),
+    /// Wait for the next event from terminal
     Wait,
+    /// Wait for the next event with the provided timeout
     Sleep(Duration),
 }
 
+/// Commands that can be executed by terminal
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalCommand {
     /// Put character
@@ -194,6 +205,7 @@ pub enum TerminalCommand {
     Title(String),
 }
 
+/// Kind of terminal color
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalColor {
     Background,
@@ -201,6 +213,7 @@ pub enum TerminalColor {
     Palette(usize),
 }
 
+/// DEC mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DecMode {
     /// Visibility of the cursor
@@ -219,9 +232,12 @@ pub enum DecMode {
     KittyKeyboard = 2017,
 }
 
+/// Current/requested postion of terminal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position {
+    /// Row
     pub row: usize,
+    /// Column
     pub col: usize,
 }
 
@@ -232,6 +248,7 @@ impl Position {
 }
 
 impl DecMode {
+    /// Convert DEC code into DecMode object
     pub fn from_usize(code: usize) -> Option<Self> {
         use DecMode::*;
         for mode in [
@@ -253,16 +270,23 @@ impl DecMode {
     }
 }
 
+/// Dec mode status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DecModeStatus {
+    /// Unknown DEC mode
     NotRecognized = 0,
+    /// DEC mode enabled
     Enabled = 1,
+    /// DEC mode disabled
     Disabled = 2,
+    /// DEC mode was understood but can not be disabled
     PermanentlyEnabled = 3,
+    /// DEC mode was understood but can not be enabled
     PermanentlyDisabled = 4,
 }
 
 impl DecModeStatus {
+    /// Convert DEC status code into DecModeStatus object
     pub fn from_usize(code: usize) -> Option<Self> {
         use DecModeStatus::*;
         for status in [
@@ -282,47 +306,41 @@ impl DecModeStatus {
     }
 }
 
+/// Events returned by terminal
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TerminalEvent {
-    // Key press event
+    /// Key press event
     Key(Key),
-    // Mouse event
+    /// Mouse event
     Mouse(Mouse),
-    // Current cursor position
-    CursorPosition {
-        row: usize,
-        col: usize,
-    },
-    // Terminal was resized
+    /// Current cursor position
+    CursorPosition { row: usize, col: usize },
+    /// Terminal was resized
     Resize(TerminalSize),
-    // Current terminal size
+    /// Current terminal size
     Size(TerminalSize),
-    // DEC mode status
+    /// DEC mode status
     DecMode {
         mode: DecMode,
         status: DecModeStatus,
     },
-    // Kitty image result
-    KittyImage {
-        id: u64,
-        error: Option<String>,
-    },
-    // Terminal have been woken by waker object
+    /// Kitty image result
+    KittyImage { id: u64, error: Option<String> },
+    /// Terminal have been woken by waker object
     Wake,
-    // Termcap/Terminfo repsponse to XTGETTCAP
+    /// Termcap/Terminfo repsponse to XTGETTCAP
     Termcap(BTreeMap<String, Option<String>>),
-    // Terminal Attributes DA1 response
+    /// Terminal Attributes DA1 response
     DeviceAttrs(BTreeSet<usize>),
-    // Unrecognized bytes (TODO: remove Vec and just use u8)
+    /// Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
-    Color {
-        name: TerminalColor,
-        color: RGBA,
-    },
-    // So we can use single decoder for commands and events
+    /// Color
+    Color { name: TerminalColor, color: RGBA },
+    /// So we can use single decoder for commands and events
     Command(TerminalCommand),
 }
 
+/// Size
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Size {
     pub height: usize,
@@ -330,6 +348,7 @@ pub struct Size {
 }
 
 impl Size {
+    /// Zero size
     pub fn empty() -> Self {
         Self::new(0, 0)
     }
@@ -339,13 +358,17 @@ impl Size {
     }
 }
 
+/// Terminal size object
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TerminalSize {
+    /// Size of the terminal in cells
     pub cells: Size,
+    /// Size of the terminal in pixels
     pub pixels: Size,
 }
 
 impl TerminalSize {
+    /// Size of the cell in pixels
     pub fn cell_size(&self) -> Size {
         Size {
             height: self.pixels.height / self.cells.height,
@@ -353,6 +376,7 @@ impl TerminalSize {
         }
     }
 
+    /// Convert cell size into pixels
     pub fn cells_in_pixels(&self, cells: Size) -> Size {
         let cell_size = self.cell_size();
         Size {
@@ -362,9 +386,12 @@ impl TerminalSize {
     }
 }
 
+/// Terminal statistics
 #[derive(Clone, Debug)]
 pub struct TerminalStats {
+    /// Number of bytes send
     pub send: usize,
+    /// Number of bytes received
     pub recv: usize,
 }
 
@@ -380,11 +407,16 @@ impl TerminalStats {
     }
 }
 
+/// Mouse event
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Mouse {
+    /// Key name
     pub name: KeyName,
+    /// Key mode
     pub mode: KeyMod,
+    /// Row coordinate
     pub row: usize,
+    /// Column coordinate
     pub col: usize,
 }
 

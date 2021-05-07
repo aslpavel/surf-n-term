@@ -1,5 +1,7 @@
+//! Surface object
+//!
+//! Matrix like object which is used to access and modify terminal frame and images
 #![allow(clippy::iter_nth_zero)]
-#![deny(warnings)]
 
 use std::{
     hash::{Hash, Hasher},
@@ -9,6 +11,7 @@ use std::{
     sync::Arc,
 };
 
+/// Shape object describing layout of data in the surface object
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
     /// Offsest of the first element.
@@ -51,6 +54,7 @@ impl Shape {
     }
 }
 
+/// Matrix like object used to store `RGBA` (in case of images) and `Cell` (in case of Terminal)
 pub trait Surface {
     type Item;
 
@@ -187,6 +191,7 @@ pub trait Surface {
     }
 }
 
+/// Mutable surface
 pub trait SurfaceMut: Surface {
     /// Mutable slice containing all the items
     fn data_mut(&mut self) -> &mut [Self::Item];
@@ -315,6 +320,7 @@ pub trait SurfaceMut: Surface {
     }
 }
 
+/// Iterator over elements of the Surface
 pub struct SurfaceIter<'a, T> {
     index: usize,
     shape: Shape,
@@ -349,6 +355,7 @@ impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
     }
 }
 
+/// Iterator over mutable elements of the Surface
 pub struct SurfaceMutIter<'a, T> {
     index: usize,
     shape: Shape,
@@ -444,24 +451,28 @@ impl<T> Surface for Arc<dyn Surface<Item = T>> {
     }
 }
 
+/// Surface owns its data
 #[derive(Clone)]
 pub struct SurfaceOwned<T> {
     shape: Shape,
     data: Vec<T>,
 }
 
+/// View over owned surface
 #[derive(Clone)]
 pub struct SurfaceOwnedView<S> {
     shape: Shape,
     inner: S,
 }
 
+/// View of (sub)surface
 #[derive(Clone)]
 pub struct SurfaceView<'a, T> {
     shape: Shape,
     data: &'a [T],
 }
 
+/// Mutable view of (sub)surface
 pub struct SurfaceMutView<'a, T> {
     shape: Shape,
     data: &'a mut [T],

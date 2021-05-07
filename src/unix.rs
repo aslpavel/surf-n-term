@@ -1,4 +1,4 @@
-/// Unix systems specific `Terminal` implementation.
+//! Unix systems specific `Terminal` implementation.
 use crate::common::IOQueue;
 use crate::{
     decoder::{Decoder, TTYDecoder},
@@ -62,6 +62,7 @@ impl UnixTerminal {
         Self::open("/dev/tty")
     }
 
+    /// Open terminal by a given device path
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
         Self::new_from_fd(fd, fd)
@@ -139,10 +140,12 @@ impl UnixTerminal {
         &self.stats
     }
 
+    /// Get a reference an image handler
     pub fn image_handler(&mut self) -> &mut dyn ImageHandler {
         &mut self.image_handler
     }
 
+    /// Close all descriptors free all the resources
     fn dispose(&mut self) -> Result<(), Error> {
         self.frames_drop();
 

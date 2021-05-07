@@ -1,3 +1,9 @@
+//! Handling everything to do with images.
+//!
+//! Provides:
+//!  - Protocol handling
+//!  - Image object
+//!  - Quantization and dithering
 use crate::{
     common::{clamp, Rnd},
     encoder::Base64Encoder,
@@ -166,6 +172,7 @@ impl Surface for Image {
     }
 }
 
+/// Image rendering/handling interface
 pub trait ImageHandler: Send + Sync {
     /// Name
     fn name(&self) -> &str;
@@ -256,6 +263,7 @@ pub fn image_handler_detect(
     Ok(handler.unwrap_or_else(|| Box::new(DummyImageHandler)))
 }
 
+/// Image handler which ignores requests
 pub struct DummyImageHandler;
 
 impl ImageHandler for DummyImageHandler {
@@ -276,6 +284,9 @@ impl ImageHandler for DummyImageHandler {
     }
 }
 
+/// Image handler for iTerm2 graphic protocol
+///
+/// Reference: [iTerm2 Image Protocol](https://iterm2.com/documentation-images.html)
 pub struct ItermImageHandler {
     imgs: lru::LruCache<u64, Vec<u8>>,
     size: usize,
@@ -335,7 +346,7 @@ impl ImageHandler for ItermImageHandler {
 
 /// Image handler for kitty graphic protocol
 ///
-/// Reference: https://sw.kovidgoyal.net/kitty/graphics-protocol.html
+/// Reference: [Kitty Graphic Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol.html)
 pub struct KittyImageHandler {
     imgs: HashMap<u64, usize>, // hash -> size in bytes
     cache: bool,
@@ -440,6 +451,9 @@ impl ImageHandler for KittyImageHandler {
     }
 }
 
+/// Image handler for sixel graphic protocol
+///
+/// Reference: [Sixel](https://en.wikipedia.org/wiki/Sixel)
 pub struct SixelImageHandler {
     imgs: lru::LruCache<u64, Vec<u8>>,
     size: usize,
@@ -723,7 +737,7 @@ impl OcTreeNode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct OcTreeInfo {
+struct OcTreeInfo {
     // total number of leafs in the subtree
     pub leaf_count: usize,
     // total number of colors in the subtree
@@ -791,8 +805,8 @@ impl OcTreeNode {
 /// Oc(tet)Tree used for color quantization
 ///
 /// References:
-/// - https://www.cubic.org/docs/octree.htm
-/// - http://www.leptonica.org/color-quantization.html
+/// - [OcTree color quantization](https://www.cubic.org/docs/octree.htm)
+/// - [Color quantization](http://www.leptonica.org/color-quantization.html)
 #[derive(Debug, Clone)]
 pub struct OcTree {
     info: OcTreeInfo,
@@ -823,6 +837,7 @@ impl FromIterator<RGBA> for OcTree {
 }
 
 impl OcTree {
+    /// Create empty OcTree
     pub fn new() -> Self {
         use OcTreeNode::Empty;
         Self {
@@ -832,7 +847,9 @@ impl OcTree {
         }
     }
 
-    pub fn info(&self) -> OcTreeInfo {
+    /// Get info associated with the node
+    #[cfg(test)]
+    fn info(&self) -> OcTreeInfo {
         self.info
     }
 
@@ -1077,6 +1094,7 @@ impl OcTreePath {
         }
     }
 
+    /// Convert octree path to a color
     pub fn rgba(&self) -> RGBA {
         self.rgba
     }
@@ -1103,6 +1121,10 @@ impl Iterator for OcTreePath {
     }
 }
 
+/// 3-dimentional KDTree which is used to quickly find nearest (euclidian distance)
+/// color from the palette.
+///
+/// Reference: [k-d tree](https://en.wikipedia.org/wiki/K-d_tree)
 pub struct KDTree {
     nodes: Vec<KDNode>,
 }
@@ -1117,6 +1139,7 @@ struct KDNode {
 }
 
 impl KDTree {
+    /// Create k-d tree from the list of colors
     pub fn new(colors: &[RGBA]) -> Self {
         fn build_rec(
             dim: usize,
@@ -1159,7 +1182,7 @@ impl KDTree {
         Self { nodes }
     }
 
-    /// find nearest neighbour color (euclidian distance) in the palette
+    /// Find nearest neighbour color (euclidian distance) in the palette
     pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(rgb: [u8; 3], node: &KDNode) -> i32 {
             let [r0, g0, b0] = rgb;
