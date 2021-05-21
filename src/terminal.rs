@@ -97,7 +97,9 @@ pub trait Terminal: Write {
                         renderer.clear();
                     }
                     // render frame
+                    self.execute(TerminalCommand::SynchronizeUpdate(true))?;
                     renderer.frame(self)?;
+                    self.execute(TerminalCommand::SynchronizeUpdate(false))?;
                     // handle action
                     timeout = match action {
                         TerminalAction::Quit(result) => return Ok(result),
@@ -159,10 +161,7 @@ pub enum TerminalCommand {
     /// Set current face (foreground/background colors and text attributes)
     Face(Face),
     /// Control specified DEC mode (DECSET|DECRST)
-    DecModeSet {
-        enable: bool,
-        mode: DecMode,
-    },
+    DecModeSet { enable: bool, mode: DecMode },
     /// Report specified DEC mode (DECRQM)
     DecModeGet(DecMode),
     /// Request current cursor postion
@@ -184,10 +183,7 @@ pub enum TerminalCommand {
     /// Scroll, positive is up and negative is down
     Scroll(i32),
     /// Set scroll region
-    ScrollRegion {
-        start: usize,
-        end: usize,
-    },
+    ScrollRegion { start: usize, end: usize },
     /// Full reset of the terminal
     Reset,
     /// Draw image
@@ -201,8 +197,14 @@ pub enum TerminalCommand {
         name: TerminalColor,
         color: Option<RGBA>,
     },
-    // Set terminal title
+    /// Set terminal title
     Title(String),
+    /// Synchronized update
+    ///
+    /// The goal of synchronized updates is to avoid showing a half-drawn screen,
+    /// such as while paging through a document in an editor. True means block updates, until False is received.
+    /// [Reference](https://gitlab.com/gnachman/iterm2/-/wikis/synchronized-updates-spec)
+    SynchronizeUpdate(bool),
 }
 
 /// Kind of terminal color

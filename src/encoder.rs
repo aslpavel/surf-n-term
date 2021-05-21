@@ -137,6 +137,13 @@ impl Encoder for TTYEncoder {
             Title(title) => {
                 write!(out, "\x1b]0;{}\x1b\\", title)?;
             }
+            SynchronizeUpdate(enable) => {
+                if enable {
+                    write!(out, "\x1bP=1s\x1b\\")?;
+                } else {
+                    write!(out, "\x1bP=2s\x1b\\")?;
+                }
+            }
         }
 
         Ok(())
