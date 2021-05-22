@@ -23,6 +23,10 @@ impl Default for TTYCaps {
             Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
             _ => ColorDepth::EightBit,
         };
+        let depth = match std::env::var("TERM").as_deref() {
+            Ok("linux") => ColorDepth::Gray,
+            _ => depth,
+        };
         Self { depth }
     }
 }
@@ -222,6 +226,7 @@ impl<W: Write> Write for Base64Encoder<W> {
 pub enum ColorDepth {
     TrueColor,
     EightBit,
+    Gray,
 }
 
 /// Color cube grid [0, 95, 135, 175, 215, 255] converted to linear RGB colors space.
@@ -296,6 +301,16 @@ pub fn color_sgr_encode<C: Color, W: Write>(
             }
             write!(out, ";5;{}", index)?;
         }
+        ColorDepth::Gray => {
+            let luma = color.luma();
+            let index = match nearest(luma, &[0.0, 0.7, 1.0]) {
+                0 => 30,
+                1 => 90,
+                _ => 37,
+            };
+            let index = if foreground { index } else { index + 10 };
+            write!(out, ";{}", index)?;
+        }
     }
     Ok(())
 }
@@ -319,6 +334,24 @@ mod tests {
         base64.write(b"ab")?;
         assert_eq!(base64.finish()?, b"YWI=");
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_sgr() -> Result<(), Error> {
+        let mut encoder = TTYEncoder::new(TTYCaps {
+            depth: ColorDepth::Gray,
+        });
+        let mut out = Vec::new();
+        encoder.encode(
+            &mut out,
+            TerminalCommand::Face("bg=#ebdbb2,fg=#282828".parse()?),
+        )?;
+
+        assert_eq!(
+            std::str::from_utf8(out.as_ref()).as_deref(),
+            Ok("\x1b[00;30;47m")
+        );
         Ok(())
     }
 }
