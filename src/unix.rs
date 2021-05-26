@@ -302,6 +302,9 @@ impl Terminal for UnixTerminal {
             if read_set.contains(read_fd) {
                 let mut buf = [0u8; 1024];
                 let recv = guard_io(self.read_handle.read(&mut buf), 0)?;
+                if recv == 0 {
+                    return Err(Error::Quit);
+                }
                 self.stats.recv += recv;
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
