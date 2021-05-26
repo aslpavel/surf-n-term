@@ -148,6 +148,7 @@ impl UnixTerminal {
     /// Close all descriptors free all the resources
     fn dispose(&mut self) -> Result<(), Error> {
         self.frames_drop();
+        self.drain().count();
 
         // revert descriptors to blocking mode
         self.write_handle.set_blocking(true)?;
@@ -360,6 +361,10 @@ impl Terminal for UnixTerminal {
 
     fn frames_drop(&mut self) {
         self.write_queue.clear_but_last()
+    }
+
+    fn dyn_ref(&mut self) -> &mut dyn Terminal {
+        self
     }
 }
 

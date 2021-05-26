@@ -8,7 +8,7 @@ use crate::{
     common::{clamp, Rnd},
     encoder::Base64Encoder,
     Blend, Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, Terminal,
-    TerminalEvent, TerminalSize, RGBA,
+    TerminalCommand, TerminalEvent, TerminalSize, RGBA,
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
@@ -223,7 +223,7 @@ pub fn image_handler_detect(
     // Send kitty query and DA1 request
     term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?; // kitty image
     term.write_all(b"\x1b]11;?\x1b\\")?; // background color
-    term.write_all(b"\x1b[c")?; // we expect to see response at least for this one or there will be 1s deley
+    term.execute(TerminalCommand::DeviceAttrs)?; // we expect to see response at least for this one or there will be 1s deley
     let mut handler: Option<Box<dyn ImageHandler + 'static>> = None;
     let mut bg: Option<RGBA> = None;
     for _ in 0..3 {
@@ -232,6 +232,7 @@ pub fn image_handler_detect(
                 handler.replace(Box::new(KittyImageHandler::new(true)));
             }
             Some(TerminalEvent::DeviceAttrs(attrs)) => {
+                // 4 - attribute indicates sixel support
                 if handler.is_none() && attrs.contains(&4) {
                     handler.replace(Box::new(SixelImageHandler::new(bg)));
                 }
@@ -244,7 +245,7 @@ pub fn image_handler_detect(
         }
     }
     // drain terminal
-    while term.poll(Some(Duration::new(0, 0)))?.is_some() {}
+    term.drain().count();
     // check environment for handler override
     if let Ok(name) = std::env::var("SURF_N_TERM_IMG") {
         match name.as_ref() {

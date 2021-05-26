@@ -34,6 +34,14 @@ pub trait Terminal: Write {
     /// None duration blocks indefinitely until event received from the terminal.
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error>;
 
+    /// Iterator over pending events
+    fn drain(&mut self) -> TerminalDrain<'_> {
+        TerminalDrain(self.dyn_ref())
+    }
+
+    /// Create dynamic reference to the temrinal object
+    fn dyn_ref(&mut self) -> &mut dyn Terminal;
+
     /// Get terminal size
     fn size(&self) -> Result<TerminalSize, Error>;
 
@@ -121,6 +129,46 @@ pub trait Terminal: Write {
     fn frames_drop(&mut self);
 }
 
+impl<'a, T: Terminal + ?Sized> Terminal for &'a mut T {
+    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
+        (**self).execute(cmd)
+    }
+
+    fn waker(&self) -> TerminalWaker {
+        (**self).waker()
+    }
+
+    fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error> {
+        (**self).poll(timeout)
+    }
+
+    fn dyn_ref(&mut self) -> &mut dyn Terminal {
+        (**self).dyn_ref()
+    }
+
+    fn size(&self) -> Result<TerminalSize, Error> {
+        (**self).size()
+    }
+
+    fn frames_pending(&self) -> usize {
+        (**self).frames_pending()
+    }
+
+    fn frames_drop(&mut self) {
+        (**self).frames_drop()
+    }
+}
+
+pub struct TerminalDrain<'a>(&'a mut dyn Terminal);
+
+impl<'a> Iterator for TerminalDrain<'a> {
+    type Item = TerminalEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.poll(Some(Duration::new(0, 0))).ok().flatten()
+    }
+}
+
 /// Waker object
 ///
 /// Waker object is a thread safe object that can be called to wake terminal
@@ -205,6 +253,8 @@ pub enum TerminalCommand {
     /// such as while paging through a document in an editor. True means block updates, until False is received.
     /// [Reference](https://gitlab.com/gnachman/iterm2/-/wikis/synchronized-updates-spec)
     SynchronizeUpdate(bool),
+    /// [Primary Device Attributes](https://vt100.net/docs/vt510-rm/DA1.html)
+    DeviceAttrs,
 }
 
 /// Kind of terminal color

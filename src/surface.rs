@@ -407,11 +407,11 @@ where
     type Item = S::Item;
 
     fn shape(&self) -> Shape {
-        (*self).shape()
+        (**self).shape()
     }
 
     fn data(&self) -> &[Self::Item] {
-        (*self).data()
+        (**self).data()
     }
 }
 

@@ -148,6 +148,9 @@ impl Encoder for TTYEncoder {
                     write!(out, "\x1bP=2s\x1b\\")?;
                 }
             }
+            DeviceAttrs => {
+                write!(out, "\x1b[c")?;
+            }
         }
 
         Ok(())

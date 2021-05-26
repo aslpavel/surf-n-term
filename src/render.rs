@@ -524,6 +524,10 @@ mod tests {
         }
 
         fn frames_drop(&mut self) {}
+
+        fn dyn_ref(&mut self) -> &mut dyn Terminal {
+            self
+        }
     }
 
     #[test]
