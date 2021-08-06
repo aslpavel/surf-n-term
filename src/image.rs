@@ -440,7 +440,7 @@ impl ImageHandler for KittyImageHandler {
                 let filter = if !error.is_none() {
                     // remove elemnt from cache, and propagate event to
                     // the user which will cause the redraw
-                    self.imgs.remove(&id);
+                    self.imgs.remove(id);
                     false
                 } else {
                     true
@@ -697,7 +697,7 @@ impl OcTreeLeaf {
         }
     }
 
-    fn to_rgba(&self) -> RGBA {
+    fn to_rgba(self) -> RGBA {
         let r = (self.red_acc / self.color_count) as u8;
         let g = (self.green_acc / self.color_count) as u8;
         let b = (self.blue_acc / self.color_count) as u8;

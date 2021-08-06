@@ -148,7 +148,6 @@ impl UnixTerminal {
     /// Close all descriptors free all the resources
     fn dispose(&mut self) -> Result<(), Error> {
         self.frames_drop();
-        self.drain().count();
 
         // revert descriptors to blocking mode
         self.write_handle.set_blocking(true)?;
@@ -188,6 +187,7 @@ impl UnixTerminal {
                 Ok(())
             })
             .unwrap_or(()); // ignore write errors
+        self.drain().count(); // drain pending events
 
         // disable signal handler
         self.signal_delivery.handle().close();

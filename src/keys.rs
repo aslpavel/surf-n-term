@@ -372,7 +372,7 @@ impl<V> KeyMap<V> {
             .iter()
             .enumerate()
             .try_fold(&self.mapping, |mapping, (index, key)| {
-                match mapping.get(&key) {
+                match mapping.get(key) {
                     None => Err(None),
                     Some(Err(mapping)) => Ok(&mapping.mapping),
                     Some(Ok(value)) => Err(Some((index, value))),
