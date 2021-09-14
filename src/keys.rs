@@ -1,6 +1,11 @@
 /// Key types
 use crate::Error;
-use std::{collections::HashMap, fmt, str::FromStr, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Debug, Write as _},
+    str::FromStr,
+    sync::Arc,
+};
 
 /// Key descriptor
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -318,7 +323,7 @@ pub enum KeyMapResult<V> {
 
 /// Collection of key bindings
 pub struct KeyMap<V> {
-    mapping: HashMap<Key, Result<V, KeyMap<V>>>,
+    mapping: BTreeMap<Key, Result<V, KeyMap<V>>>,
 }
 
 impl<V> Default for KeyMap<V> {
@@ -366,6 +371,34 @@ impl<V> KeyMap<V> {
         }
     }
 
+    /// Override mapping with the other
+    pub fn register_override(&mut self, other: &Self)
+    where
+        V: Clone,
+    {
+        other.for_each(|chord, value| {
+            self.register(chord, value.clone());
+        })
+    }
+
+    /// Run closure for each chord bound
+    pub fn for_each(&self, mut f: impl FnMut(&'_ [Key], &'_ V)) {
+        fn for_each_rec<V, F>(chord: &mut Vec<Key>, map: &KeyMap<V>, f: &mut F)
+        where
+            F: FnMut(&[Key], &V),
+        {
+            for (key, entry) in map.mapping.iter() {
+                chord.push(*key);
+                match entry {
+                    Ok(value) => f(chord.as_slice(), value),
+                    Err(map) => for_each_rec(chord, map, f),
+                }
+                chord.pop();
+            }
+        }
+        for_each_rec(&mut Vec::new(), self, &mut f)
+    }
+
     /// Lookup value given full chord path
     pub fn lookup(&self, chord: &[Key]) -> KeyMapResult<&V> {
         let result = chord
@@ -408,6 +441,23 @@ impl<V> KeyMap<V> {
             }
         }
         None
+    }
+}
+
+impl<V: Debug> fmt::Debug for KeyMap<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut map = f.debug_map();
+        let mut chord_str = String::new();
+        self.for_each(|chord, value| {
+            chord_str.clear();
+            for key in chord.iter() {
+                write!(chord_str, "{} ", key).expect("in memory wirte failed");
+            }
+            chord_str.pop();
+            map.entry(&chord_str, value);
+        });
+        map.finish()?;
+        Ok(())
     }
 }
 
@@ -478,7 +528,6 @@ mod tests {
         assert_eq!(key_map.lookup(c0.as_ref()), KeyMapResult::Continue);
         assert_eq!(key_map.lookup(c1.as_ref()), KeyMapResult::Success(&1));
         assert_eq!(key_map.lookup(c2.as_ref()), KeyMapResult::Success(&2));
-
         Ok(())
     }
 
