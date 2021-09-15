@@ -88,6 +88,110 @@ impl FromStr for Theme {
     }
 }
 
+/// Action description with default binding
+pub struct ActionDesc<A> {
+    /// action
+    pub action: A,
+    /// default binding
+    pub chord: &'static [&'static [Key]],
+    /// action name
+    pub name: &'static str,
+    /// action description
+    pub description: &'static str,
+}
+
+pub enum InputAction {
+    Insert(char),
+    CursorForward,
+    CursorBackward,
+    CursorEnd,
+    CursorStart,
+    CursorNextWord,
+    CursorPrevWord,
+    DeleteBackward,
+    DeleteForward,
+    DeleteEnd,
+}
+
+impl InputAction {
+    pub fn description() -> &'static [ActionDesc<Self>] {
+        &[
+            ActionDesc {
+                action: InputAction::CursorForward,
+                chord: &[
+                    &[Key { name: KeyName::Right, mode: KeyMod::EMPTY }]
+                ],
+                name: "input.move.forward",
+                description: "Move cursor forward in the input field",
+            },
+            ActionDesc {
+                action: InputAction::CursorBackward,
+                chord: &[
+                    &[Key { name: KeyName::Left, mode: KeyMod::EMPTY }]
+                ],
+                name: "input.move.backward",
+                description: "Move cursor backward in the input field",
+            },
+            ActionDesc {
+                action: InputAction::CursorEnd,
+                chord: &[
+                    &[Key { name: KeyName::Char('e'), mode: KeyMod::CTRL }]
+                ],
+                name: "input.move.end",
+                description: "Move cursor to the end of the input",
+            },
+            ActionDesc {
+                action: InputAction::CursorStart,
+                chord: &[
+                    &[Key { name: KeyName::Char('a'), mode: KeyMod::CTRL }]
+                ],
+                name: "input.move.start",
+                description: "Move cursor to the start of the input",
+            },
+            ActionDesc {
+                action: InputAction::CursorNextWord,
+                chord: &[
+                    &[Key { name: KeyName::Char('f'), mode: KeyMod::ALT }]
+                ],
+                name: "input.move.next_word",
+                description: "Move cursor to the end of the current word",
+            },
+            ActionDesc {
+                action: InputAction::CursorPrevWord,
+                chord: &[
+                    &[Key { name: KeyName::Char('b'), mode: KeyMod::ALT }]
+                ],
+                name: "input.move.prev_word",
+                description: "Move cursor to the start of the word",
+            },
+            ActionDesc {
+                action: InputAction::DeleteBackward,
+                chord: &[
+                    &[Key { name: KeyName::Backspace, mode: KeyMod::EMPTY }]
+                ],
+                name: "input.delete.backward",
+                description: "Delete previous char",
+            },
+            ActionDesc {
+                action: InputAction::DeleteForward,
+                chord: &[
+                    &[Key { name: KeyName::Delete, mode: KeyMod::EMPTY }]
+                ],
+                name: "input.delete.forward",
+                description: "Delete next char",
+            },
+            ActionDesc {
+                action: InputAction::DeleteEnd,
+                chord: &[
+                    &[Key { name: KeyName::Char('k'), mode: KeyMod::CTRL }]
+                ],
+                name: "input.delete.end",
+                description: "Delete all input after cursor",
+            },
+        ]
+    }
+}
+
 pub struct Input {
     /// string before cursor
     before: Vec<char>,
@@ -112,77 +216,85 @@ impl Input {
         }
     }
 
+    pub fn apply(&mut self, action: InputAction) {
+        use InputAction::*;
+        match action {
+            Insert(c) => self.before.push(c),
+            CursorForward => self.before.extend(self.after.pop()),
+            CursorBackward => self.after.extend(self.before.pop()),
+            CursorEnd => self.before.extend(self.after.drain(..).rev()),
+            CursorStart => self.after.extend(self.before.drain(..).rev()),
+            CursorNextWord => {
+                while let Some(c) = self.after.pop() {
+                    if is_word_separator(c) {
+                        self.before.push(c);
+                    } else {
+                        self.after.push(c);
+                        break;
+                    }
+                }
+                while let Some(c) = self.after.pop() {
+                    if is_word_separator(c) {
+                        self.after.push(c);
+                        break;
+                    } else {
+                        self.before.push(c);
+                    }
+                }
+            }
+            CursorPrevWord => {
+                while let Some(c) = self.before.pop() {
+                    if is_word_separator(c) {
+                        self.after.push(c);
+                    } else {
+                        self.before.push(c);
+                        break;
+                    }
+                }
+                while let Some(c) = self.before.pop() {
+                    if is_word_separator(c) {
+                        self.before.push(c);
+                        break;
+                    } else {
+                        self.after.push(c);
+                    }
+                }
+            }
+            DeleteEnd => self.after.clear(),
+            DeleteBackward => {
+                self.before.pop();
+            }
+            DeleteForward => {
+                self.after.pop();
+            }
+        }
+    }
+
     pub fn handle(&mut self, event: &TerminalEvent) {
-        match *event {
-            TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::EMPTY => {
-                if let KeyName::Char(c) = name {
-                    // insert char
-                    self.before.push(c);
-                } else if name == KeyName::Backspace {
-                    // delete previous char
-                    self.before.pop();
-                } else if name == KeyName::Left {
-                    // delete next char
-                    self.after.extend(self.before.pop());
-                } else if name == KeyName::Right {
-                    // move cursor forward
-                    self.before.extend(self.after.pop());
-                } else if name == KeyName::Delete {
-                    // move cursor backward
-                    self.after.pop();
-                }
+        use KeyName::*;
+        if let TerminalEvent::Key(Key { name, mode }) = event {
+            match *mode {
+                KeyMod::EMPTY => match name {
+                    Char(c) => self.apply(InputAction::Insert(*c)),
+                    Backspace => self.apply(InputAction::DeleteBackward),
+                    Delete => self.apply(InputAction::DeleteForward),
+                    Left => self.apply(InputAction::CursorBackward),
+                    Right => self.apply(InputAction::CursorForward),
+                    _ => {}
+                },
+                KeyMod::CTRL => match name {
+                    KeyName::Char('e') => self.apply(InputAction::CursorEnd),
+                    KeyName::Char('a') => self.apply(InputAction::CursorStart),
+                    KeyName::Char('k') => self.apply(InputAction::DeleteEnd),
+                    _ => {}
+                },
+                KeyMod::ALT => match name {
+                    KeyName::Char('f') => self.apply(InputAction::CursorNextWord),
+                    KeyName::Char('b') => self.apply(InputAction::CursorPrevWord),
+                    _ => {}
+                },
+                _ => {}
             }
-            TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::CTRL => {
-                if name == KeyName::Char('e') {
-                    // move curosor to the end of input
-                    self.before.extend(self.after.drain(..).rev());
-                } else if name == KeyName::Char('a') {
-                    // move cursor to the start of input
-                    self.after.extend(self.before.drain(..).rev());
-                } else if name == KeyName::Char('k') {
-                    self.after.clear();
-                }
-            }
-            TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::ALT => {
-                if name == KeyName::Char('f') {
-                    // next word
-                    while let Some(c) = self.after.pop() {
-                        if is_word_separator(c) {
-                            self.before.push(c);
-                        } else {
-                            self.after.push(c);
-                            break;
-                        }
-                    }
-                    while let Some(c) = self.after.pop() {
-                        if is_word_separator(c) {
-                            self.after.push(c);
-                            break;
-                        } else {
-                            self.before.push(c);
-                        }
-                    }
-                } else if name == KeyName::Char('b') {
-                    // previous word
-                    while let Some(c) = self.before.pop() {
-                        if is_word_separator(c) {
-                            self.after.push(c);
-                        } else {
-                            self.before.push(c);
-                            break;
-                        }
-                    }
-                    while let Some(c) = self.before.pop() {
-                        if is_word_separator(c) {
-                            self.before.push(c);
-                            break;
-                        } else {
-                            self.after.push(c);
-                        }
-                    }
-                }
-            }
-            _ => (),
         }
     }
 
@@ -228,6 +340,55 @@ fn is_word_separator(c: char) -> bool {
     c.is_ascii_punctuation() || c.is_ascii_whitespace()
 }
 
+
+pub enum ListAction {
+    ItemNext,
+    ItemPrev,
+    PageNext,
+    PagePrev,
+}
+
+impl ListAction {
+    pub fn description() -> &'static [ActionDesc<Self>] {
+        &[
+            ActionDesc {
+                action: ListAction::ItemNext,
+                chord: &[
+                    &[Key { name: KeyName::Down, mode: KeyMod::EMPTY }],
+                    &[Key { name: KeyName::Char('n'), mode: KeyMod::CTRL}],
+                ],
+                name: "list.item.next",
+                description: "Move to the next item in the list",
+            },
+            ActionDesc {
+                action: ListAction::ItemPrev,
+                chord: &[
+                    &[Key { name: KeyName::Up, mode: KeyMod::EMPTY }],
+                    &[Key { name: KeyName::Char('p'), mode: KeyMod::CTRL }],
+                ],
+                name: "list.item.prev",
+                description: "Move to the previous item in the list",
+            },
+            ActionDesc {
+                action: ListAction::PageNext,
+                chord: &[
+                    &[Key { name: KeyName::PageDown, mode: KeyMod::EMPTY }]
+                ],
+                name: "input.page.next",
+                description: "Move one page down in the list",
+            },
+            ActionDesc {
+                action: ListAction::PagePrev,
+                chord: &[
+                    &[Key { name: KeyName::PageUp, mode: KeyMod::EMPTY }]
+                ],
+                name: "input.page.prev",
+                description: "Move one page up in the list",
+            },
+        ]
+    }
+}
+
 pub trait ListItems {
     type Item: TerminalWritable;
     fn len(&self) -> usize;
@@ -268,32 +429,42 @@ impl<T: ListItems> List<T> {
         self.items.get(self.cursor)
     }
 
-    pub fn handle(&mut self, event: &TerminalEvent) {
-        match *event {
-            TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::EMPTY => {
-                if name == KeyName::Down {
-                    self.cursor += 1;
-                } else if name == KeyName::Up && self.cursor > 0 {
-                    self.cursor -= 1;
-                } else if name == KeyName::PageDown {
-                    self.cursor += self.height_hint;
-                } else if name == KeyName::PageUp && self.cursor >= self.height_hint {
-                    self.cursor -= self.height_hint;
-                }
+    pub fn apply(&mut self, action: ListAction) {
+        use ListAction::*;
+        match action {
+            ItemNext => self.cursor += 1,
+            ItemPrev => if self.cursor > 0 {
+                self.cursor -= 1
             }
-            TerminalEvent::Key(Key { name, mode }) if mode == KeyMod::CTRL => {
-                if name == KeyName::Char('n') {
-                    self.cursor += 1;
-                } else if name == KeyName::Char('p') && self.cursor > 0 {
-                    self.cursor -= 1;
-                }
+            PageNext => self.cursor += self.height_hint,
+            PagePrev => if self.cursor >= self.height_hint {
+                self.cursor -= self.height_hint
             }
-            _ => (),
         }
         if self.items.len() > 0 {
             self.cursor = clamp(self.cursor, 0, self.items.len() - 1);
         } else {
             self.cursor = 0;
+        }
+    }
+
+    pub fn handle(&mut self, event: &TerminalEvent) {
+        if let TerminalEvent::Key(Key {name, mode}) = event {
+            match *mode {
+                KeyMod::EMPTY => match name {
+                    KeyName::Down => self.apply(ListAction::ItemNext),
+                    KeyName::Up => self.apply(ListAction::ItemPrev),
+                    KeyName::PageDown => self.apply(ListAction::PageNext),
+                    KeyName::PageUp => self.apply(ListAction::PagePrev),
+                    _ => {}
+                }
+                KeyMod::CTRL => match name {
+                    KeyName::Char('n') => self.apply(ListAction::ItemNext),
+                    KeyName::Char('p') => self.apply(ListAction::ItemPrev),
+                    _ => {}
+                }
+                _ => {}
+            }
         }
     }
 
