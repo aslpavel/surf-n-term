@@ -89,7 +89,7 @@ impl FromStr for Theme {
 }
 
 /// Action description with default binding
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActionDesc<A> {
     /// action
     pub action: A,
@@ -101,7 +101,7 @@ pub struct ActionDesc<A> {
     pub description: &'static str,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InputAction {
     Insert(char),
     CursorForward,
@@ -343,7 +343,7 @@ fn is_word_separator(c: char) -> bool {
 }
 
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ListAction {
     ItemNext,
     ItemPrev,
