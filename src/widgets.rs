@@ -120,73 +120,82 @@ impl InputAction {
         &[
             ActionDesc {
                 action: InputAction::CursorForward,
-                chord: &[
-                    &[Key { name: KeyName::Right, mode: KeyMod::EMPTY }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Right,
+                    mode: KeyMod::EMPTY,
+                }]],
                 name: "input.move.forward",
                 description: "Move cursor forward in the input field",
             },
             ActionDesc {
                 action: InputAction::CursorBackward,
-                chord: &[
-                    &[Key { name: KeyName::Left, mode: KeyMod::EMPTY }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Left,
+                    mode: KeyMod::EMPTY,
+                }]],
                 name: "input.move.backward",
                 description: "Move cursor backward in the input field",
             },
             ActionDesc {
                 action: InputAction::CursorEnd,
-                chord: &[
-                    &[Key { name: KeyName::Char('e'), mode: KeyMod::CTRL }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Char('e'),
+                    mode: KeyMod::CTRL,
+                }]],
                 name: "input.move.end",
                 description: "Move cursor to the end of the input",
             },
             ActionDesc {
                 action: InputAction::CursorStart,
-                chord: &[
-                    &[Key { name: KeyName::Char('a'), mode: KeyMod::CTRL }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Char('a'),
+                    mode: KeyMod::CTRL,
+                }]],
                 name: "input.move.start",
                 description: "Move cursor to the start of the input",
             },
             ActionDesc {
                 action: InputAction::CursorNextWord,
-                chord: &[
-                    &[Key { name: KeyName::Char('f'), mode: KeyMod::ALT }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Char('f'),
+                    mode: KeyMod::ALT,
+                }]],
                 name: "input.move.next_word",
                 description: "Move cursor to the end of the current word",
             },
             ActionDesc {
                 action: InputAction::CursorPrevWord,
-                chord: &[
-                    &[Key { name: KeyName::Char('b'), mode: KeyMod::ALT }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Char('b'),
+                    mode: KeyMod::ALT,
+                }]],
                 name: "input.move.prev_word",
                 description: "Move cursor to the start of the word",
             },
             ActionDesc {
                 action: InputAction::DeleteBackward,
-                chord: &[
-                    &[Key { name: KeyName::Backspace, mode: KeyMod::EMPTY }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Backspace,
+                    mode: KeyMod::EMPTY,
+                }]],
                 name: "input.delete.backward",
                 description: "Delete previous char",
             },
             ActionDesc {
                 action: InputAction::DeleteForward,
-                chord: &[
-                    &[Key { name: KeyName::Delete, mode: KeyMod::EMPTY }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Delete,
+                    mode: KeyMod::EMPTY,
+                }]],
                 name: "input.delete.forward",
                 description: "Delete next char",
             },
             ActionDesc {
                 action: InputAction::DeleteEnd,
-                chord: &[
-                    &[Key { name: KeyName::Char('k'), mode: KeyMod::CTRL }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::Char('k'),
+                    mode: KeyMod::CTRL,
+                }]],
                 name: "input.delete.end",
                 description: "Delete all input after cursor",
             },
@@ -342,7 +351,6 @@ fn is_word_separator(c: char) -> bool {
     c.is_ascii_punctuation() || c.is_ascii_whitespace()
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ListAction {
     ItemNext,
@@ -357,8 +365,14 @@ impl ListAction {
             ActionDesc {
                 action: ListAction::ItemNext,
                 chord: &[
-                    &[Key { name: KeyName::Down, mode: KeyMod::EMPTY }],
-                    &[Key { name: KeyName::Char('n'), mode: KeyMod::CTRL}],
+                    &[Key {
+                        name: KeyName::Down,
+                        mode: KeyMod::EMPTY,
+                    }],
+                    &[Key {
+                        name: KeyName::Char('n'),
+                        mode: KeyMod::CTRL,
+                    }],
                 ],
                 name: "list.item.next",
                 description: "Move to the next item in the list",
@@ -366,25 +380,33 @@ impl ListAction {
             ActionDesc {
                 action: ListAction::ItemPrev,
                 chord: &[
-                    &[Key { name: KeyName::Up, mode: KeyMod::EMPTY }],
-                    &[Key { name: KeyName::Char('p'), mode: KeyMod::CTRL }],
+                    &[Key {
+                        name: KeyName::Up,
+                        mode: KeyMod::EMPTY,
+                    }],
+                    &[Key {
+                        name: KeyName::Char('p'),
+                        mode: KeyMod::CTRL,
+                    }],
                 ],
                 name: "list.item.prev",
                 description: "Move to the previous item in the list",
             },
             ActionDesc {
                 action: ListAction::PageNext,
-                chord: &[
-                    &[Key { name: KeyName::PageDown, mode: KeyMod::EMPTY }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::PageDown,
+                    mode: KeyMod::EMPTY,
+                }]],
                 name: "input.page.next",
                 description: "Move one page down in the list",
             },
             ActionDesc {
                 action: ListAction::PagePrev,
-                chord: &[
-                    &[Key { name: KeyName::PageUp, mode: KeyMod::EMPTY }]
-                ],
+                chord: &[&[Key {
+                    name: KeyName::PageUp,
+                    mode: KeyMod::EMPTY,
+                }]],
                 name: "input.page.prev",
                 description: "Move one page up in the list",
             },
@@ -436,12 +458,16 @@ impl<T: ListItems> List<T> {
         use ListAction::*;
         match action {
             ItemNext => self.cursor += 1,
-            ItemPrev => if self.cursor > 0 {
-                self.cursor -= 1
+            ItemPrev => {
+                if self.cursor > 0 {
+                    self.cursor -= 1
+                }
             }
             PageNext => self.cursor += self.height_hint,
-            PagePrev => if self.cursor >= self.height_hint {
-                self.cursor -= self.height_hint
+            PagePrev => {
+                if self.cursor >= self.height_hint {
+                    self.cursor -= self.height_hint
+                }
             }
         }
         if self.items.len() > 0 {
@@ -452,7 +478,7 @@ impl<T: ListItems> List<T> {
     }
 
     pub fn handle(&mut self, event: &TerminalEvent) {
-        if let TerminalEvent::Key(Key {name, mode}) = event {
+        if let TerminalEvent::Key(Key { name, mode }) = event {
             match *mode {
                 KeyMod::EMPTY => match name {
                     KeyName::Down => self.apply(ListAction::ItemNext),
@@ -460,12 +486,12 @@ impl<T: ListItems> List<T> {
                     KeyName::PageDown => self.apply(ListAction::PageNext),
                     KeyName::PageUp => self.apply(ListAction::PagePrev),
                     _ => {}
-                }
+                },
                 KeyMod::CTRL => match name {
                     KeyName::Char('n') => self.apply(ListAction::ItemNext),
                     KeyName::Char('p') => self.apply(ListAction::ItemPrev),
                     _ => {}
-                }
+                },
                 _ => {}
             }
         }

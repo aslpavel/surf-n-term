@@ -128,8 +128,12 @@ pub struct TTYDecoder {
     /// Bytes consumed since the initialization of DFA
     buffer: Vec<u8>,
     /// Rescheduled data, that needs to be parsed again in **reversed order**
+    /// This data is used when possible match was found but longer one failed
+    /// to materialize, hence we need to resubmit data consumed after first match.
     rescheduled: Vec<u8>,
-    /// Found non-terminal match with its size in the buffer
+    /// Possible match is filled when we have automata in the accepting state
+    /// but it is not terminal (transition to other state is possible). Contains
+    /// TerminalEvent and ammount of data in the buffer when this event was found.
     possible: Option<(TerminalEvent, usize)>,
     /// Used when decoding SGR commands, to track current face
     face: Face,
@@ -159,6 +163,7 @@ impl Decoder for TTYDecoder {
             }
         }
         input.consume(consumed);
+
         Ok(output)
     }
 }
@@ -185,12 +190,10 @@ impl TTYDecoder {
 
     /// Process single byte
     fn decode_byte(&mut self, byte: u8) -> Option<TerminalEvent> {
+        self.buffer.push(byte);
         match self.automata.transition(self.state, byte) {
             Some(state) => {
-                // put byte into a buffer since automata resulted in a valid state
-                self.buffer.push(byte);
                 self.state = state;
-
                 let info = self.automata.info(state);
                 if info.accepting {
                     let tag = info
@@ -200,44 +203,33 @@ impl TTYDecoder {
                         .expect("[TTYDecoder] found untagged accepting state");
                     let event = tty_decoder_event(tag, &self.buffer, &mut self.face)
                         .unwrap_or_else(|| TerminalEvent::Raw(self.buffer.clone()));
+                    self.possible.replace((event, self.buffer.len()));
                     if info.terminal {
-                        // report event
-                        self.reset();
-                        return Some(event);
-                    } else {
-                        // stash event (there might be a longer chain to be accepted)
-                        self.possible.replace((event, self.buffer.len()));
+                        return self.take();
                     }
                 }
                 None
             }
-            None => match self.possible.take() {
-                None => {
-                    if self.buffer.is_empty() {
-                        self.buffer.push(byte);
-                    } else {
-                        self.rescheduled.push(byte);
-                    }
-                    let event = TerminalEvent::Raw(std::mem::take(&mut self.buffer));
-                    self.reset();
-                    Some(event)
-                }
-                Some((event, size)) => {
-                    // report possible event and reschedule reminder to be parsed again
-                    self.rescheduled.push(byte);
-                    self.rescheduled.extend(self.buffer.drain(size..).rev());
-                    self.reset();
-                    Some(event)
-                }
-            },
+            None => {
+                let event = self.take().unwrap_or_else(|| {
+                    self.rescheduled.push(byte); // schdule current by for parsing
+                    self.state = self.automata.start();
+                    self.buffer.pop();
+                    TerminalEvent::Raw(std::mem::take(&mut self.buffer))
+                });
+                Some(event)
+            }
         }
     }
 
-    /// Reset automata and buffer, but keep rescheduled data
-    fn reset(&mut self) {
-        self.possible.take();
-        self.buffer.clear();
-        self.state = self.automata.start();
+    /// Take last successfuly parsed event
+    pub fn take(&mut self) -> Option<TerminalEvent> {
+        self.possible.take().map(|(event, size)| {
+            self.rescheduled.extend(self.buffer.drain(size..).rev());
+            self.buffer.clear();
+            self.state = self.automata.start();
+            event
+        })
     }
 }
 

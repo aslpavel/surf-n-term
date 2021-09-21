@@ -314,6 +314,11 @@ impl Terminal for UnixTerminal {
                         self.events_queue.push_back(event)
                     }
                 }
+                // Durty hack to exctract ambiguous terminal events (such as Escape key)
+                // we assume that ambiguous events are never split across reads.
+                if let Some(event) = self.decoder.take() {
+                    self.events_queue.push_back(event);
+                }
             }
 
             // indicate that first loop was executed
