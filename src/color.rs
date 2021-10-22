@@ -145,14 +145,8 @@ impl Color for ColorLinear {
 }
 
 /// u8 RGBA color
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RGBA(pub [u8; 4]);
-
-impl Default for RGBA {
-    fn default() -> Self {
-        Self([0, 0, 0, 0])
-    }
-}
 
 impl RGBA {
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {

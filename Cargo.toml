@@ -1,7 +1,7 @@
 [package]
 authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 description = "Posix terminal rendering library"
-edition = "2018"
+edition = "2021"
 homepage = "https://github.com/aslpavel/surf-n-term"
 include = [
   "**/*.rs",
@@ -12,7 +12,7 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.1.6"
+version = "0.1.7"
 
 [dependencies]
 flate2 = "1.0"
