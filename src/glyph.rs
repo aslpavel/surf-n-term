@@ -1,4 +1,6 @@
-use crate::{Color, ColorLinear, Face, Image, RGBA, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize};
+use crate::{
+    Color, ColorLinear, Face, Image, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
+};
 pub use rasterize::FillRule;
 use rasterize::{ActiveEdgeRasterizer, Align, BBox, Path, Rasterizer, Transform};
 use std::{
@@ -8,6 +10,7 @@ use std::{
 };
 
 /// Glyph defined as an SVG path
+#[derive(Debug, Clone)]
 pub struct Glyph {
     /// Rasterize path representing the glyph
     path: Arc<Path>,
@@ -22,12 +25,7 @@ pub struct Glyph {
 }
 
 impl Glyph {
-    pub fn new(
-        path: Path,
-        fill_rule: FillRule,
-        view_box: Option<BBox>,
-        size: Size,
-    ) -> Self {
+    pub fn new(path: Path, fill_rule: FillRule, view_box: Option<BBox>, size: Size) -> Self {
         let view_box = view_box
             .or_else(|| path.bbox(Transform::identity()))
             .unwrap_or(BBox::new((0.0, 0.0), (1.0, 1.0)));
@@ -49,7 +47,10 @@ impl Glyph {
     /// Rasterize glyph into an image with provied face.
     pub fn rasterize(&self, face: Face, term_size: TerminalSize) -> Image {
         let pixel_size = term_size.cells_in_pixels(self.size);
-        let size = rasterize::Size { height: pixel_size.height, width: pixel_size.width };
+        let size = rasterize::Size {
+            height: pixel_size.height,
+            width: pixel_size.width,
+        };
         let tr = Transform::fit_size(self.view_box, size, Align::Mid);
 
         let bg_rgba = face.bg.unwrap_or(RGBA::new(0, 0, 0, 0));

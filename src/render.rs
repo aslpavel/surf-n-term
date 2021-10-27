@@ -1,5 +1,8 @@
 //! Terminal rendering logic
-use crate::{Face, FaceAttrs, Image, Position, RGBA, Surface, SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, decoder::Decoder, error::Error};
+use crate::{
+    decoder::Decoder, error::Error, Face, FaceAttrs, Glyph, Image, Position, Surface, SurfaceMut,
+    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
+};
 
 /// Terminal cell kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,16 +21,18 @@ pub struct Cell {
     face: Face,
     character: Option<char>,
     image: Option<Image>,
+    glyph: Option<Glyph>,
     kind: CellKind,
 }
 
 impl Cell {
     /// Create new cell from face and char
-    pub fn new(face: Face, glyph: Option<char>) -> Self {
+    pub fn new(face: Face, character: Option<char>) -> Self {
         Self {
             face,
-            character: glyph,
+            character,
             image: None,
+            glyph: None,
             kind: CellKind::Content,
         }
     }
@@ -38,6 +43,18 @@ impl Cell {
             face: Default::default(),
             character: None,
             image: Some(image),
+            glyph: None,
+            kind: CellKind::Content,
+        }
+    }
+
+    /// Create new cell from glyph
+    pub fn new_glyph(face: Face, glyph: Glyph) -> Self {
+        Self {
+            face,
+            character: None,
+            image: None,
+            glyph: Some(glyph),
             kind: CellKind::Content,
         }
     }
@@ -48,6 +65,7 @@ impl Cell {
             face: Default::default(),
             character: None,
             image: None,
+            glyph: None,
             kind: CellKind::Damaged,
         }
     }
@@ -59,6 +77,7 @@ impl Default for Cell {
             face: Default::default(),
             character: None,
             image: None,
+            glyph: None,
             kind: CellKind::Content,
         }
     }
