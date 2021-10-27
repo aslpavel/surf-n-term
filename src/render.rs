@@ -1,8 +1,5 @@
 //! Terminal rendering logic
-use crate::{
-    decoder::Decoder, error::Error, Face, FaceAttrs, Image, Position, Surface, SurfaceMut,
-    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
-};
+use crate::{Face, FaceAttrs, Image, Position, RGBA, Surface, SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, decoder::Decoder, error::Error};
 
 /// Terminal cell kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +16,7 @@ enum CellKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
     face: Face,
-    glyph: Option<char>,
+    character: Option<char>,
     image: Option<Image>,
     kind: CellKind,
 }
@@ -29,7 +26,7 @@ impl Cell {
     pub fn new(face: Face, glyph: Option<char>) -> Self {
         Self {
             face,
-            glyph,
+            character: glyph,
             image: None,
             kind: CellKind::Content,
         }
@@ -39,7 +36,7 @@ impl Cell {
     pub fn new_image(image: Image) -> Self {
         Self {
             face: Default::default(),
-            glyph: None,
+            character: None,
             image: Some(image),
             kind: CellKind::Content,
         }
@@ -49,7 +46,7 @@ impl Cell {
     fn new_damaged() -> Self {
         Self {
             face: Default::default(),
-            glyph: None,
+            character: None,
             image: None,
             kind: CellKind::Damaged,
         }
@@ -60,7 +57,7 @@ impl Default for Cell {
     fn default() -> Self {
         Self {
             face: Default::default(),
-            glyph: None,
+            character: None,
             image: None,
             kind: CellKind::Content,
         }
@@ -188,7 +185,7 @@ impl TerminalRenderer {
                     continue;
                 }
                 // identify glyph
-                let glyph = src.glyph.unwrap_or(' ');
+                let glyph = src.character.unwrap_or(' ');
                 // find if it is possible to erase instead of using ' '
                 if glyph == ' ' {
                     let repeats = self.find_repeats(row, col);
@@ -447,7 +444,7 @@ mod tests {
                     None => break,
                     Some(cell) => {
                         encoder.encode(&mut out, TerminalCommand::Face(cell.face))?;
-                        write!(&mut out, "{}", cell.glyph.unwrap_or(' '))?;
+                        write!(&mut out, "{}", cell.character.unwrap_or(' '))?;
                     }
                 }
             }

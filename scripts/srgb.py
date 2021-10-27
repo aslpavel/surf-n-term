@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
+from typing import Callable, List
 import numpy as np
 import numpy.linalg as la
-import argparse
-import inspect
 import math
 
-
-def true_l2s(value):
+def true_l2s(value: float) -> float:
     """Convert linear component to SRGB gamma corrected"""
     if value <= 0.0031308:
         return value * 12.92
     return 1.055 * (value ** (1.0 / 2.4)) - 0.055
 
 
-def true_s2l(value):
+def true_s2l(value: float) -> float:
     """Convert SRGB gamma corrected component to linear"""
     if value <= 0.04045:
         return value / 12.92
     return ((value + 0.055) / 1.055) ** 2.4
 
 
-def l2s_sqrt_fit():
-    def l2s_xs(x0):
+def l2s_sqrt_fit() -> Callable[[float], float]:
+    def l2s_xs(x0: float) -> List[float]:
         x1 = math.sqrt(x0)  # x ^ 1/2
         x2 = math.sqrt(x1)  # x ^ 1/4
         x3 = math.sqrt(x2)  # x ^ 1/8
         return [x0, x1, x2, x3]
 
-    def l2s(cs, x):
+    def l2s(cs, x: float) -> float:
         if x <= 0.0031308:
             return x * 12.92
         return cs.dot(l2s_xs(x))
@@ -66,7 +64,6 @@ def l2s_sqrt_fit():
 
 def main():
     """Generate polynomial interpolation of SRGB <-> Linear RGB convertion"""
-    # parser = argparse.ArgumentParser(description=inspect.getdoc(main))
     l2s_sqrt_fit()
 
 

@@ -1,22 +1,71 @@
-use crate::{Color, ColorLinear, Image, Size, Surface, SurfaceMut, SurfaceOwned};
+use crate::{Color, ColorLinear, Face, Image, RGBA, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize};
 pub use rasterize::FillRule;
-use rasterize::{
-    Align, BBox, Image as _, ImageMutRef, Path, Shape as ImageShape, SignedDifferenceRasterizer,
-    Transform,
-};
+use rasterize::{ActiveEdgeRasterizer, Align, BBox, Path, Rasterizer, Transform};
 use std::{
     hash::{Hash, Hasher},
     io::Write,
     sync::Arc,
 };
 
+/// Glyph defined as an SVG path
 pub struct Glyph {
-    /// Path scaled to fit in 1000x1000 grid
+    /// Rasterize path representing the glyph
     path: Arc<Path>,
+    /// View box
+    view_box: BBox,
     /// Fill rule
     fill_rule: FillRule,
-    /// Hash of the glyph
+    /// Glyph size in cells
+    size: Size,
+    /// Hash that is used to determine equality of the paths
     hash: u64,
+}
+
+impl Glyph {
+    pub fn new(
+        path: Path,
+        fill_rule: FillRule,
+        view_box: Option<BBox>,
+        size: Size,
+    ) -> Self {
+        let view_box = view_box
+            .or_else(|| path.bbox(Transform::identity()))
+            .unwrap_or(BBox::new((0.0, 0.0), (1.0, 1.0)));
+
+        let mut hasher = GlyphHasher::new();
+        path.write_svg_path(&mut hasher).unwrap();
+        write!(&mut hasher, "{:?}", view_box).unwrap();
+        let hash = hasher.finish();
+
+        Self {
+            path: Arc::new(path),
+            view_box,
+            hash,
+            size,
+            fill_rule,
+        }
+    }
+
+    /// Rasterize glyph into an image with provied face.
+    pub fn rasterize(&self, face: Face, term_size: TerminalSize) -> Image {
+        let pixel_size = term_size.cells_in_pixels(self.size);
+        let size = rasterize::Size { height: pixel_size.height, width: pixel_size.width };
+        let tr = Transform::fit_size(self.view_box, size, Align::Mid);
+
+        let bg_rgba = face.bg.unwrap_or(RGBA::new(0, 0, 0, 0));
+        let bg: ColorLinear = bg_rgba.into();
+        let fg: ColorLinear = face.fg.unwrap_or(RGBA::new(255, 255, 255, 255)).into();
+
+        let rasterizer = ActiveEdgeRasterizer::default();
+        let mut surf = SurfaceOwned::new_with(size.height, size.width, |_, _| bg_rgba);
+        let shape = surf.shape();
+        let data = surf.data_mut();
+        for pixel in rasterizer.mask_iter(&self.path, tr, size, self.fill_rule) {
+            data[shape.offset(pixel.y, pixel.x)] = bg.lerp(fg, pixel.alpha).into();
+        }
+
+        Image::new(surf)
+    }
 }
 
 impl PartialEq for Glyph {
@@ -31,51 +80,6 @@ impl Hash for Glyph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.hash.hash(state);
         self.fill_rule.hash(state);
-    }
-}
-
-impl Glyph {
-    pub fn new(mut path: Path, fill_rule: FillRule) -> Self {
-        if let Some(src_bbox) = path.bbox(Transform::default()) {
-            let dst_bbox = BBox::new((0.0, 0.0), (1000.0, 1000.0));
-            let tr = Transform::fit_bbox(src_bbox, dst_bbox, Align::Mid);
-            path.transform(tr);
-        }
-
-        let mut hasher = GlyphHasher::new();
-        path.write_svg_path(&mut hasher)
-            .expect("in memory write failed");
-        let hash = hasher.finish();
-
-        Self {
-            path: Arc::new(path),
-            hash,
-            fill_rule,
-        }
-    }
-
-    pub fn rasterize(&self, fg: impl Color, bg: impl Color, size: Size) -> Image {
-        let mut surf = SurfaceOwned::new(size.height, size.width);
-        let mut img = ImageMutRef::new(
-            ImageShape {
-                width: surf.width(),
-                height: surf.height(),
-                row_stride: surf.width(),
-                col_stride: 1,
-            },
-            surf.data_mut(),
-        );
-        let rasterizer = SignedDifferenceRasterizer::default();
-        let tr = Transform::fit_size(
-            BBox::new((0.0, 0.0), (1000.0, 1000.0)),
-            img.size(),
-            Align::Mid,
-        );
-        self.path.mask(rasterizer, tr, self.fill_rule, &mut img);
-        let fg: ColorLinear = fg.into();
-        let bg: ColorLinear = bg.into();
-        let img = surf.map(|_, _, t| bg.lerp(fg, *t).into());
-        Image::new(img)
     }
 }
 
