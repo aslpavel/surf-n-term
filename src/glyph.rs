@@ -71,7 +71,7 @@ impl Glyph {
 
 impl PartialEq for Glyph {
     fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash && self.fill_rule == other.fill_rule
+        self.hash == other.hash && self.fill_rule == other.fill_rule && self.size == other.size
     }
 }
 

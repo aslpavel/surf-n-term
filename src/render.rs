@@ -1,4 +1,6 @@
 //! Terminal rendering logic
+use std::collections::HashMap;
+
 use crate::{
     decoder::Decoder, error::Error, Face, FaceAttrs, Glyph, Image, Position, Surface, SurfaceMut,
     SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
@@ -100,6 +102,8 @@ pub struct TerminalRenderer {
     back: SurfaceOwned<Cell>,
     /// Current terminal size
     size: TerminalSize,
+    /// Cache of rendered glyphs
+    glyph_cache: HashMap<Glyph, Image>,
 }
 
 impl TerminalRenderer {
@@ -118,6 +122,7 @@ impl TerminalRenderer {
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back,
             size,
+            glyph_cache: HashMap::new(),
         })
     }
 
@@ -136,20 +141,23 @@ impl TerminalRenderer {
 
     /// Render the current frame
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+        // Rasterize all glyphs
+        self.glyphs_reasterize(term.size()?);
+
         // Images can overlap and newly rendered image might be erased by erase command
         // addressed to images of the previous frame. That is why we are erasing all images
         // of the previous frame before rendering new images.
         for row in 0..self.back.height() {
             for col in 0..self.back.width() {
-                let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
-                    (Some(src), Some(dst)) => (src, dst),
+                let (front, back) = match (self.front.get(row, col), self.back.get(row, col)) {
+                    (Some(front), Some(back)) => (front, back),
                     _ => break,
                 };
-                if src.image != dst.image && dst.image.is_some() {
+                if front.image != back.image && back.image.is_some() {
                     term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
                 }
                 // mark all cells effected by the image as dameged
-                if let Some(size) = src.image.as_ref().map(|img| img.size_cells(self.size)) {
+                if let Some(size) = front.image.as_ref().map(|img| img.size_cells(self.size)) {
                     let mut view = self
                         .front
                         .view_mut(row..row + size.height, col..col + size.width);
@@ -163,18 +171,18 @@ impl TerminalRenderer {
         for row in 0..self.back.height() {
             let mut col = 0;
             while col < self.back.width() {
-                let (src, dst) = match (self.front.get(row, col), self.back.get(row, col)) {
-                    (Some(src), Some(dst)) => (src, dst),
+                let (front, back) = match (self.front.get(row, col), self.back.get(row, col)) {
+                    (Some(front), Some(back)) => (front, back),
                     _ => break,
                 };
-                if src.kind == CellKind::Ignore || src == dst {
+                if front.kind == CellKind::Ignore || front == back {
                     col += 1;
                     continue;
                 }
                 // update face
-                if src.face != self.face {
-                    term.execute(TerminalCommand::Face(src.face))?;
-                    self.face = src.face;
+                if front.face != self.face {
+                    term.execute(TerminalCommand::Face(front.face))?;
+                    self.face = front.face;
                 }
                 // update position
                 if self.cursor.row != row || self.cursor.col != col {
@@ -183,8 +191,8 @@ impl TerminalRenderer {
                     term.execute(TerminalCommand::CursorTo(self.cursor))?;
                 }
                 // handle image
-                if let Some(image) = src.image.clone() {
-                    let image_changed = src.image != dst.image;
+                if let Some(image) = front.image.clone() {
+                    let image_changed = front.image != back.image;
                     // make sure surface under image is not changed
                     let size = image.size_cells(self.size);
                     let mut view = self
@@ -204,7 +212,7 @@ impl TerminalRenderer {
                     continue;
                 }
                 // identify glyph
-                let glyph = src.character.unwrap_or(' ');
+                let glyph = front.character.unwrap_or(' ');
                 // find if it is possible to erase instead of using ' '
                 if glyph == ' ' {
                     let repeats = self.find_repeats(row, col);
@@ -232,6 +240,25 @@ impl TerminalRenderer {
         std::mem::swap(&mut self.front, &mut self.back);
         self.front.clear();
         Ok(())
+    }
+
+    /// Rasterize all glyphs in the front surface
+    ///
+    /// All glyphs are replaced with rasterized image
+    fn glyphs_reasterize(&mut self, term_size: TerminalSize) {
+        for cell in self.front.iter_mut() {
+            if let Some(glyph) = &cell.glyph {
+                let image = match self.glyph_cache.get(glyph) {
+                    Some(image) => image.clone(),
+                    None => {
+                        let image = glyph.rasterize(cell.face, term_size);
+                        self.glyph_cache.insert(glyph.clone(), image.clone());
+                        image
+                    }
+                };
+                cell.image = Some(image);
+            }
+        }
     }
 
     /// Find how many identical cells is located starting from provided coordinate
