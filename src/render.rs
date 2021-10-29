@@ -472,6 +472,7 @@ mod tests {
     use crate::{
         encoder::{Encoder, TTYEncoder},
         terminal::{Size, TerminalEvent, TerminalSize, TerminalWaker},
+        TerminalCaps,
     };
     use std::io::Write;
 
@@ -508,6 +509,7 @@ mod tests {
         size: TerminalSize,
         cmds: Vec<TerminalCommand>,
         buffer: Vec<u8>,
+        capabiliets: TerminalCaps,
     }
 
     impl DummyTerminal {
@@ -522,6 +524,7 @@ mod tests {
                 },
                 cmds: Default::default(),
                 buffer: Default::default(),
+                capabiliets: TerminalCaps::default(),
             }
         }
 
@@ -570,6 +573,10 @@ mod tests {
 
         fn dyn_ref(&mut self) -> &mut dyn Terminal {
             self
+        }
+
+        fn capabilities(&self) -> &TerminalCaps {
+            &self.capabiliets
         }
     }
 

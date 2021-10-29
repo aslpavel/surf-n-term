@@ -63,7 +63,7 @@ pub use surface::{
     SurfaceOwnedView, SurfaceView,
 };
 pub use terminal::{
-    DecMode, DecModeStatus, Position, Size, Terminal, TerminalAction, TerminalColor,
+    DecMode, DecModeStatus, Position, Size, Terminal, TerminalAction, TerminalCaps, TerminalColor,
     TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker,
 };
 

@@ -57,8 +57,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     // image handler
-    let image_handler_name = term.image_handler().name().to_string();
-    write!(&mut term, "image_handler: {}\r\n", image_handler_name)?;
+    let image_handler_kind = term.image_handler().kind();
+    write!(&mut term, "image_handler: {:?}\r\n", image_handler_kind)?;
 
     // get size
     let size = term.size()?;

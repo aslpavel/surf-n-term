@@ -1,5 +1,6 @@
 //! Main interface to interact with terminal
 use crate::{
+    encoder::ColorDepth,
     error::Error,
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
     Face, Image, Key, KeyMod, KeyName, RGBA,
@@ -127,6 +128,9 @@ pub trait Terminal: Write {
 
     /// Drop all pending frames (equal to number of flush calls)
     fn frames_drop(&mut self);
+
+    /// Get terminal capabiliets
+    fn capabilities(&self) -> &TerminalCaps;
 }
 
 impl<'a, T: Terminal + ?Sized> Terminal for &'a mut T {
@@ -156,6 +160,26 @@ impl<'a, T: Terminal + ?Sized> Terminal for &'a mut T {
 
     fn frames_drop(&mut self) {
         (**self).frames_drop()
+    }
+
+    fn capabilities(&self) -> &TerminalCaps {
+        (**self).capabilities()
+    }
+}
+
+/// Terminal capabilities
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalCaps {
+    pub depth: ColorDepth,
+    pub glyphs: bool,
+}
+
+impl Default for TerminalCaps {
+    fn default() -> Self {
+        Self {
+            depth: ColorDepth::EightBit,
+            glyphs: false,
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 //! Encoders
-use crate::{error::Error, Color, ColorLinear, FaceAttrs, TerminalColor, TerminalCommand};
+use crate::{
+    error::Error, Color, ColorLinear, FaceAttrs, TerminalCaps, TerminalColor, TerminalCommand,
+};
 use std::{cmp::Ordering, io::Write};
 
 /// Encoder interface
@@ -11,30 +13,10 @@ pub trait Encoder {
     fn encode<W: Write>(&mut self, out: W, item: Self::Item) -> Result<(), Self::Error>;
 }
 
-/// TTY capabilities
-#[derive(Debug)]
-pub struct TTYCaps {
-    pub depth: ColorDepth,
-}
-
-impl Default for TTYCaps {
-    fn default() -> Self {
-        let depth = match std::env::var("COLORTERM") {
-            Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
-            _ => ColorDepth::EightBit,
-        };
-        let depth = match std::env::var("TERM").as_deref() {
-            Ok("linux") => ColorDepth::Gray,
-            _ => depth,
-        };
-        Self { depth }
-    }
-}
-
 /// TTY encoder
 #[derive(Debug)]
 pub struct TTYEncoder {
-    caps: TTYCaps,
+    caps: TerminalCaps,
 }
 
 impl Default for TTYEncoder {
@@ -44,7 +26,7 @@ impl Default for TTYEncoder {
 }
 
 impl TTYEncoder {
-    pub fn new(caps: TTYCaps) -> Self {
+    pub fn new(caps: TerminalCaps) -> Self {
         Self { caps }
     }
 }
@@ -342,8 +324,9 @@ mod tests {
 
     #[test]
     fn test_sgr() -> Result<(), Error> {
-        let mut encoder = TTYEncoder::new(TTYCaps {
+        let mut encoder = TTYEncoder::new(TerminalCaps {
             depth: ColorDepth::Gray,
+            glyphs: false,
         });
         let mut out = Vec::new();
         encoder.encode(

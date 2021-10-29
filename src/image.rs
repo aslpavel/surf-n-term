@@ -172,10 +172,18 @@ impl Surface for Image {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageHandlerKind {
+    Kitty,
+    ITerm,
+    Sixel,
+    Dummy,
+}
+
 /// Image rendering/handling interface
 pub trait ImageHandler: Send + Sync {
     /// Name
-    fn name(&self) -> &str;
+    fn kind(&self) -> ImageHandlerKind;
 
     /// Draw image
     ///
@@ -196,8 +204,8 @@ pub trait ImageHandler: Send + Sync {
 }
 
 impl<'a> ImageHandler for Box<dyn ImageHandler> {
-    fn name(&self) -> &str {
-        (**self).name()
+    fn kind(&self) -> ImageHandlerKind {
+        (**self).kind()
     }
 
     fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
@@ -268,8 +276,8 @@ pub fn image_handler_detect(
 pub struct DummyImageHandler;
 
 impl ImageHandler for DummyImageHandler {
-    fn name(&self) -> &str {
-        "dummy"
+    fn kind(&self) -> ImageHandlerKind {
+        ImageHandlerKind::Dummy
     }
 
     fn draw(&mut self, _img: &Image, _out: &mut dyn Write) -> Result<(), Error> {
@@ -303,8 +311,8 @@ impl ItermImageHandler {
 }
 
 impl ImageHandler for ItermImageHandler {
-    fn name(&self) -> &str {
-        "iterm"
+    fn kind(&self) -> ImageHandlerKind {
+        ImageHandlerKind::ITerm
     }
 
     fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
@@ -369,8 +377,8 @@ impl Default for KittyImageHandler {
 }
 
 impl ImageHandler for KittyImageHandler {
-    fn name(&self) -> &str {
-        "kitty"
+    fn kind(&self) -> ImageHandlerKind {
+        ImageHandlerKind::Kitty
     }
 
     fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
@@ -472,8 +480,8 @@ impl SixelImageHandler {
 }
 
 impl ImageHandler for SixelImageHandler {
-    fn name(&self) -> &str {
-        "sixel"
+    fn kind(&self) -> ImageHandlerKind {
+        ImageHandlerKind::Sixel
     }
 
     fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {

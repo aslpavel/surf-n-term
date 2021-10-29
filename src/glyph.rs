@@ -72,6 +72,11 @@ impl Glyph {
 
         Image::new(surf)
     }
+
+    /// Size of the glyph in cells
+    pub fn size(&self) -> Size {
+        self.size
+    }
 }
 
 impl PartialEq for Glyph {
@@ -184,7 +189,7 @@ impl<'de> Deserialize<'de> for Glyph {
                             });
                         }
                         "view_box" => {
-                            let (minx, miny, height, width): (Scalar, Scalar, Scalar, Scalar) =
+                            let (minx, miny, width, height): (Scalar, Scalar, Scalar, Scalar) =
                                 map.next_value()?;
                             view_box
                                 .replace(BBox::new((minx, miny), (minx + width, miny + height)));
@@ -238,7 +243,7 @@ mod tests {
         let term = Glyph::new(
             path,
             FillRule::NonZero,
-            Some(BBox::new((1.0, 0.0), (25.0, 24.0))),
+            Some(BBox::new((1.0, 0.0), (25.0, 21.0))),
             Size::new(1, 2),
         );
         let term_str = serde_json::to_string(&term)?;
@@ -247,7 +252,7 @@ mod tests {
         let term_json = serde_json::json!({
             "path": TERMINAL_ICON,
             "fill_rule": "nonzero",
-            "view_box": [1, 0, 24, 24],
+            "view_box": [1, 0, 24, 21],
             "size": [1, 2],
         });
         assert_eq!(term, serde_json::from_value(term_json)?);

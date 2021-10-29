@@ -1,5 +1,8 @@
 //! Unix systems specific `Terminal` implementation.
 use crate::common::IOQueue;
+use crate::encoder::ColorDepth;
+use crate::image::ImageHandlerKind;
+use crate::TerminalCaps;
 use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
@@ -54,6 +57,7 @@ pub struct UnixTerminal {
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
     image_handler: Box<dyn ImageHandler + 'static>,
+    capabilities: TerminalCaps,
 }
 
 impl UnixTerminal {
@@ -109,9 +113,22 @@ impl UnixTerminal {
         write_handle.set_blocking(false)?;
         set_blocking(waker_read.as_raw_fd(), false)?;
 
+        let depth = match std::env::var("COLORTERM") {
+            Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
+            _ => ColorDepth::EightBit,
+        };
+        let depth = match std::env::var("TERM").as_deref() {
+            Ok("linux") => ColorDepth::Gray,
+            _ => depth,
+        };
+        let capabilities = TerminalCaps {
+            depth,
+            glyphs: false,
+        };
+
         let mut term = Self {
             write_handle,
-            encoder: TTYEncoder::default(),
+            encoder: TTYEncoder::new(capabilities),
             write_queue: Default::default(),
             read_handle,
             decoder: TTYDecoder::new(),
@@ -123,8 +140,10 @@ impl UnixTerminal {
             stats: TerminalStats::new(),
             tee: None,
             image_handler: Box::new(DummyImageHandler),
+            capabilities: TerminalCaps::default(),
         };
         term.image_handler = image_handler_detect(&mut term)?;
+        term.capabilities.glyphs = matches!(term.image_handler.kind(), ImageHandlerKind::Kitty);
         Ok(term)
     }
 
@@ -370,6 +389,10 @@ impl Terminal for UnixTerminal {
 
     fn dyn_ref(&mut self) -> &mut dyn Terminal {
         self
+    }
+
+    fn capabilities(&self) -> &TerminalCaps {
+        &self.capabilities
     }
 }
 
