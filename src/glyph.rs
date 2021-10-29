@@ -168,7 +168,7 @@ impl<'de> Deserialize<'de> for Glyph {
             type Value = Glyph;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("struct with path/?view_box/fill_rule/size attributes")
+                formatter.write_str("expected Glyph with {path|view_box|fill_rule|size} attributes")
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
