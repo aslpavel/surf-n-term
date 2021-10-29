@@ -54,7 +54,7 @@ pub mod widgets;
 pub use color::{Blend, Color, ColorLinear, RGBA};
 pub use error::Error;
 pub use face::{Face, FaceAttrs};
-pub use glyph::{FillRule, Glyph};
+pub use glyph::{BBox, FillRule, Glyph, Path};
 pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImageHandler};
 pub use keys::{Key, KeyMap, KeyMod, KeyName};
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt, TerminalWritable, TerminalWriter};

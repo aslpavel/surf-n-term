@@ -1,8 +1,8 @@
 use crate::{
     Color, ColorLinear, Face, Image, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
 };
-pub use rasterize::FillRule;
-use rasterize::{ActiveEdgeRasterizer, Align, BBox, Path, Rasterizer, Scalar, Transform};
+use rasterize::{ActiveEdgeRasterizer, Align, Rasterizer, Scalar, Transform};
+pub use rasterize::{BBox, FillRule, Path};
 use serde::{de, ser::SerializeStruct, Deserialize, Serialize};
 use std::{
     borrow::Cow,
