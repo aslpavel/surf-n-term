@@ -52,13 +52,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let timeout = Duration::from_secs(10);
     write!(
         &mut term,
-        "Program will exit after {:?} of idling or if 'q' is pressed ...\r\n",
+        "\x1b[91mProgram will exit after {:?} of idling or if 'q' is pressed ...\x1b[m\r\n",
         timeout
     )?;
 
     // image handler
     let image_handler_kind = term.image_handler().kind();
     write!(&mut term, "image_handler: {:?}\r\n", image_handler_kind)?;
+    let caps = term.capabilities().clone();
+    write!(&mut term, "term caps: {:?}\r\n", caps)?;
 
     // get size
     let size = term.size()?;

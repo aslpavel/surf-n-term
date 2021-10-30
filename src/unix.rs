@@ -128,7 +128,7 @@ impl UnixTerminal {
 
         let mut term = Self {
             write_handle,
-            encoder: TTYEncoder::new(capabilities),
+            encoder: TTYEncoder::new(capabilities.clone()),
             write_queue: Default::default(),
             read_handle,
             decoder: TTYDecoder::new(),
@@ -140,7 +140,7 @@ impl UnixTerminal {
             stats: TerminalStats::new(),
             tee: None,
             image_handler: Box::new(DummyImageHandler),
-            capabilities: TerminalCaps::default(),
+            capabilities,
         };
         term.image_handler = image_handler_detect(&mut term)?;
         term.capabilities.glyphs = matches!(term.image_handler.kind(), ImageHandlerKind::Kitty);
