@@ -143,7 +143,10 @@ impl UnixTerminal {
             capabilities,
         };
         term.image_handler = image_handler_detect(&mut term)?;
-        term.capabilities.glyphs = matches!(term.image_handler.kind(), ImageHandlerKind::Kitty);
+        term.capabilities.glyphs = matches!(
+            term.image_handler.kind(),
+            ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
+        );
         Ok(term)
     }
 

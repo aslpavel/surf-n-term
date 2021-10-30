@@ -107,9 +107,15 @@ pub trait Terminal: Write {
                         renderer.clear(self)?;
                     }
                     // render frame
-                    self.execute(TerminalCommand::SynchronizeUpdate(true))?;
+                    self.execute(TerminalCommand::DecModeSet {
+                        enable: true,
+                        mode: DecMode::SynchronizedOutput,
+                    })?;
                     renderer.frame(self)?;
-                    self.execute(TerminalCommand::SynchronizeUpdate(false))?;
+                    self.execute(TerminalCommand::DecModeSet {
+                        enable: false,
+                        mode: DecMode::SynchronizedOutput,
+                    })?;
                     // handle action
                     timeout = match action {
                         TerminalAction::Quit(result) => return Ok(result),
@@ -272,12 +278,6 @@ pub enum TerminalCommand {
     },
     /// Set terminal title
     Title(String),
-    /// Synchronized update
-    ///
-    /// The goal of synchronized updates is to avoid showing a half-drawn screen,
-    /// such as while paging through a document in an editor. True means block updates, until False is received.
-    /// [Reference](https://gitlab.com/gnachman/iterm2/-/wikis/synchronized-updates-spec)
-    SynchronizeUpdate(bool),
     /// [Primary Device Attributes](https://vt100.net/docs/vt510-rm/DA1.html)
     DeviceAttrs,
 }
@@ -307,6 +307,8 @@ pub enum DecMode {
     AltScreen = 1049,
     /// Kitty keyboard mode https://sw.kovidgoyal.net/kitty/protocol-extensions.html
     KittyKeyboard = 2017,
+    /// Synchronized output https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036
+    SynchronizedOutput = 2026,
 }
 
 /// Current/requested postion of terminal

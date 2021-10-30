@@ -13,7 +13,7 @@ use crate::{
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
     io::Write,
     iter::FromIterator,
@@ -424,7 +424,7 @@ impl ImageHandler for KittyImageHandler {
         let img_id = kitty_image_id(img);
 
         // transfer image if it has not been transfered yet
-        if !self.imgs.contains_key(&img_id) {
+        if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
             // zlib compressed and base64 encoded RGBA image data
             let mut payload_write =
                 ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
@@ -466,7 +466,7 @@ impl ImageHandler for KittyImageHandler {
             }
 
             // remember that image data has been send
-            self.imgs.insert(img_id, img.size());
+            entry.insert(img.size());
         }
 
         // request image to be shown
