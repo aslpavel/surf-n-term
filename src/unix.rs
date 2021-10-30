@@ -348,9 +348,11 @@ impl Terminal for UnixTerminal {
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         match cmd {
-            TerminalCommand::Image(image) => self.image_handler.draw(&image, &mut self.write_queue),
-            TerminalCommand::ImageErase(pos) => {
-                self.image_handler.erase(pos, &mut self.write_queue)
+            TerminalCommand::Image(img, pos) => {
+                self.image_handler.draw(&mut self.write_queue, &img, pos)
+            }
+            TerminalCommand::ImageErase(img, pos) => {
+                self.image_handler.erase(&mut self.write_queue, &img, pos)
             }
             cmd => self.encoder.encode(&mut self.write_queue, cmd),
         }

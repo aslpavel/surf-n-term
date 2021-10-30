@@ -127,11 +127,20 @@ impl TerminalRenderer {
     }
 
     /// Clear terminal
-    pub fn clear(&mut self) {
+    pub fn clear<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+        // erase all images
+        for cell in self.back.iter() {
+            if let Some(img) = &cell.image {
+                term.execute(TerminalCommand::ImageErase(img.clone(), None))?;
+            }
+        }
+
         self.face = Face::default().with_fg(Some(RGBA::new(254, 0, 253, 252)));
         self.cursor = Position::new(100_000, 100_000);
         self.front.fill(Cell::new_damaged());
         self.back.fill(Cell::new_damaged());
+
+        Ok(())
     }
 
     /// View associated with the current frame
@@ -153,8 +162,13 @@ impl TerminalRenderer {
                     (Some(front), Some(back)) => (front, back),
                     _ => break,
                 };
-                if front.image != back.image && back.image.is_some() {
-                    term.execute(TerminalCommand::ImageErase(Position::new(row, col)))?;
+                if front.image != back.image {
+                    if let Some(img) = &back.image {
+                        term.execute(TerminalCommand::ImageErase(
+                            img.clone(),
+                            Some(Position::new(row, col)),
+                        ))?;
+                    }
                 }
                 // mark all cells effected by the image as dameged
                 if let Some(size) = front.image.as_ref().map(|img| img.size_cells(self.size)) {
@@ -204,7 +218,7 @@ impl TerminalRenderer {
                     // render image if changed
                     if image_changed {
                         // issure render command
-                        term.execute(TerminalCommand::Image(image))?;
+                        term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
                         // set position large enough so it would tirgger position update
                         self.cursor = Position::new(100000, 1000000);
                     }

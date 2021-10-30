@@ -15,7 +15,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt,
-    io::{Cursor, Read, Write},
+    io::Write,
     iter::FromIterator,
     ops::{Add, AddAssign, Mul},
     sync::Arc,
@@ -188,14 +188,20 @@ pub trait ImageHandler: Send + Sync {
     /// Draw image
     ///
     /// Send approprite terminal escape sequence so image would be rendered.
-    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error>;
+    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error>;
 
     /// Erase image at specified position
     ///
     /// This is needed when erasing characters is not actually removing
     /// image from the terminal. For example kitty needs to send separate
-    /// escape sequence to actually erase image.
-    fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error>;
+    /// escape sequence to actually erase image. If position is not specified
+    /// all matching images are deleted.
+    fn erase(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Option<Position>,
+    ) -> Result<(), Error>;
 
     /// Handle events frome the terminal
     ///
@@ -208,12 +214,17 @@ impl<'a> ImageHandler for Box<dyn ImageHandler> {
         (**self).kind()
     }
 
-    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
-        (**self).draw(img, out)
+    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
+        (**self).draw(out, img, pos)
     }
 
-    fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error> {
-        (**self).erase(pos, out)
+    fn erase(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Option<Position>,
+    ) -> Result<(), Error> {
+        (**self).erase(out, img, pos)
     }
 
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
@@ -237,7 +248,7 @@ pub fn image_handler_detect(
     for _ in 0..3 {
         match term.poll(Some(Duration::from_secs(1)))? {
             Some(TerminalEvent::KittyImage { .. }) => {
-                handler.replace(Box::new(KittyImageHandler::new(true)));
+                handler.replace(Box::new(KittyImageHandler::new()));
             }
             Some(TerminalEvent::DeviceAttrs(attrs)) => {
                 // 4 - attribute indicates sixel support
@@ -261,7 +272,7 @@ pub fn image_handler_detect(
                 handler.replace(Box::new(ItermImageHandler::new()));
             }
             "kitty" => {
-                handler.replace(Box::new(KittyImageHandler::new(true)));
+                handler.replace(Box::new(KittyImageHandler::new()));
             }
             "sixel" => {
                 handler.replace(Box::new(SixelImageHandler::new(bg)));
@@ -280,11 +291,16 @@ impl ImageHandler for DummyImageHandler {
         ImageHandlerKind::Dummy
     }
 
-    fn draw(&mut self, _img: &Image, _out: &mut dyn Write) -> Result<(), Error> {
+    fn draw(&mut self, _out: &mut dyn Write, _img: &Image, _pos: Position) -> Result<(), Error> {
         Ok(())
     }
 
-    fn erase(&mut self, _pos: Position, _out: &mut dyn Write) -> Result<(), Error> {
+    fn erase(
+        &mut self,
+        _out: &mut dyn Write,
+        _img: &Image,
+        _pos: Option<Position>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
@@ -315,7 +331,7 @@ impl ImageHandler for ItermImageHandler {
         ImageHandlerKind::ITerm
     }
 
-    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+    fn draw(&mut self, out: &mut dyn Write, img: &Image, _pos: Position) -> Result<(), Error> {
         if let Some(data) = self.imgs.get(&img.hash()) {
             out.write_all(data.as_slice())?;
             return Ok(());
@@ -344,7 +360,12 @@ impl ImageHandler for ItermImageHandler {
         Ok(())
     }
 
-    fn erase(&mut self, _pos: Position, _out: &mut dyn Write) -> Result<(), Error> {
+    fn erase(
+        &mut self,
+        _out: &mut dyn Write,
+        _img: &Image,
+        _pos: Option<Position>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
@@ -355,25 +376,43 @@ impl ImageHandler for ItermImageHandler {
 
 /// Image handler for kitty graphic protocol
 ///
-/// Reference: [Kitty Graphic Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol.html)
+/// Reference: [Kitty Graphic Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
 pub struct KittyImageHandler {
     imgs: HashMap<u64, usize>, // hash -> size in bytes
-    cache: bool,
 }
 
 impl KittyImageHandler {
-    pub fn new(cache: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             imgs: Default::default(),
-            cache,
         }
     }
 }
 
 impl Default for KittyImageHandler {
     fn default() -> Self {
-        Self::new(true)
+        Self::new()
     }
+}
+
+/// Kitty id/placement_id must not exceed this value
+const KITTY_MAX_ID: u64 = 4294967295;
+/// We are using position to derive placement_id, and this is the limit
+/// on terminal dimension (width and height).
+const KITTY_MAX_DIM: u64 = 65536;
+
+/// Identificator for image data
+fn kitty_image_id(img: &Image) -> u64 {
+    img.hash() % KITTY_MAX_ID
+}
+
+/// Identificator of particular placement of the image
+///
+/// In general this identificator is just represents individual placement
+/// but in particular implementation it is bound to a physical position on
+/// the screen.
+fn kitty_placement_id(pos: Position) -> u64 {
+    (pos.row as u64 % KITTY_MAX_DIM) + (pos.col as u64 % KITTY_MAX_DIM) * KITTY_MAX_DIM
 }
 
 impl ImageHandler for KittyImageHandler {
@@ -381,64 +420,84 @@ impl ImageHandler for KittyImageHandler {
         ImageHandlerKind::Kitty
     }
 
-    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
-        let id = img.hash() % 4294967295;
-        match self.imgs.get(&id) {
-            Some(_) => {
-                // data has already been send and we can just use an id.
-                write!(out, "\x1b_Ga=p,i={};\x1b\\", id)?;
-            }
-            None => {
-                let mut payload =
-                    ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
-                for color in img.iter() {
-                    payload.write_all(&color.rgba_u8())?;
-                }
+    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
+        let img_id = kitty_image_id(img);
 
-                let mut buf = [0u8; 4096];
-                let mut payload = Cursor::new(payload.finish()?.finish()?);
-                loop {
-                    let size = payload.read(&mut buf)?;
-                    let more = if payload.position() < payload.get_ref().len() as u64 {
-                        1
-                    } else {
-                        0
-                    };
-                    // a = t - transfer only
-                    // a = T - transfer and show
-                    // a = p - present only using `i = id`
+        // transfer image if it has not been transfered yet
+        if !self.imgs.contains_key(&img_id) {
+            // zlib compressed and base64 encoded RGBA image data
+            let mut payload_write =
+                ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
+            for color in img.iter() {
+                payload_write.write_all(&color.rgba_u8())?;
+            }
+            let payload = payload_write.finish()?.finish()?;
+
+            // data needs to be transfered in chunks
+            let chunks = payload.chunks(4096);
+            let count = chunks.len();
+            for (index, chunk) in chunks.enumerate() {
+                // control data
+                let more = if index + 1 < count { 1 } else { 0 };
+                if index == 0 {
+                    // a=t  - action is transmit only
+                    // f=32 - RGBA pixel format
+                    // o=z  - zlib compressed data
+                    // i    - image data identifier
+                    // v    - height of the image
+                    // s    - width of the image
+                    // m    - whether more chunks will follow or not
                     write!(
                         out,
-                        "\x1b_Ga=T,f=32,o=z,v={},s={},m={}",
+                        "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={};",
+                        img_id,
                         img.height(),
                         img.width(),
-                        more,
+                        more
                     )?;
-                    if self.cache {
-                        write!(out, ",i={}", id)?;
-                    }
-                    out.write_all(b";")?;
-                    out.write_all(&buf[..size])?;
-                    out.write_all(b"\x1b\\")?;
-                    if more == 0 {
-                        break;
-                    }
+                } else {
+                    // only first chunk requires all attributes
+                    write!(out, "\x1b_Gm={};", more)?;
                 }
-                if self.cache {
-                    self.imgs.insert(id, img.size());
-                }
+                // data
+                out.write_all(chunk)?;
+                // epilogue
+                out.write_all(b"\x1b\\")?;
             }
+
+            // remember that image data has been send
+            self.imgs.insert(img_id, img.size());
         }
+
+        // request image to be shown
+        let placement_id = kitty_placement_id(pos);
+        // a=p - action is put image
+        // i   - image data identifier
+        // p   - placement identifier
+        write!(out, "\x1b_Ga=p,i={},p={};\x1b\\", img_id, placement_id)?;
         Ok(())
     }
 
-    fn erase(&mut self, pos: Position, out: &mut dyn Write) -> Result<(), Error> {
-        write!(
-            out,
-            "\x1b_Ga=d,d=p,x={},y={}\x1b\\",
-            pos.col + 1,
-            pos.row + 1
-        )?;
+    fn erase(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Option<Position>,
+    ) -> Result<(), Error> {
+        // Delete image by image id and placement id
+        // a=d - action delete image
+        // d=i - delete by image and placement id without freeing data
+        // i   - image data identifier
+        // p   - placement identifier
+        match pos {
+            Some(pos) => write!(
+                out,
+                "\x1b_Ga=d,d=i,i={},p={}\x1b\\",
+                kitty_image_id(img),
+                kitty_placement_id(pos),
+            )?,
+            None => write!(out, "\x1b_Ga=d,d=i,i={}\x1b\\", kitty_image_id(img))?,
+        }
         Ok(())
     }
 
@@ -484,7 +543,7 @@ impl ImageHandler for SixelImageHandler {
         ImageHandlerKind::Sixel
     }
 
-    fn draw(&mut self, img: &Image, out: &mut dyn Write) -> Result<(), Error> {
+    fn draw(&mut self, out: &mut dyn Write, img: &Image, _pos: Position) -> Result<(), Error> {
         if let Some(sixel_image) = self.imgs.get(&img.hash()) {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
@@ -603,7 +662,12 @@ impl ImageHandler for SixelImageHandler {
         Ok(())
     }
 
-    fn erase(&mut self, _pos: Position, _out: &mut dyn Write) -> Result<(), Error> {
+    fn erase(
+        &mut self,
+        _out: &mut dyn Write,
+        _img: &Image,
+        _pos: Option<Position>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 

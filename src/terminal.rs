@@ -96,6 +96,7 @@ pub trait Terminal: Write {
                 Ok(event) => {
                     // allocate new renderer on resize
                     if let Some(TerminalEvent::Resize(_)) = event {
+                        renderer.clear(self)?;
                         renderer = TerminalRenderer::new(self, true)?;
                     }
                     // handle event
@@ -103,7 +104,7 @@ pub trait Terminal: Write {
                     // drop frames if we are too far behind
                     if self.frames_pending() > TERMINAL_FRAMES_DROP {
                         self.frames_drop();
-                        renderer.clear();
+                        renderer.clear(self)?;
                     }
                     // render frame
                     self.execute(TerminalCommand::SynchronizeUpdate(true))?;
@@ -259,9 +260,9 @@ pub enum TerminalCommand {
     /// Full reset of the terminal
     Reset,
     /// Draw image
-    Image(Image),
+    Image(Image, Position),
     /// Erase image
-    ImageErase(Position),
+    ImageErase(Image, Option<Position>),
     /// Request Termcap/Terminfo XTGETTCAP
     Termcap(Vec<String>),
     /// Set or query terminal colors
