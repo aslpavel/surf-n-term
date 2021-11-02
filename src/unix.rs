@@ -25,6 +25,7 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
+use tracing::info;
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -147,6 +148,7 @@ impl UnixTerminal {
             term.image_handler.kind(),
             ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
         );
+        info!("capabilities: {:?}", term.capabilities);
         Ok(term)
     }
 

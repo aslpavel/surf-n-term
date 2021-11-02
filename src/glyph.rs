@@ -10,6 +10,7 @@ use std::{
     io::Write,
     sync::Arc,
 };
+use tracing::debug;
 
 /// Glyph defined as an SVG path
 #[derive(Debug, Clone)]
@@ -70,6 +71,7 @@ impl Glyph {
             data[shape.offset(pixel.y, pixel.x)] = bg.lerp(fg, pixel.alpha).into();
         }
 
+        debug!(path=%self.path.to_svg_path(), ?face, ?size, "glyph rasterized");
         Image::new(surf)
     }
 

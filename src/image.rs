@@ -21,6 +21,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tracing::{debug_span, info};
 
 const IMAGE_CACHE_SIZE: usize = 134217728; // 128MB
 
@@ -59,6 +60,7 @@ impl Image {
     /// Qunatize image
     ///
     /// Perform palette extraction and Floyd–Steinberg dithering.
+    #[tracing::instrument(level = "debug")]
     pub fn quantize(
         &self,
         palette_size: usize,
@@ -280,7 +282,9 @@ pub fn image_handler_detect(
             _ => {}
         }
     }
-    Ok(handler.unwrap_or_else(|| Box::new(DummyImageHandler)))
+    let handler = handler.unwrap_or_else(|| Box::new(DummyImageHandler));
+    info!("image handler detected: {:?}", handler.kind());
+    Ok(handler)
 }
 
 /// Image handler which ignores requests
@@ -425,6 +429,7 @@ impl ImageHandler for KittyImageHandler {
 
         // transfer image if it has not been transfered yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
+            debug_span!("transfer image", image_handler = "kitty");
             // zlib compressed and base64 encoded RGBA image data
             let mut payload_write =
                 ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
@@ -548,6 +553,7 @@ impl ImageHandler for SixelImageHandler {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
         }
+        debug_span!("encode image", image_handler = "sixel");
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
         // quantization, it will produce smaller or/and better palette for this color depth
         let dimg = Image::new(img.map(|_, _, color| {

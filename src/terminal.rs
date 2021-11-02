@@ -12,6 +12,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tracing::{debug, trace};
 
 /// How many frames needs to be pending before we start dropping them
 const TERMINAL_FRAMES_DROP: usize = 32;
@@ -85,6 +86,7 @@ pub trait Terminal: Write {
         let mut timeout = Some(Duration::new(0, 0)); // run first loop immediately
         loop {
             let event = self.poll(timeout);
+            trace!("processing event: {:?}", event);
             match event {
                 Err(error) => {
                     // cleanup on error
@@ -103,6 +105,7 @@ pub trait Terminal: Write {
                     let action = handler(self, event, renderer.view())?;
                     // drop frames if we are too far behind
                     if self.frames_pending() > TERMINAL_FRAMES_DROP {
+                        debug!("dropping frames: {}", self.frames_pending());
                         self.frames_drop();
                         renderer.clear(self)?;
                     }
