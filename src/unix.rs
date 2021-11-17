@@ -352,6 +352,7 @@ impl Terminal for UnixTerminal {
     }
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
+        tracing::trace!(?cmd, "execute");
         match cmd {
             TerminalCommand::Image(img, pos) => {
                 self.image_handler.draw(&mut self.write_queue, &img, pos)
