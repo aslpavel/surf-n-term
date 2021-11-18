@@ -17,7 +17,10 @@ use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
 };
-use std::os::unix::io::AsRawFd;
+use std::os::unix::{
+    io::{AsRawFd, RawFd},
+    net::UnixStream,
+};
 use std::{
     collections::VecDeque,
     fs::File,
@@ -38,23 +41,21 @@ mod nix {
             termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
             time::TimeVal,
         },
-        unistd::{isatty, read, write},
+        unistd::{close, isatty, read, write},
         Error,
     };
-    pub use std::os::unix::{io::RawFd, net::UnixStream};
 }
 
 pub struct UnixTerminal {
-    write_handle: IOHandle,
+    tty_handle: IOHandle,
     encoder: TTYEncoder,
     write_queue: IOQueue,
-    read_handle: IOHandle,
     decoder: TTYDecoder,
     events_queue: VecDeque<TerminalEvent>,
-    waker_read: nix::UnixStream,
+    waker_read: UnixStream,
     waker: TerminalWaker,
     termios_saved: nix::Termios,
-    signal_delivery: SignalDelivery<nix::UnixStream, SignalOnly>,
+    signal_delivery: SignalDelivery<UnixStream, SignalOnly>,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
     image_handler: Box<dyn ImageHandler + 'static>,
@@ -69,25 +70,27 @@ impl UnixTerminal {
 
     /// Open terminal by a given device path
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
-        Self::new_from_fd(fd, fd)
+        let tty_fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
+        Self::new_from_fd(tty_fd)
     }
 
-    /// Create new terminal from raw file descriptors.
-    pub fn new_from_fd(write_fd: nix::RawFd, read_fd: nix::RawFd) -> Result<Self, Error> {
-        if !nix::isatty(write_fd)? || !nix::isatty(read_fd)? {
+    /// Create new terminal from raw file descriptor pointing to /dev/tty.
+    pub fn new_from_fd(tty_fd: RawFd) -> Result<Self, Error> {
+        let tty_handle = IOHandle::new(tty_fd);
+        tty_handle.set_blocking(false)?;
+        if !nix::isatty(tty_fd)? {
             return Err(Error::NotATTY);
         }
 
         // switching terminal into a raw mode
         // [Entering Raw Mode](https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html)
-        let termios_saved = nix::tcgetattr(write_fd)?;
+        let termios_saved = nix::tcgetattr(tty_fd)?;
         let mut termios = termios_saved.clone();
         nix::cfmakeraw(&mut termios);
-        nix::tcsetattr(write_fd, nix::SetArg::TCSAFLUSH, &termios)?;
+        nix::tcsetattr(tty_fd, nix::SetArg::TCSAFLUSH, &termios)?;
 
         // signal delivery
-        let (signal_read, signal_write) = nix::UnixStream::pair()?;
+        let (signal_read, signal_write) = UnixStream::pair()?;
         let signal_delivery = SignalDelivery::with_pipe(
             signal_read,
             signal_write,
@@ -96,22 +99,16 @@ impl UnixTerminal {
         )?;
 
         // self-pipe trick to implement waker
-        let (waker_read, waker_write) = nix::UnixStream::pair()?;
+        let (waker_read, waker_write) = UnixStream::pair()?;
         set_blocking(waker_write.as_raw_fd(), false)?;
         let waker = TerminalWaker::new(move || {
             const WAKE: &[u8] = b"\x00";
             // use write syscall instead of locking so it would be safe to use in a signal handler
-            match guard_nix(nix::write(waker_write.as_raw_fd(), WAKE), 0) {
-                Ok(_) => Ok(()),
+            match nix::write(waker_write.as_raw_fd(), WAKE) {
+                Ok(_) | Err(nix::Error::Sys(nix::Errno::EINTR | nix::Errno::EAGAIN)) => Ok(()),
                 Err(error) => Err(error.into()),
             }
         });
-
-        let write_handle = IOHandle::new(write_fd);
-        let read_handle = IOHandle::new(read_fd);
-
-        read_handle.set_blocking(false)?;
-        write_handle.set_blocking(false)?;
         set_blocking(waker_read.as_raw_fd(), false)?;
 
         let depth = match std::env::var("COLORTERM") {
@@ -128,10 +125,9 @@ impl UnixTerminal {
         };
 
         let mut term = Self {
-            write_handle,
+            tty_handle,
             encoder: TTYEncoder::new(capabilities.clone()),
             write_queue: Default::default(),
-            read_handle,
             decoder: TTYDecoder::new(),
             events_queue: Default::default(),
             waker_read,
@@ -173,9 +169,8 @@ impl UnixTerminal {
     fn dispose(&mut self) -> Result<(), Error> {
         self.frames_drop();
 
-        // revert descriptors to blocking mode
-        self.write_handle.set_blocking(true)?;
-        self.read_handle.set_blocking(true)?;
+        // revert descriptor to blocking mode
+        self.tty_handle.set_blocking(true)?;
 
         // flush currently queued output and submit the epilogue
         let epilogue = [
@@ -218,7 +213,7 @@ impl UnixTerminal {
 
         // restore termios settings
         nix::tcsetattr(
-            self.write_handle.as_raw_fd(),
+            self.tty_handle.as_raw_fd(),
             nix::SetArg::TCSAFLUSH,
             &self.termios_saved,
         )?;
@@ -251,8 +246,7 @@ impl Terminal for UnixTerminal {
         self.write_queue.flush()?;
         let mut read_set = nix::FdSet::new();
         let mut write_set = nix::FdSet::new();
-        let write_fd = self.write_handle.as_raw_fd();
-        let read_fd = self.read_handle.as_raw_fd();
+        let tty_fd = self.tty_handle.as_raw_fd();
         let signal_fd = self.signal_delivery.get_read().as_raw_fd();
         let waker_fd = self.waker_read.as_raw_fd();
 
@@ -261,12 +255,12 @@ impl Terminal for UnixTerminal {
         while !self.write_queue.is_empty() || self.events_queue.is_empty() {
             // update descriptors sets
             read_set.clear();
-            read_set.insert(read_fd);
+            read_set.insert(tty_fd);
             read_set.insert(signal_fd);
             read_set.insert(waker_fd);
             write_set.clear();
             if !self.write_queue.is_empty() {
-                write_set.insert(write_fd);
+                write_set.insert(tty_fd);
             }
 
             // process timeout
@@ -288,14 +282,17 @@ impl Terminal for UnixTerminal {
 
             // wait for descriptors
             let select = nix::select(None, &mut read_set, &mut write_set, None, &mut delay);
-            let _count = guard_nix(select, 0)?;
+            match select {
+                Err(nix::Error::Sys(nix::Errno::EINTR | nix::Errno::EAGAIN)) => return Ok(None),
+                Err(error) => return Err(error.into()),
+                Ok(count) => tracing::trace!("select count={}", count),
+            };
 
             // process pending output
-            if write_set.contains(write_fd) {
-                let write_handle = &mut self.write_handle;
+            if write_set.contains(tty_fd) {
                 let tee = self.tee.as_mut();
                 let send = self.write_queue.consume_with(|slice| {
-                    let size = guard_io(write_handle.write(slice), 0)?;
+                    let size = guard_io(self.tty_handle.write(slice), 0)?;
                     tee.map(|tee| tee.write(&slice[..size])).transpose()?;
                     Ok::<_, Error>(size)
                 })?;
@@ -324,9 +321,9 @@ impl Terminal for UnixTerminal {
                 }
             }
             // process pending input
-            if read_set.contains(read_fd) {
+            if read_set.contains(tty_fd) {
                 let mut buf = [0u8; 1024];
-                let recv = guard_io(self.read_handle.read(&mut buf), 0)?;
+                let recv = guard_io(self.tty_handle.read(&mut buf), 0)?;
                 if recv == 0 {
                     return Err(Error::Quit);
                 }
@@ -367,7 +364,7 @@ impl Terminal for UnixTerminal {
     fn size(&self) -> Result<TerminalSize, Error> {
         unsafe {
             let mut winsize: nix::winsize = std::mem::zeroed();
-            if libc::ioctl(self.write_handle.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
+            if libc::ioctl(self.tty_handle.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
                 return Err(nix::Error::last().into());
             }
             Ok(TerminalSize {
@@ -404,16 +401,6 @@ impl Terminal for UnixTerminal {
     }
 }
 
-/// Guard against EAGAIN and EINTR
-fn guard_nix<T>(result: Result<T, nix::Error>, value: T) -> Result<T, nix::Error> {
-    match result {
-        Err(nix::Error::Sys(nix::Errno::EINTR)) | Err(nix::Error::Sys(nix::Errno::EAGAIN)) => {
-            Ok(value)
-        }
-        _ => result,
-    }
-}
-
 fn guard_io<T>(result: Result<T, std::io::Error>, otherwise: T) -> Result<T, std::io::Error> {
     use std::io::ErrorKind::*;
     match result {
@@ -423,7 +410,7 @@ fn guard_io<T>(result: Result<T, std::io::Error>, otherwise: T) -> Result<T, std
 }
 
 /// Enable/disable blocking io for the provided file descriptor.
-fn set_blocking(fd: nix::RawFd, blocking: bool) -> Result<(), nix::Error> {
+fn set_blocking(fd: RawFd, blocking: bool) -> Result<(), nix::Error> {
     let mut flags = nix::OFlag::from_bits_truncate(nix::fcntl(fd, nix::FcntlArg::F_GETFL)?);
     flags.set(nix::OFlag::O_NONBLOCK, !blocking);
     nix::fcntl(fd, nix::FcntlArg::F_SETFL(flags))?;
@@ -438,11 +425,11 @@ fn timeval_from_duration(dur: Duration) -> nix::TimeVal {
 }
 
 struct IOHandle {
-    fd: nix::RawFd,
+    fd: RawFd,
 }
 
 impl IOHandle {
-    pub fn new(fd: nix::RawFd) -> Self {
+    pub fn new(fd: RawFd) -> Self {
         Self { fd }
     }
 
@@ -451,8 +438,14 @@ impl IOHandle {
     }
 }
 
+impl Drop for IOHandle {
+    fn drop(&mut self) {
+        let _ = nix::close(self.fd);
+    }
+}
+
 impl AsRawFd for IOHandle {
-    fn as_raw_fd(&self) -> nix::RawFd {
+    fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }
