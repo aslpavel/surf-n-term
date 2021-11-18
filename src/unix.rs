@@ -111,20 +111,8 @@ impl UnixTerminal {
         });
         set_blocking(waker_read.as_raw_fd(), false)?;
 
-        let depth = match std::env::var("COLORTERM") {
-            Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
-            _ => ColorDepth::EightBit,
-        };
-        let depth = match std::env::var("TERM").as_deref() {
-            Ok("linux") => ColorDepth::Gray,
-            _ => depth,
-        };
-        let capabilities = TerminalCaps {
-            depth,
-            glyphs: false,
-        };
-
-        let mut term = Self {
+        let capabilities = TerminalCaps::default();
+        Self {
             tty_handle,
             encoder: TTYEncoder::new(capabilities.clone()),
             write_queue: Default::default(),
@@ -138,14 +126,8 @@ impl UnixTerminal {
             tee: None,
             image_handler: Box::new(DummyImageHandler),
             capabilities,
-        };
-        term.image_handler = image_handler_detect(&mut term)?;
-        term.capabilities.glyphs = matches!(
-            term.image_handler.kind(),
-            ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
-        );
-        info!("capabilities: {:?}", term.capabilities);
-        Ok(term)
+        }
+        .detect()
     }
 
     /// Duplicate all output to specified tee file. Used for debugging.
@@ -163,6 +145,36 @@ impl UnixTerminal {
     /// Get a reference an image handler
     pub fn image_handler(&mut self) -> &mut dyn ImageHandler {
         &mut self.image_handler
+    }
+
+    /// Detect termincal capabilieties
+    fn detect(mut self) -> Result<Self, Error> {
+        // color depth
+        let depth = match std::env::var("COLORTERM") {
+            Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
+            _ => ColorDepth::EightBit,
+        };
+        let depth = match std::env::var("TERM").as_deref() {
+            Ok("linux") => ColorDepth::Gray,
+            _ => depth,
+        };
+
+        // image handler
+        let image_handler = image_handler_detect(&mut self)?;
+
+        // update capabilieties
+        self.capabilities.depth = depth;
+        self.capabilities.glyphs = matches!(
+            image_handler.kind(),
+            ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
+        );
+
+        // update fields
+        self.encoder = TTYEncoder::new(self.capabilities.clone());
+        self.image_handler = image_handler;
+
+        info!("capabilities: {:?}", self.capabilities);
+        Ok(self)
     }
 
     /// Close all descriptors free all the resources
