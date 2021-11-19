@@ -438,8 +438,11 @@ impl ImageHandler for KittyImageHandler {
             }
             let payload = payload_write.finish()?.finish()?;
 
-            // data needs to be transfered in chunks
-            let chunks = payload.chunks(4095);
+            // NOTE:
+            //  - data needs to be transfered in chunks
+            //  - chunks should be multiple of 4, otherwise kitty complains that it is not
+            //    valid base64 encoded data.
+            let chunks = payload.chunks(4096);
             let count = chunks.len();
             for (index, chunk) in chunks.enumerate() {
                 // control data
