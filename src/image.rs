@@ -441,10 +441,7 @@ impl ImageHandler for KittyImageHandler {
             // data needs to be transfered in chunks
             let chunks = payload.chunks(4095);
             let count = chunks.len();
-            let mut frame = Vec::new(); // collect frame produce single write if possible
             for (index, chunk) in chunks.enumerate() {
-                frame.clear();
-
                 // control data
                 let more = if index + 1 < count { 1 } else { 0 };
                 if index == 0 {
@@ -456,7 +453,7 @@ impl ImageHandler for KittyImageHandler {
                     // s    - width of the image
                     // m    - whether more chunks will follow or not
                     write!(
-                        frame,
+                        out,
                         "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={};",
                         img_id,
                         img.height(),
@@ -465,14 +462,12 @@ impl ImageHandler for KittyImageHandler {
                     )?;
                 } else {
                     // only first chunk requires all attributes
-                    write!(frame, "\x1b_Gm={};", more)?;
+                    write!(out, "\x1b_Gm={};", more)?;
                 }
                 // data
-                frame.write_all(chunk)?;
+                out.write_all(chunk)?;
                 // epilogue
-                frame.write_all(b"\x1b\\")?;
-
-                out.write_all(frame.as_slice())?;
+                out.write_all(b"\x1b\\")?;
             }
 
             // remember that image data has been send
