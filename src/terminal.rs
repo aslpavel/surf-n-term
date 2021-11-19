@@ -438,6 +438,10 @@ impl Size {
     pub fn new(height: usize, width: usize) -> Self {
         Self { height, width }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.height == 0 || self.width == 0
+    }
 }
 
 /// Terminal size object

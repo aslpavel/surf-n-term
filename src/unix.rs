@@ -163,11 +163,11 @@ impl UnixTerminal {
         let image_handler = image_handler_detect(&mut self)?;
 
         // update capabilieties
-        self.capabilities.depth = depth;
         self.capabilities.glyphs = matches!(
             image_handler.kind(),
             ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
-        );
+        ) && !self.size()?.pixels.is_empty();
+        self.capabilities.depth = depth;
 
         // update fields
         self.encoder = TTYEncoder::new(self.capabilities.clone());
