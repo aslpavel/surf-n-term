@@ -1,40 +1,118 @@
-use std::{ops::Range, time::Duration};
+use std::{
+    cmp::min,
+    ops::{Add, Mul, Range},
+    time::Duration,
+};
 use surf_n_term::{
-    Color, ColorLinear, DecMode, Error, Image, Surface, SurfaceMut, SurfaceOwned, SystemTerminal,
-    Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt, RGBA,
+    Color, ColorLinear, DecMode, Error, Image, Size, Surface, SurfaceOwned, SystemTerminal,
+    Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
-fn mandelbrot_at(x0: f64, y0: f64, count: usize) -> usize {
-    (0..count)
-        .try_fold([0.0, 0.0], |[x, y], i| {
-            if x * x + y * y >= 4.0 {
+#[derive(Copy, Clone, Default)]
+struct Complex {
+    x: f64,
+    y: f64,
+}
+
+impl Complex {
+    fn sabs(self) -> f64 {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+impl Mul for Complex {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        Complex {
+            x: self.x * other.x - self.y * other.y,
+            y: self.x * other.y + self.y * other.x,
+        }
+    }
+}
+
+impl Add for Complex {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Complex {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+fn mandelbrot_at(c: Complex, max_iter: usize) -> usize {
+    (0..max_iter)
+        .try_fold(Complex::default(), |z, i| {
+            if z.sabs() >= 4.0 {
                 Err(i)
             } else {
-                Ok([x * x - y * y + x0, 2.0 * x * y + y0])
+                Ok(z * z + c)
             }
         })
         .err()
-        .unwrap_or(count)
+        .unwrap_or(max_iter)
 }
 
-fn mandelbrot(
-    xs: Range<f64>,
-    ys: Range<f64>,
-    colors: &Range<ColorLinear>,
-    count: usize,
-    mut img: impl SurfaceMut<Item = RGBA>,
-) {
-    if img.height() < 2 || img.width() < 2 {
-        return;
+const MAGMA: &'static [ColorLinear] = &[
+    ColorLinear([0.001462, 0.000466, 0.013866, 1.0]),
+    ColorLinear([0.039608, 0.03109, 0.133515, 1.0]),
+    ColorLinear([0.113094, 0.065492, 0.276784, 1.0]),
+    ColorLinear([0.211718, 0.061992, 0.418647, 1.0]),
+    ColorLinear([0.316654, 0.07169, 0.48538, 1.0]),
+    ColorLinear([0.414709, 0.110431, 0.504662, 1.0]),
+    ColorLinear([0.512831, 0.148179, 0.507648, 1.0]),
+    ColorLinear([0.613617, 0.181811, 0.498536, 1.0]),
+    ColorLinear([0.716387, 0.214982, 0.47529, 1.0]),
+    ColorLinear([0.816914, 0.255895, 0.436461, 1.0]),
+    ColorLinear([0.904281, 0.31961, 0.388137, 1.0]),
+    ColorLinear([0.960949, 0.418323, 0.35963, 1.0]),
+    ColorLinear([0.9867, 0.535582, 0.38221, 1.0]),
+    ColorLinear([0.996096, 0.653659, 0.446213, 1.0]),
+    ColorLinear([0.996898, 0.769591, 0.534892, 1.0]),
+    ColorLinear([0.99244, 0.88433, 0.640099, 1.0]),
+];
+
+struct ColorMap {
+    colors: &'static [ColorLinear],
+}
+
+impl ColorMap {
+    fn lookup(&self, value: f64) -> ColorLinear {
+        let offset = value.clamp(0.0, 1.0) * (self.colors.len() - 1) as f64;
+        let index = offset.floor() as usize;
+        let fract = offset.fract();
+        let start = self.colors[index];
+        let end = self.colors[min(index + 1, self.colors.len() - 1)];
+        start.lerp(end, fract)
     }
-    let height = (img.height() - 1) as f64;
-    let width = (img.width() - 1) as f64;
-    img.fill_with(|row, col, _| {
+}
+
+fn mandelbrot(xs: Range<f64>, ys: Range<f64>, size: Size, max_iter: usize) -> SurfaceOwned<usize> {
+    let height = (size.height - 1) as f64;
+    let width = (size.width - 1) as f64;
+    SurfaceOwned::new_with(size.height, size.width, |row, col| {
         let x = lerp(&xs, (col as f64 + 0.5) / width);
         let y = lerp(&ys, (row as f64 + 0.5) / height);
-        let ratio = mandelbrot_at(x, y, count) as f64 / (count as f64);
-        colors.start.lerp(colors.end, ratio).into()
+        mandelbrot_at(Complex { x, y }, max_iter)
     })
+}
+
+fn mandlebrot_imgs(
+    mand: impl Surface<Item = usize>,
+    colormap: &ColorMap,
+    count: usize,
+) -> Vec<Image> {
+    let mut imgs = Vec::new();
+    for iter in 0..count {
+        let surf = SurfaceOwned::new_with(mand.height(), mand.width(), |row, col| {
+            let ratio = min(*mand.get(row, col).unwrap(), iter) as f64 / count as f64;
+            colormap.lookup(ratio).into()
+        });
+        imgs.push(Image::new(surf));
+    }
+    imgs
 }
 
 fn lerp(vs: &Range<f64>, t: f64) -> f64 {
@@ -59,30 +137,32 @@ fn main() -> Result<(), Error> {
         mode: DecMode::AltScreen,
     })?;
 
+    let mut imgs = Vec::new();
+    let xs = -2.5..1.0;
+    let ys = -1.0..1.0;
+    let colormap = ColorMap { colors: MAGMA };
+    let mut size = Size {
+        height: 58,
+        width: 100,
+    };
+    let max_iter = 100;
+
     // loop
-    let delay = Duration::from_millis(20);
-    let mut count = 1;
-    let mut img_ascii = SurfaceOwned::new(58, 100);
-    let mut img = SurfaceOwned::new(232, 400);
-    let color_start = "#000000".parse()?;
-    let color_end = "#ffffff".parse()?;
-    let colors = color_start..color_end;
+    let mut index = 0;
     let mut ascii = true;
-    term.run_render(|_term, event, mut view| -> Result<_, Error> {
+    let delay = Duration::from_millis(16);
+    term.run_render(move |_term, event, mut view| -> Result<_, Error> {
+        if imgs.len() < max_iter {
+            let mand = mandelbrot(xs.clone(), ys.clone(), size, max_iter);
+            imgs = mandlebrot_imgs(mand, &colormap, max_iter);
+        };
+
         if ascii {
-            mandelbrot(
-                -2.5..1.0,
-                -1.0..1.0,
-                &colors,
-                1 + (count % 60),
-                &mut img_ascii,
-            );
-            view.draw_image_ascii(&img_ascii);
+            view.draw_image_ascii(&imgs[index]);
         } else {
-            mandelbrot(-2.5..1.0, -1.0..1.0, &colors, 1 + (count % 60), &mut img);
-            view.draw_image(Image::new(img.to_owned_surf()));
+            view.draw_image(imgs[index].clone());
         }
-        count += 1;
+        index = (index + 1) % max_iter;
 
         // process event
         if event.as_ref() == Some(&q) || event.as_ref() == Some(&ctrl_c) {
@@ -90,6 +170,18 @@ fn main() -> Result<(), Error> {
         } else {
             if event.as_ref() == Some(&f) {
                 ascii = !ascii;
+                size = if ascii {
+                    Size {
+                        height: 58,
+                        width: 100,
+                    }
+                } else {
+                    Size {
+                        height: 486,
+                        width: 800,
+                    }
+                };
+                imgs.clear();
             }
             Ok(TerminalAction::Sleep(delay))
         }
