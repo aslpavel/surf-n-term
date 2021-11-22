@@ -242,6 +242,8 @@ pub enum TerminalCommand {
     Char(char),
     /// Set current face (foreground/background colors and text attributes)
     Face(Face),
+    /// Get current face
+    FaceGet,
     /// Control specified DEC mode (DECSET|DECRST)
     DecModeSet { enable: bool, mode: DecMode },
     /// Report specified DEC mode (DECRQM)
@@ -418,6 +420,8 @@ pub enum TerminalEvent {
     Raw(Vec<u8>),
     /// Color
     Color { name: TerminalColor, color: RGBA },
+    /// Report current face
+    FaceGet(Face),
     /// So we can use single decoder for commands and events
     Command(TerminalCommand),
 }

@@ -486,6 +486,19 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
     };
     cmds.push(sgr_sequence.tag(TTYTag::SetGraphicRendition));
 
+    // DECRPSS - Report Selection or Setting
+    // "\x1bP{0|1}$p{data}\x1b\\"
+    cmds.push(
+        NFA::sequence(vec![
+            NFA::from("\x1bP"),              // DCS
+            NFA::from("0") | NFA::from("1"), // response code
+            NFA::from("$r"),
+            NFA::predicate(|c| c != b'\x1b').many(), // data
+            NFA::from("\x1b\\"),                     // ST
+        ])
+        .tag(TTYTag::ReportSetting),
+    );
+
     NFA::choice(cmds).compile()
 }
 
@@ -635,37 +648,26 @@ fn tty_decoder_event(tag: &TTYTag, data: &[u8], face: &mut Face) -> Option<Termi
         }
         SetGraphicRendition => {
             // "\x1b[(<cmd>;?)*m"
-            let mut cmds = data[2..data.len() - 1].split(|c| *c == b';');
-            while let Some(cmd) = cmds.next() {
-                match number_decode(cmd) {
-                    Some(0) | None => *face = Face::default(),
-                    Some(1) => face.attrs |= FaceAttrs::BOLD,
-                    Some(3) => face.attrs |= FaceAttrs::ITALIC,
-                    Some(4) => face.attrs |= FaceAttrs::UNDERLINE,
-                    Some(5) => face.attrs |= FaceAttrs::BLINK,
-                    Some(7) | Some(27) => *face = face.invert(),
-                    Some(9) => face.attrs |= FaceAttrs::STRIKE,
-                    Some(21) => face.attrs = face.attrs.remove(FaceAttrs::BOLD),
-                    Some(23) => face.attrs = face.attrs.remove(FaceAttrs::ITALIC),
-                    Some(24) => face.attrs = face.attrs.remove(FaceAttrs::UNDERLINE),
-                    Some(25) => face.attrs = face.attrs.remove(FaceAttrs::BLINK),
-                    Some(29) => face.attrs = face.attrs.remove(FaceAttrs::STRIKE),
-                    Some(38) => face.fg = sgr_color(&mut cmds),
-                    Some(48) => face.bg = sgr_color(&mut cmds),
-                    Some(v) if (30..=37).contains(&v) => face.fg = Some(COLORS[v - 30]),
-                    Some(v) if (90..=97).contains(&v) => face.fg = Some(COLORS[v - 82]),
-                    Some(v) if (40..=48).contains(&v) => face.bg = Some(COLORS[v - 40]),
-                    Some(v) if (100..=107).contains(&v) => face.bg = Some(COLORS[v - 92]),
-                    _ => {
-                        // TODO:
-                        //   - de jure standard (ITU-T T.416)
-                        //   - different types of underline
-                        // [reference](https://github.com/csdvrx/sixel-testsuite/blob/master/ansi-vte52.sh)
-                        continue;
-                    }
-                }
-            }
+            let cmds = data[2..data.len() - 1].split(|c| matches!(c, b';' | b':'));
+            sgr_face(face, cmds);
             TerminalEvent::Command(TerminalCommand::Face(*face))
+        }
+        ReportSetting => {
+            // DECRPSS "\x1bP{0|1}$p{data}\x1b\\"
+            let code = data[2];
+            let payload = &data[5..data.len() - 2];
+            if code != b'1' {
+                return None;
+            }
+            if payload.ends_with(b"m") {
+                let cmds = payload[..payload.len() - 1].split(|c| matches!(c, b';' | b':'));
+                let mut face = Face::default();
+                sgr_face(&mut face, cmds);
+                TerminalEvent::FaceGet(face)
+            } else {
+                tracing::info!("unhandled DECRPSS: {:?}", payload);
+                return None;
+            }
         }
     };
     Some(event)
@@ -685,6 +687,7 @@ enum TTYTag {
     DeviceAttrs,
     OperatingSystemControl,
     SetGraphicRendition,
+    ReportSetting, // DECRPSS
 }
 
 impl fmt::Debug for TTYTag {
@@ -703,6 +706,7 @@ impl fmt::Debug for TTYTag {
             DeviceAttrs => write!(f, "DA1")?,
             OperatingSystemControl => write!(f, "OSC")?,
             SetGraphicRendition => write!(f, "SGR")?,
+            ReportSetting => write!(f, "DECRPSS")?,
         }
         Ok(())
     }
@@ -768,6 +772,39 @@ fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
             Some(RGBA::new(r, g, b, 255))
         }
         _ => None,
+    }
+}
+
+/// Apply SGR cmds to the provided Face
+fn sgr_face<'a>(face: &mut Face, mut cmds: impl Iterator<Item = &'a [u8]>) {
+    while let Some(cmd) = cmds.next() {
+        match number_decode(cmd) {
+            Some(0) | None => *face = Face::default(),
+            Some(1) => face.attrs |= FaceAttrs::BOLD,
+            Some(3) => face.attrs |= FaceAttrs::ITALIC,
+            Some(4) => face.attrs |= FaceAttrs::UNDERLINE,
+            Some(5) => face.attrs |= FaceAttrs::BLINK,
+            Some(7) | Some(27) => *face = face.invert(),
+            Some(9) => face.attrs |= FaceAttrs::STRIKE,
+            Some(21) => face.attrs = face.attrs.remove(FaceAttrs::BOLD),
+            Some(23) => face.attrs = face.attrs.remove(FaceAttrs::ITALIC),
+            Some(24) => face.attrs = face.attrs.remove(FaceAttrs::UNDERLINE),
+            Some(25) => face.attrs = face.attrs.remove(FaceAttrs::BLINK),
+            Some(29) => face.attrs = face.attrs.remove(FaceAttrs::STRIKE),
+            Some(38) => face.fg = sgr_color(&mut cmds),
+            Some(48) => face.bg = sgr_color(&mut cmds),
+            Some(v) if (30..=37).contains(&v) => face.fg = Some(COLORS[v - 30]),
+            Some(v) if (90..=97).contains(&v) => face.fg = Some(COLORS[v - 82]),
+            Some(v) if (40..=48).contains(&v) => face.bg = Some(COLORS[v - 40]),
+            Some(v) if (100..=107).contains(&v) => face.bg = Some(COLORS[v - 92]),
+            _ => {
+                // TODO:
+                //   - de jure standard (ITU-T T.416)
+                //   - different types of underline
+                // [reference](https://github.com/csdvrx/sixel-testsuite/blob/master/ansi-vte52.sh)
+                continue;
+            }
+        }
     }
 }
 
@@ -1233,7 +1270,7 @@ mod tests {
 
         write!(
             cursor.get_mut(),
-            "\x1b[48;5;150m\x1b[1m\x1b[38;2;255;128;64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m"
+            "\x1b[48;5;150m\x1b[1m\x1b[38:2:255:128:64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m"
         )?;
 
         let mut result = Vec::new();
@@ -1255,6 +1292,21 @@ mod tests {
                 face("fg=#ff0000,bg=#00ff00,bold")?,
             ]
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_report_setting() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1bP1$r48:2:1:2:3m\x1b\\")?;
+
+        let mut result = Vec::new();
+        decoder.decode_into(&mut cursor, &mut result)?;
+
+        assert_eq!(result, vec![TerminalEvent::FaceGet("bg=#010203".parse()?)],);
 
         Ok(())
     }

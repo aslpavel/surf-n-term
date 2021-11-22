@@ -38,6 +38,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         enable: true,
         mode: DecMode::MouseSGR,
     })?;
+    term.execute(TerminalCommand::Face("bg=#8f3f71".parse()?))?;
+    term.execute(TerminalCommand::FaceGet)?;
+    term.execute(TerminalCommand::Face("".parse()?))?;
 
     term.execute(TerminalCommand::Termcap(vec![
         "bel".to_string(),
@@ -48,6 +51,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     term.write_all(b"\x1b[14t\x1b[18t")?;
     term.execute(TerminalCommand::Title("events test title".to_string()))?;
 
+    let caps = term.capabilities().clone();
+    write!(&mut term, "Terminal::capabilities(): {:?}\r\n", caps)?;
+    let size = term.size()?;
+    write!(&mut term, "Terminal::size(): {:?}\r\n", size)?;
+
     // read terminal events
     let timeout = Duration::from_secs(10);
     write!(
@@ -55,16 +63,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         "\x1b[91mProgram will exit after {:?} of idling or if 'q' is pressed ...\x1b[m\r\n",
         timeout
     )?;
-
-    // image handler
-    let image_handler_kind = term.image_handler().kind();
-    write!(&mut term, "image_handler: {:?}\r\n", image_handler_kind)?;
-    let caps = term.capabilities().clone();
-    write!(&mut term, "term caps: {:?}\r\n", caps)?;
-
-    // get size
-    let size = term.size()?;
-    write!(&mut term, "{:?}\r\n", size)?;
 
     let q_key = "q".parse()?;
 

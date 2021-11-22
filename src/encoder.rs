@@ -78,6 +78,10 @@ impl Encoder for TTYEncoder {
                 }
                 out.write_all(b"m")?;
             }
+            FaceGet => {
+                // DECRQSS - Request Selection or Setting with description set to `m`
+                out.write_all(b"\x1bP$qm\x1b\\")?;
+            }
             Reset => out.write_all(b"\x1bc")?,
             Char(c) => write!(out, "{}", c)?,
             Scroll(count) => match count.cmp(&0) {
