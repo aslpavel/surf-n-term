@@ -123,6 +123,8 @@ impl Decoder for Utf8Decoder {
 pub struct TTYDecoder {
     /// DFA that represents all possible states of the parser
     automata: DFA<TTYTag>,
+    /// Matchers registred with TTYMatch::Index tag
+    matchers: Vec<Box<dyn TTYMatcher>>,
     /// Current DFA state of the parser
     state: DFAState,
     /// Bytes consumed since the initialization of DFA
@@ -176,10 +178,35 @@ impl Default for TTYDecoder {
 
 impl TTYDecoder {
     pub fn new() -> Self {
-        let automata = tty_decoder_dfa();
+        let mut automatas = vec![tty_event_nfa().map(TTYTag::Event)];
+        let matchers: Vec<Box<dyn TTYMatcher>> = vec![
+            Box::new(CursorPositionMatcher),
+            Box::new(DecModeMatcher),
+            Box::new(DeviceAttrsMatcher),
+            Box::new(GraphicRenditionMatcher::default()),
+            Box::new(KittyImageMatcher),
+            Box::new(MouseEventMatcher),
+            Box::new(OSControlMatcher),
+            Box::new(ReportSettingMatcher),
+            Box::new(TermCapMatcher),
+            Box::new(TermSizeMatcher),
+            Box::new(UTF8Matcher),
+        ];
+        for (index, matcher) in matchers.iter().enumerate() {
+            automatas.push(
+                matcher
+                    .matcher()
+                    // map needs only to convert type, _Void cannot be created
+                    .map(|_| TTYTag::Matcher(index))
+                    .tag(TTYTag::Matcher(index)),
+            )
+        }
+
+        let automata = NFA::choice(automatas).compile();
         let state = automata.start();
         Self {
             automata,
+            matchers,
             state,
             rescheduled: Default::default(),
             buffer: Default::default(),
@@ -201,8 +228,15 @@ impl TTYDecoder {
                         .iter()
                         .next()
                         .expect("[TTYDecoder] found untagged accepting state");
-                    let event = tty_decoder_event(tag, &self.buffer, &mut self.face)
-                        .unwrap_or_else(|| TerminalEvent::Raw(self.buffer.clone()));
+
+                    // decode events
+                    let event = match tag {
+                        TTYTag::Event(event) => event.clone(),
+                        TTYTag::Matcher(index) => self.matchers[*index]
+                            .decode(&self.buffer)
+                            .unwrap_or_else(|| TerminalEvent::Raw(self.buffer.clone())),
+                    };
+
                     self.possible.replace((event, self.buffer.len()));
                     if info.terminal {
                         return self.take();
@@ -233,11 +267,437 @@ impl TTYDecoder {
     }
 }
 
-fn tty_decoder_dfa() -> DFA<TTYTag> {
-    let mut cmds: Vec<NFA<TTYTag>> = Vec::new();
+/// Automata tags that are used to pick correct decoder for the event
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum TTYTag {
+    /// Automata already produce valid terminal event
+    Event(TerminalEvent),
+    /// Index of the matcher that needs to be used to decode event
+    Matcher(usize),
+}
+
+/// Same as `!` type, which is not possible to construct
+#[derive(Clone)]
+enum _Void {}
+
+trait TTYMatcher: fmt::Debug {
+    /// NFA that should match desired escape sequence
+    fn matcher(&self) -> NFA<_Void>;
+
+    /// Decoder that sould produce terminal event given matched data
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent>;
+}
+
+/// Kitty Image Responsne
+///
+/// Reference: https://sw.kovidgoyal.net/kitty/graphics-protocol/#display-images-on-screen
+#[derive(Debug)]
+struct KittyImageMatcher;
+
+impl TTYMatcher for KittyImageMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        // "\x1b_Gkey=value(,key=value)*;response\x1b\\"
+        let key_value = NFA::sequence(vec![
+            NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
+            NFA::from("="),
+            NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
+        ]);
+        NFA::sequence(vec![
+            NFA::from("\x1b_G"),
+            key_value.clone(),
+            NFA::sequence(vec![NFA::from(","), key_value]).many(),
+            NFA::from(";"),
+            NFA::predicate(|b| b != b'\x1b').many(),
+            NFA::from("\x1b\\"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        let mut iter = (&data[3..data.len() - 2]).splitn(2, |b| *b == b';');
+        let mut id = 0; // id can not be zero according to the spec
+        for (key, value) in key_value_decode(b',', iter.next()?) {
+            if key == b"i" {
+                id = number_decode(value)? as u64;
+            }
+        }
+        let msg = iter.next()?;
+        let error = if msg == b"OK" {
+            None
+        } else {
+            Some(String::from_utf8_lossy(msg).to_string())
+        };
+        Some(TerminalEvent::KittyImage { id, error })
+    }
+}
+
+/// DECRPM - DEC mode report
+///
+/// Rerference: https://www.vt100.net/docs/vt510-rm/DECRPM
+#[derive(Debug)]
+struct DecModeMatcher;
+
+impl TTYMatcher for DecModeMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        NFA::sequence(vec![
+            NFA::from("\x1b[?"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("$y"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1b[?{mode};{status}$y"
+        let mut nums = numbers_decode(&data[3..data.len() - 2]);
+        Some(TerminalEvent::DecMode {
+            mode: crate::terminal::DecMode::from_usize(nums.next()?)?,
+            status: DecModeStatus::from_usize(nums.next()?)?,
+        })
+    }
+}
+
+/// DA1 - Primary Device Attributes
+///
+/// Reference: https://vt100.net/docs/vt510-rm/DA1.html
+#[derive(Debug)]
+struct DeviceAttrsMatcher;
+
+impl TTYMatcher for DeviceAttrsMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        // "\x1b[?<attr_1>;...<attr_n>c"
+        NFA::sequence(vec![
+            NFA::from("\x1b[?"),
+            (NFA::number() + NFA::from(";").optional()).some(),
+            NFA::from("c"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        Some(TerminalEvent::DeviceAttrs(
+            numbers_decode(&data[3..data.len() - 1])
+                .filter(|v| v > &0)
+                .collect(),
+        ))
+    }
+}
+
+/// OSC - Operating System Command Response
+///
+/// Reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands
+#[derive(Debug)]
+struct OSControlMatcher;
+
+impl TTYMatcher for OSControlMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        // "\x1b]<number>;.*\x1b\\"
+        NFA::sequence(vec![
+            NFA::from("\x1b]"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::predicate(|c| c != b'\x1b' && c != b'\x07').some(),
+            (NFA::from("\x1b\\") | NFA::from("\x07")),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1b]<number>;.*(\x1b\\|\x07)"
+        let data = if data[data.len() - 1] == b'\x07' {
+            &data[2..data.len() - 1]
+        } else {
+            &data[2..data.len() - 2]
+        };
+        let mut args = data.split(|c| *c == b';');
+        let id = number_decode(args.next()?)?;
+        let name = match id {
+            10 => TerminalColor::Foreground,
+            11 => TerminalColor::Background,
+            4 => TerminalColor::Palette(number_decode(args.next()?)?),
+            _ => return None,
+        };
+        let color = std::str::from_utf8(args.next()?).ok()?.parse().ok()?;
+        Some(TerminalEvent::Color { name, color })
+    }
+}
+
+/// DECRPSS - Report Selection or Setting
+///
+/// Reference: https://vt100.net/docs/vt510-rm/DECRPSS.html
+#[derive(Debug)]
+struct ReportSettingMatcher;
+
+impl TTYMatcher for ReportSettingMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        // "\x1bP{0|1}$p{data}\x1b\\"
+        NFA::sequence(vec![
+            NFA::from("\x1bP"),              // DCS
+            NFA::from("0") | NFA::from("1"), // response code
+            NFA::from("$r"),
+            NFA::predicate(|c| c != b'\x1b').many(), // data
+            NFA::from("\x1b\\"),                     // ST
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // DECRPSS "\x1bP{0|1}$p{data}\x1b\\"
+        let code = data[2];
+        let payload = &data[5..data.len() - 2];
+        if code != b'1' {
+            return None;
+        }
+        if payload.ends_with(b"m") {
+            let cmds = payload[..payload.len() - 1].split(|c| matches!(c, b';' | b':'));
+            let mut face = Face::default();
+            sgr_face(&mut face, cmds);
+            Some(TerminalEvent::FaceGet(face))
+        } else {
+            tracing::info!("unhandled DECRPSS: {:?}", payload);
+            None
+        }
+    }
+}
+
+/// SGR - Set Graphic Rendition
+#[derive(Debug, Default)]
+struct GraphicRenditionMatcher {
+    face: Face,
+}
+
+impl TTYMatcher for GraphicRenditionMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
+        NFA::sequence(vec![
+            NFA::from("\x1b["),
+            (code + NFA::from(";").optional()).some(),
+            NFA::from("m"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1b[(<cmd>;?)*m"
+        let cmds = data[2..data.len() - 1].split(|c| matches!(c, b';' | b':'));
+        sgr_face(&mut self.face, cmds);
+        Some(TerminalEvent::Command(TerminalCommand::Face(self.face)))
+    }
+}
+
+/// SGR Mouse event
+///
+/// Reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
+#[derive(Debug)]
+struct MouseEventMatcher;
+
+impl TTYMatcher for MouseEventMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        NFA::sequence(vec![
+            NFA::from("\x1b[<"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::predicate(|b| b == b'm' || b == b'M'),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1b[<{event};{row};{col}(m|M)"
+        let mut nums = numbers_decode(&data[3..data.len() - 1]);
+        let event = nums.next()?;
+        let col = nums.next()? - 1;
+        let row = nums.next()? - 1;
+
+        let mut mode = KeyMod::from_bits(((event >> 2) & 7) as u8);
+        if data[data.len() - 1] == b'M' {
+            mode |= KeyMod::PRESS;
+        }
+
+        let button = event & 3;
+        let name = if event & 64 != 0 {
+            if button == 0 {
+                KeyName::MouseWheelDown
+            } else if button == 1 {
+                KeyName::MouseWheelUp
+            } else {
+                KeyName::MouseMove
+            }
+        } else if button == 0 {
+            KeyName::MouseLeft
+        } else if button == 1 {
+            KeyName::MouseMiddle
+        } else if button == 2 {
+            KeyName::MouseRight
+        } else {
+            KeyName::MouseMove
+        };
+
+        Some(TerminalEvent::Mouse(Mouse {
+            name,
+            mode,
+            row,
+            col,
+        }))
+    }
+}
+
+/// Request Termcap/Terminfo String (XTGETTCAP)
+///
+/// Reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Application-Program-Command-functions
+#[derive(Debug)]
+struct TermCapMatcher;
+
+impl TTYMatcher for TermCapMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        let hex = NFA::predicate(|b| matches!(b, b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9'));
+        let hex = hex.clone() + hex;
+        let key_value = NFA::sequence(vec![hex.clone().some(), NFA::from("="), hex.clone().some()]);
+        NFA::choice(vec![
+            // success
+            NFA::sequence(vec![
+                NFA::from("\x1bP1+r"),
+                NFA::sequence(vec![
+                    key_value.clone(),
+                    NFA::sequence(vec![NFA::from(";"), key_value]).many(),
+                ])
+                .optional(),
+            ]),
+            // failure
+            NFA::sequence(vec![
+                NFA::from("\x1bP0+r"),
+                NFA::sequence(vec![
+                    hex.clone().some(),
+                    NFA::sequence(vec![NFA::from(";"), hex.some()]).many(),
+                ])
+                .optional(),
+            ]),
+        ]) + NFA::from("\x1b\\")
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1bP(0|1)+rkey=value(;key=value)\x1b\\"
+        let mut termcap = BTreeMap::new();
+        if data[2] == b'1' {
+            for (key, value) in key_value_decode(b';', &data[5..data.len() - 2]) {
+                termcap.insert(
+                    hex_decode(key).map(char::from).collect(),
+                    Some(hex_decode(value).map(char::from).collect()),
+                );
+            }
+        } else {
+            for key in data[5..data.len() - 2].split(|b| *b == b';') {
+                termcap.insert(hex_decode(key).map(char::from).collect(), None);
+            }
+        }
+        Some(TerminalEvent::Termcap(termcap))
+    }
+}
+
+/// UTF8
+///
+/// Mostly utf8, but one-byte codes are restricted to the printable set
+#[derive(Debug)]
+struct UTF8Matcher;
+
+impl TTYMatcher for UTF8Matcher {
+    fn matcher(&self) -> NFA<_Void> {
+        let printable = NFA::predicate(|b| (b' '..=b'~').contains(&b));
+        let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
+        let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
+        let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
+        let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
+        NFA::choice(vec![
+            printable,
+            utf8_two + utf8_tail.clone(),
+            utf8_three + utf8_tail.clone() + utf8_tail.clone(),
+            utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        Some(TerminalEvent::Key(KeyName::Char(utf8_decode(data)).into()))
+    }
+}
+
+/// DSR-CPR - Device status report - cursor position report
+///
+/// Reference: https://vt100.net/docs/vt510-rm/DSR-CPR.html
+#[derive(Debug)]
+struct CursorPositionMatcher;
+
+impl TTYMatcher for CursorPositionMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        NFA::sequence(vec![
+            NFA::from("\x1b["),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("R"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1b[{row};{col}R"
+        let mut nums = numbers_decode(&data[2..data.len() - 1]);
+        Some(TerminalEvent::CursorPosition {
+            row: nums.next()? - 1,
+            col: nums.next()? - 1,
+        })
+    }
+}
+
+/// XTWINOPS - Window manipulation response
+///
+/// Reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+/// "\x1b[18t" - Report the size of the text area in characters ("\x1b[8{height};{width}t")
+/// "\x1b[14t" - Report text area size in pixels ("\x1b[4{height};{width}t")
+#[derive(Debug)]
+struct TermSizeMatcher;
+
+impl TTYMatcher for TermSizeMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        NFA::sequence(vec![
+            NFA::from("\x1b["),
+            NFA::from("8") | NFA::from("4"),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from(";"),
+            NFA::number(),
+            NFA::from("t"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        // "\x1b[(4|8);{height};{width}t"
+        let code = data[2];
+        let mut nums = numbers_decode(&data[4..data.len() - 1]);
+        let height = nums.next()?;
+        let width = nums.next()?;
+        match code {
+            b'8' => Some(TerminalEvent::Size(TerminalSize {
+                cells: Size { height, width },
+                pixels: Size {
+                    height: 0,
+                    width: 0,
+                },
+            })),
+            b'4' => Some(TerminalEvent::Size(TerminalSize {
+                cells: Size {
+                    height: 0,
+                    width: 0,
+                },
+                pixels: Size { width, height },
+            })),
+            _ => None,
+        }
+    }
+}
+
+/// NFA for TerminalEvent events, that do not require parsing
+fn tty_event_nfa() -> NFA<TerminalEvent> {
+    let mut cmds: Vec<NFA<TerminalEvent>> = Vec::new();
 
     // construct NFA for basic key (no additional parsing is needed)
-    fn basic_key(seq: &str, key: impl Into<Key>) -> NFA<TTYTag> {
+    fn basic_key(seq: &str, key: impl Into<Key>) -> NFA<TerminalEvent> {
         NFA::from(seq).tag(TerminalEvent::Key(key.into()))
     }
 
@@ -327,395 +787,7 @@ fn tty_decoder_dfa() -> DFA<TTYTag> {
         }
     }
 
-    // DEC mode report
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b[?"),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::number(),
-            NFA::from("$y"),
-        ])
-        .tag(TTYTag::DecMode),
-    );
-
-    // response to `CursorReport` ("\x1b[6n")
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b["),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::number(),
-            NFA::from("R"),
-        ])
-        .tag(TTYTag::CursorPosition),
-    );
-
-    // size of the terminal in cells response to "\x1b[18t"
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b[8;"),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::number(),
-            NFA::from("t"),
-        ])
-        .tag(TTYTag::TerminalSizeCells),
-    );
-
-    // size of the terminal in pixels response to "\x1b[14t"
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b[4;"),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::number(),
-            NFA::from("t"),
-        ])
-        .tag(TTYTag::TerminalSizePixels),
-    );
-
-    // mouse events
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b[<"),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::number(),
-            NFA::predicate(|b| b == b'm' || b == b'M'),
-        ])
-        .tag(TTYTag::MouseSGR),
-    );
-
-    // character event (mostly utf8 but one-byte codes are restricted to the printable set)
-    let char_nfa = {
-        let printable = NFA::predicate(|b| (b' '..=b'~').contains(&b));
-        let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
-        let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
-        let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
-        let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-        NFA::choice(vec![
-            printable,
-            utf8_two + utf8_tail.clone(),
-            utf8_three + utf8_tail.clone() + utf8_tail.clone(),
-            utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
-        ])
-    };
-    cmds.push(char_nfa.tag(TTYTag::Char));
-
-    // kitty image response "\x1b_Gkey=value(,key=value)*;response\x1b\\"
-    let kitty_image_response = {
-        let key_value = NFA::sequence(vec![
-            NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
-            NFA::from("="),
-            NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
-        ]);
-        NFA::sequence(vec![
-            NFA::from("\x1b_G"),
-            key_value.clone(),
-            NFA::sequence(vec![NFA::from(","), key_value]).many(),
-            NFA::from(";"),
-            NFA::predicate(|b| b != b'\x1b').many(),
-            NFA::from("\x1b\\"),
-        ])
-    };
-    cmds.push(kitty_image_response.tag(TTYTag::KittyImage));
-
-    // Termcap/Terminfo response to XTGETTCAP
-    let terminfo_response = {
-        let hex = NFA::predicate(|b| matches!(b, b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9'));
-        let hex = hex.clone() + hex;
-        let key_value = NFA::sequence(vec![hex.clone().some(), NFA::from("="), hex.clone().some()]);
-        NFA::choice(vec![
-            // success
-            NFA::sequence(vec![
-                NFA::from("\x1bP1+r"),
-                NFA::sequence(vec![
-                    key_value.clone(),
-                    NFA::sequence(vec![NFA::from(";"), key_value]).many(),
-                ])
-                .optional(),
-            ]),
-            // failure
-            NFA::sequence(vec![
-                NFA::from("\x1bP0+r"),
-                NFA::sequence(vec![
-                    hex.clone().some(),
-                    NFA::sequence(vec![NFA::from(";"), hex.some()]).many(),
-                ])
-                .optional(),
-            ]),
-        ]) + NFA::from("\x1b\\")
-    };
-    cmds.push(terminfo_response.tag(TTYTag::Terminfo));
-
-    // DA1 Deivece attributes https://vt100.net/docs/vt510-rm/DA1.html
-    // "\x1b[?<attr_1>;...<attr_n>c"
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b[?"),
-            (NFA::number() + NFA::from(";").optional()).some(),
-            NFA::from("c"),
-        ])
-        .tag(TTYTag::DeviceAttrs),
-    );
-
-    // OSC (Operating System Command) response
-    // "\x1b]<number>;.*\x1b\\"
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1b]"),
-            NFA::number(),
-            NFA::from(";"),
-            NFA::predicate(|c| c != b'\x1b' && c != b'\x07').some(),
-            (NFA::from("\x1b\\") | NFA::from("\x07")),
-        ])
-        .tag(TTYTag::OperatingSystemControl),
-    );
-
-    // SGR (Set Graphic Rendition) sequence
-    let sgr_sequence = {
-        let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
-        NFA::sequence(vec![
-            NFA::from("\x1b["),
-            (code + NFA::from(";").optional()).some(),
-            NFA::from("m"),
-        ])
-    };
-    cmds.push(sgr_sequence.tag(TTYTag::SetGraphicRendition));
-
-    // DECRPSS - Report Selection or Setting
-    // "\x1bP{0|1}$p{data}\x1b\\"
-    cmds.push(
-        NFA::sequence(vec![
-            NFA::from("\x1bP"),              // DCS
-            NFA::from("0") | NFA::from("1"), // response code
-            NFA::from("$r"),
-            NFA::predicate(|c| c != b'\x1b').many(), // data
-            NFA::from("\x1b\\"),                     // ST
-        ])
-        .tag(TTYTag::ReportSetting),
-    );
-
-    NFA::choice(cmds).compile()
-}
-
-/// Convert tag plus current match to a TerminalEvent
-fn tty_decoder_event(tag: &TTYTag, data: &[u8], face: &mut Face) -> Option<TerminalEvent> {
-    use TTYTag::*;
-    let event = match tag {
-        Event(event) => event.clone(),
-        Char => TerminalEvent::Key(KeyName::Char(utf8_decode(data)).into()),
-        DecMode => {
-            // "\x1b[?{mode};{status}$y"
-            let mut nums = numbers_decode(&data[3..data.len() - 2]);
-            TerminalEvent::DecMode {
-                mode: crate::terminal::DecMode::from_usize(nums.next()?)?,
-                status: DecModeStatus::from_usize(nums.next()?)?,
-            }
-        }
-        CursorPosition => {
-            // "\x1b[{row};{col}R"
-            let mut nums = numbers_decode(&data[2..data.len() - 1]);
-            TerminalEvent::CursorPosition {
-                row: nums.next()? - 1,
-                col: nums.next()? - 1,
-            }
-        }
-        TerminalSizeCells | TerminalSizePixels => {
-            // "\x1b[(4|8);{height};{width}t"
-            let mut nums = numbers_decode(&data[4..data.len() - 1]);
-            let height = nums.next()?;
-            let width = nums.next()?;
-            if tag == &TerminalSizeCells {
-                TerminalEvent::Size(TerminalSize {
-                    cells: Size { height, width },
-                    pixels: Size {
-                        height: 0,
-                        width: 0,
-                    },
-                })
-            } else {
-                TerminalEvent::Size(TerminalSize {
-                    cells: Size {
-                        height: 0,
-                        width: 0,
-                    },
-                    pixels: Size { width, height },
-                })
-            }
-        }
-        MouseSGR => {
-            // "\x1b[<{event};{row};{col}(m|M)"
-            // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
-            let mut nums = numbers_decode(&data[3..data.len() - 1]);
-            let event = nums.next()?;
-            let col = nums.next()? - 1;
-            let row = nums.next()? - 1;
-
-            let mut mode = KeyMod::from_bits(((event >> 2) & 7) as u8);
-            if data[data.len() - 1] == b'M' {
-                mode |= KeyMod::PRESS;
-            }
-
-            let button = event & 3;
-            let name = if event & 64 != 0 {
-                if button == 0 {
-                    KeyName::MouseWheelDown
-                } else if button == 1 {
-                    KeyName::MouseWheelUp
-                } else {
-                    KeyName::MouseMove
-                }
-            } else if button == 0 {
-                KeyName::MouseLeft
-            } else if button == 1 {
-                KeyName::MouseMiddle
-            } else if button == 2 {
-                KeyName::MouseRight
-            } else {
-                KeyName::MouseMove
-            };
-
-            TerminalEvent::Mouse(Mouse {
-                name,
-                mode,
-                row,
-                col,
-            })
-        }
-        KittyImage => {
-            // "\x1b_Gkey=value(,key=value)*;response\x1b\\"
-            let mut iter = (&data[3..data.len() - 2]).splitn(2, |b| *b == b';');
-            let mut id = 0; // id can not be zero according to the spec
-            for (key, value) in key_value_decode(b',', iter.next()?) {
-                if key == b"i" {
-                    id = number_decode(value)? as u64;
-                }
-            }
-            let msg = iter.next()?;
-            let error = if msg == b"OK" {
-                None
-            } else {
-                Some(String::from_utf8_lossy(msg).to_string())
-            };
-            TerminalEvent::KittyImage { id, error }
-        }
-        Terminfo => {
-            // "\x1bP(0|1)+rkey=value(;key=value)\x1b\\"
-            let mut termcap = BTreeMap::new();
-            if data[2] == b'1' {
-                for (key, value) in key_value_decode(b';', &data[5..data.len() - 2]) {
-                    termcap.insert(
-                        hex_decode(key).map(char::from).collect(),
-                        Some(hex_decode(value).map(char::from).collect()),
-                    );
-                }
-            } else {
-                for key in data[5..data.len() - 2].split(|b| *b == b';') {
-                    termcap.insert(hex_decode(key).map(char::from).collect(), None);
-                }
-            }
-            TerminalEvent::Termcap(termcap)
-        }
-        DeviceAttrs => {
-            // "\x1b[?<attr_1>;...<attr_n>c"
-            TerminalEvent::DeviceAttrs(
-                numbers_decode(&data[3..data.len() - 1])
-                    .filter(|v| v > &0)
-                    .collect(),
-            )
-        }
-        OperatingSystemControl => {
-            // "\x1b]<number>;.*(\x1b\\|\x07)"
-            let data = if data[data.len() - 1] == b'\x07' {
-                &data[2..data.len() - 1]
-            } else {
-                &data[2..data.len() - 2]
-            };
-            let mut args = data.split(|c| *c == b';');
-            let id = number_decode(args.next()?)?;
-            let name = match id {
-                10 => TerminalColor::Foreground,
-                11 => TerminalColor::Background,
-                4 => TerminalColor::Palette(number_decode(args.next()?)?),
-                _ => return None,
-            };
-            let color = std::str::from_utf8(args.next()?).ok()?.parse().ok()?;
-            TerminalEvent::Color { name, color }
-        }
-        SetGraphicRendition => {
-            // "\x1b[(<cmd>;?)*m"
-            let cmds = data[2..data.len() - 1].split(|c| matches!(c, b';' | b':'));
-            sgr_face(face, cmds);
-            TerminalEvent::Command(TerminalCommand::Face(*face))
-        }
-        ReportSetting => {
-            // DECRPSS "\x1bP{0|1}$p{data}\x1b\\"
-            let code = data[2];
-            let payload = &data[5..data.len() - 2];
-            if code != b'1' {
-                return None;
-            }
-            if payload.ends_with(b"m") {
-                let cmds = payload[..payload.len() - 1].split(|c| matches!(c, b';' | b':'));
-                let mut face = Face::default();
-                sgr_face(&mut face, cmds);
-                TerminalEvent::FaceGet(face)
-            } else {
-                tracing::info!("unhandled DECRPSS: {:?}", payload);
-                return None;
-            }
-        }
-    };
-    Some(event)
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum TTYTag {
-    Event(TerminalEvent),
-    Char,
-    CursorPosition,
-    TerminalSizeCells,
-    TerminalSizePixels,
-    MouseSGR,
-    DecMode,
-    KittyImage,
-    Terminfo,
-    DeviceAttrs,
-    OperatingSystemControl,
-    SetGraphicRendition,
-    ReportSetting, // DECRPSS
-}
-
-impl fmt::Debug for TTYTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TTYTag::*;
-        match self {
-            Event(event) => write!(f, "{:?}", event)?,
-            CursorPosition => write!(f, "CPR")?,
-            TerminalSizeCells => write!(f, "TSC")?,
-            TerminalSizePixels => write!(f, "TSP")?,
-            MouseSGR => write!(f, "SGR")?,
-            Char => write!(f, "CHR")?,
-            DecMode => write!(f, "DCM")?,
-            KittyImage => write!(f, "KI")?,
-            Terminfo => write!(f, "CAP")?,
-            DeviceAttrs => write!(f, "DA1")?,
-            OperatingSystemControl => write!(f, "OSC")?,
-            SetGraphicRendition => write!(f, "SGR")?,
-            ReportSetting => write!(f, "DECRPSS")?,
-        }
-        Ok(())
-    }
-}
-
-impl From<TerminalEvent> for TTYTag {
-    fn from(event: TerminalEvent) -> TTYTag {
-        TTYTag::Event(event)
-    }
+    NFA::choice(cmds)
 }
 
 const CUBE: [u8; 6] = [0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff];
