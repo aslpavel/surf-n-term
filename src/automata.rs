@@ -55,6 +55,35 @@ impl<T> NFA<T> {
         self
     }
 
+    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> NFA<U> {
+        let Self {
+            start,
+            stop,
+            states,
+        } = self;
+        let states = states
+            .into_iter()
+            .map(|(state_id, state)| {
+                let NFAState {
+                    edges,
+                    epsilons,
+                    tag,
+                } = state;
+                let state = NFAState {
+                    edges,
+                    epsilons,
+                    tag: tag.map(&mut f),
+                };
+                (state_id, state)
+            })
+            .collect();
+        NFA {
+            start,
+            stop,
+            states,
+        }
+    }
+
     /// Number of states inside NFA
     pub fn size(&self) -> usize {
         self.states.len()
