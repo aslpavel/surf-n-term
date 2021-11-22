@@ -19,16 +19,18 @@ struct NFAStateId(usize);
 type NFAStateSet = Rc<BTreeSet<NFAStateId>>;
 
 #[derive(Clone)]
-struct NFAState {
+struct NFAState<T> {
     edges: BTreeMap<Symbol, NFAStateId>,
     epsilons: BTreeSet<NFAStateId>,
+    tag: Option<T>,
 }
 
-impl NFAState {
+impl<T> NFAState<T> {
     fn new() -> Self {
         Self {
             edges: Default::default(),
             epsilons: Default::default(),
+            tag: None,
         }
     }
 }
@@ -37,8 +39,7 @@ impl NFAState {
 pub struct NFA<T> {
     start: NFAStateId,
     stop: NFAStateId,
-    tags: BTreeMap<NFAStateId, T>,
-    states: BTreeMap<NFAStateId, NFAState>,
+    states: BTreeMap<NFAStateId, NFAState<T>>,
 }
 
 /// Nondeterministic finite automaton
@@ -47,20 +48,11 @@ pub struct NFA<T> {
 ///   - [Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html)
 impl<T> NFA<T> {
     // Assign provided tag to the stop state
-    pub fn tag(self, tag: impl Into<T>) -> Self {
-        let Self {
-            start,
-            stop,
-            mut tags,
-            states,
-        } = self;
-        tags.insert(stop, tag.into());
-        Self {
-            start,
-            stop,
-            tags,
-            states,
+    pub fn tag(mut self, tag: impl Into<T>) -> Self {
+        if let Some(state) = self.states.get_mut(&self.stop) {
+            state.tag = Some(tag.into());
         }
+        self
     }
 
     /// Number of states inside NFA
@@ -86,7 +78,6 @@ impl<T> NFA<T> {
         Self {
             start,
             stop,
-            tags: Default::default(),
             states,
         }
     }
@@ -102,7 +93,6 @@ impl<T> NFA<T> {
         Self {
             start: state_id,
             stop: state_id,
-            tags: Default::default(),
             states,
         }
     }
@@ -119,7 +109,6 @@ impl<T> NFA<T> {
         Self {
             start,
             stop,
-            tags: Default::default(),
             states,
         }
     }
@@ -127,7 +116,7 @@ impl<T> NFA<T> {
     /// Thompson's construction of NFAs chain one after another.
     /// For `a` and `b` regular expressions it is equivalent to `ab` expressions.
     pub fn sequence(nfas: impl IntoIterator<Item = Self>) -> Self {
-        let (mut states, ends, tags) = Self::merge_states(nfas, 0);
+        let (mut states, ends) = Self::merge_states(nfas, 0);
         if ends.is_empty() {
             return Self::empty();
         }
@@ -148,7 +137,6 @@ impl<T> NFA<T> {
         Self {
             start,
             stop,
-            tags,
             states,
         }
     }
@@ -156,7 +144,7 @@ impl<T> NFA<T> {
     /// Thompson's construction of NFA that matches any of the provided NFAs
     /// For `a` and `b` regular expressions it is equivalent to `(a|b)` expressions.
     pub fn choice(nfas: impl IntoIterator<Item = Self>) -> Self {
-        let (mut states, ends, tags) = Self::merge_states(nfas, 2);
+        let (mut states, ends) = Self::merge_states(nfas, 2);
         if ends.is_empty() {
             return Self::nothing();
         }
@@ -176,7 +164,6 @@ impl<T> NFA<T> {
         Self {
             start,
             stop,
-            tags,
             states,
         }
     }
@@ -199,7 +186,7 @@ impl<T> NFA<T> {
     /// For `a` regular expression it is equivalent to `a*`
     pub fn many(self) -> Self {
         // add offset of 2 to state ids
-        let (mut states, ends, tags) = Self::merge_states(once(self), 2);
+        let (mut states, ends) = Self::merge_states(once(self), 2);
         let (from, to) = ends[0];
 
         let start = NFAStateId(0);
@@ -217,7 +204,6 @@ impl<T> NFA<T> {
         Self {
             start,
             stop,
-            tags,
             states,
         }
     }
@@ -232,21 +218,17 @@ impl<T> NFA<T> {
         mut offset: usize,
     ) -> (
         // states
-        BTreeMap<NFAStateId, NFAState>,
+        BTreeMap<NFAStateId, NFAState<T>>,
         // starts/stops
         Vec<(NFAStateId, NFAStateId)>,
-        // tags
-        BTreeMap<NFAStateId, T>,
     ) {
-        let mut states_out: BTreeMap<NFAStateId, NFAState> = BTreeMap::new();
+        let mut states_out: BTreeMap<NFAStateId, NFAState<T>> = BTreeMap::new();
         let mut ends_out: Vec<(NFAStateId, NFAStateId)> = Vec::new();
-        let mut tags_out: BTreeMap<NFAStateId, T> = BTreeMap::new();
 
         for NFA {
             start,
             stop,
             states,
-            tags,
         } in nfas
         {
             let start = NFAStateId(offset + start.0);
@@ -256,7 +238,11 @@ impl<T> NFA<T> {
             let mut max_id = 0;
             for (id, state) in states {
                 max_id = std::cmp::max(max_id, id.0);
-                let NFAState { edges, epsilons } = state;
+                let NFAState {
+                    edges,
+                    epsilons,
+                    tag,
+                } = state;
                 let id = NFAStateId(offset + id.0);
                 let edges = edges
                     .into_iter()
@@ -266,16 +252,19 @@ impl<T> NFA<T> {
                     .into_iter()
                     .map(|v| NFAStateId(offset + v.0))
                     .collect();
-                states_out.insert(id, NFAState { edges, epsilons });
-            }
-
-            for (state, tag) in tags {
-                tags_out.insert(NFAStateId(offset + state.0), tag);
+                states_out.insert(
+                    id,
+                    NFAState {
+                        edges,
+                        epsilons,
+                        tag,
+                    },
+                );
             }
 
             offset += max_id + 1;
         }
-        (states_out, ends_out, tags_out)
+        (states_out, ends_out)
     }
 
     /// NFA to DFA using powerset construction
@@ -338,7 +327,7 @@ impl<T> NFA<T> {
             info.accepting = dfa_state.contains(&self.stop);
             info.terminal = dfa_table[&dfa_state_id].is_empty();
             for nfa_state_id in dfa_state.iter() {
-                if let Some(tag) = self.tags.get(nfa_state_id) {
+                if let Some(tag) = self.states.get(nfa_state_id).and_then(|s| s.tag.clone()) {
                     info.tags.insert(tag.clone());
                 }
             }
@@ -410,7 +399,6 @@ impl<'a, T> From<&'a str> for NFA<T> {
         Self {
             start,
             stop: state_id,
-            tags: Default::default(),
             states,
         }
     }
@@ -449,7 +437,7 @@ where
             } else {
                 write!(f, "shape=circle")?;
             }
-            if let Some(tag) = self.tags.get(from) {
+            if let Some(tag) = &state.tag {
                 write!(f, ",label=\"{} {{{:?}}}\"", from.0, tag)?;
             }
             writeln!(f, "]")?;
