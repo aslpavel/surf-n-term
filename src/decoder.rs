@@ -123,10 +123,10 @@ impl Decoder for Utf8Decoder {
 pub struct TTYDecoder {
     /// DFA that represents all possible states of the parser
     automata: DFA<TTYTag>,
-    /// Matchers registred with TTYMatch::Index tag
-    matchers: Vec<Box<dyn TTYMatcher>>,
     /// Current DFA state of the parser
     state: DFAState,
+    /// Matchers registred with TTYMatch::Index tag
+    matchers: Vec<Box<dyn TTYMatcher>>,
     /// Bytes consumed since the initialization of DFA
     buffer: Vec<u8>,
     /// Rescheduled data, that needs to be parsed again in **reversed order**
@@ -137,8 +137,6 @@ pub struct TTYDecoder {
     /// but it is not terminal (transition to other state is possible). Contains
     /// TerminalEvent and ammount of data in the buffer when this event was found.
     possible: Option<(TerminalEvent, usize)>,
-    /// Used when decoding SGR commands, to track current face
-    face: Face,
 }
 
 impl Decoder for TTYDecoder {
@@ -211,7 +209,6 @@ impl TTYDecoder {
             rescheduled: Default::default(),
             buffer: Default::default(),
             possible: None,
-            face: Default::default(),
         }
     }
 

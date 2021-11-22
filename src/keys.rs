@@ -190,6 +190,7 @@ impl fmt::Display for KeyName {
 impl FromStr for KeyName {
     type Err = Error;
 
+    #[allow(clippy::match_str_case_mismatch)]
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         let key = match string.to_lowercase().as_ref() {
             "f1" => KeyName::F1,
