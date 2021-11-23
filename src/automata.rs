@@ -437,7 +437,7 @@ impl<T> std::ops::BitOr<NFA<T>> for NFA<T> {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self {
-        Self::choice(once(self).chain(once(rhs)))
+        Self::choice([self, rhs])
     }
 }
 
@@ -445,7 +445,7 @@ impl<T> std::ops::Add<NFA<T>> for NFA<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
-        Self::sequence(once(self).chain(once(rhs)))
+        Self::sequence([self, rhs])
     }
 }
 

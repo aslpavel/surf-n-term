@@ -60,7 +60,7 @@ pub struct UnixTerminal {
     tee: Option<BufWriter<File>>,
     image_handler: Box<dyn ImageHandler + 'static>,
     capabilities: TerminalCaps,
-    // if it is None we are going to use escape sequence to detect
+    // if it is not None we are going to use escape sequence to detect
     // terminal size, otherwise ioctl is used.
     size: Option<TerminalSize>,
 }

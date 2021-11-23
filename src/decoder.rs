@@ -38,7 +38,7 @@ lazy_static! {
         let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
         let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
         let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-        NFA::choice(vec![
+        NFA::choice([
             printable,
             utf8_two + utf8_tail.clone(),
             utf8_three + utf8_tail.clone() + utf8_tail.clone(),
@@ -294,15 +294,15 @@ struct KittyImageMatcher;
 impl TTYMatcher for KittyImageMatcher {
     fn matcher(&self) -> NFA<_Void> {
         // "\x1b_Gkey=value(,key=value)*;response\x1b\\"
-        let key_value = NFA::sequence(vec![
+        let key_value = NFA::sequence([
             NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
             NFA::from("="),
             NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
         ]);
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b_G"),
             key_value.clone(),
-            NFA::sequence(vec![NFA::from(","), key_value]).many(),
+            NFA::sequence([NFA::from(","), key_value]).many(),
             NFA::from(";"),
             NFA::predicate(|b| b != b'\x1b').many(),
             NFA::from("\x1b\\"),
@@ -335,7 +335,7 @@ struct DecModeMatcher;
 
 impl TTYMatcher for DecModeMatcher {
     fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b[?"),
             NFA::number(),
             NFA::from(";"),
@@ -363,7 +363,7 @@ struct DeviceAttrsMatcher;
 impl TTYMatcher for DeviceAttrsMatcher {
     fn matcher(&self) -> NFA<_Void> {
         // "\x1b[?<attr_1>;...<attr_n>c"
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b[?"),
             (NFA::number() + NFA::from(";").optional()).some(),
             NFA::from("c"),
@@ -388,7 +388,7 @@ struct OSControlMatcher;
 impl TTYMatcher for OSControlMatcher {
     fn matcher(&self) -> NFA<_Void> {
         // "\x1b]<number>;.*\x1b\\"
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b]"),
             NFA::number(),
             NFA::from(";"),
@@ -426,7 +426,7 @@ struct ReportSettingMatcher;
 impl TTYMatcher for ReportSettingMatcher {
     fn matcher(&self) -> NFA<_Void> {
         // "\x1bP{0|1}$p{data}\x1b\\"
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1bP"),              // DCS
             NFA::from("0") | NFA::from("1"), // response code
             NFA::from("$r"),
@@ -463,7 +463,7 @@ struct GraphicRenditionMatcher {
 impl TTYMatcher for GraphicRenditionMatcher {
     fn matcher(&self) -> NFA<_Void> {
         let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b["),
             (code + NFA::from(";").optional()).some(),
             NFA::from("m"),
@@ -486,7 +486,7 @@ struct MouseEventMatcher;
 
 impl TTYMatcher for MouseEventMatcher {
     fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b[<"),
             NFA::number(),
             NFA::from(";"),
@@ -547,23 +547,23 @@ impl TTYMatcher for TermCapMatcher {
     fn matcher(&self) -> NFA<_Void> {
         let hex = NFA::predicate(|b| matches!(b, b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9'));
         let hex = hex.clone() + hex;
-        let key_value = NFA::sequence(vec![hex.clone().some(), NFA::from("="), hex.clone().some()]);
-        NFA::choice(vec![
+        let key_value = NFA::sequence([hex.clone().some(), NFA::from("="), hex.clone().some()]);
+        NFA::choice([
             // success
-            NFA::sequence(vec![
+            NFA::sequence([
                 NFA::from("\x1bP1+r"),
-                NFA::sequence(vec![
+                NFA::sequence([
                     key_value.clone(),
-                    NFA::sequence(vec![NFA::from(";"), key_value]).many(),
+                    NFA::sequence([NFA::from(";"), key_value]).many(),
                 ])
                 .optional(),
             ]),
             // failure
-            NFA::sequence(vec![
+            NFA::sequence([
                 NFA::from("\x1bP0+r"),
-                NFA::sequence(vec![
+                NFA::sequence([
                     hex.clone().some(),
-                    NFA::sequence(vec![NFA::from(";"), hex.some()]).many(),
+                    NFA::sequence([NFA::from(";"), hex.some()]).many(),
                 ])
                 .optional(),
             ]),
@@ -602,7 +602,7 @@ impl TTYMatcher for UTF8Matcher {
         let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
         let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
         let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-        NFA::choice(vec![
+        NFA::choice([
             printable,
             utf8_two + utf8_tail.clone(),
             utf8_three + utf8_tail.clone() + utf8_tail.clone(),
@@ -623,7 +623,7 @@ struct CursorPositionMatcher;
 
 impl TTYMatcher for CursorPositionMatcher {
     fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence(vec![
+        NFA::sequence([
             NFA::from("\x1b["),
             NFA::number(),
             NFA::from(";"),

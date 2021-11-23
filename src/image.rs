@@ -276,6 +276,12 @@ impl ItermImageHandler {
     }
 }
 
+impl Default for ItermImageHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImageHandler for ItermImageHandler {
     fn kind(&self) -> ImageHandlerKind {
         ImageHandlerKind::ITerm
