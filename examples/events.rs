@@ -55,6 +55,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     write!(&mut term, "Terminal::capabilities(): {:?}\r\n", caps)?;
     let size = term.size()?;
     write!(&mut term, "Terminal::size(): {:?}\r\n", size)?;
+    let image_handler = term.image_handler().kind();
+    write!(
+        &mut term,
+        "Terminal::image_handler(): {:?}\r\n",
+        image_handler
+    )?;
 
     // read terminal events
     let timeout = Duration::from_secs(10);

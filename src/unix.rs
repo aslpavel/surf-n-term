@@ -2,33 +2,33 @@
 use crate::common::IOQueue;
 use crate::encoder::ColorDepth;
 use crate::image::ImageHandlerKind;
-use crate::TerminalCaps;
 use crate::{
     decoder::{Decoder, TTYDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    image::{image_handler_detect, DummyImageHandler},
+    image::DummyImageHandler,
     terminal::{
         Size, Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
     },
     DecMode, ImageHandler,
 };
+use crate::{KittyImageHandler, SixelImageHandler, TerminalCaps, RGBA};
 use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
 };
-use std::os::unix::{
-    io::{AsRawFd, RawFd},
-    net::UnixStream,
-};
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     fs::File,
     io::{BufWriter, Cursor, Read, Write},
+    os::unix::{
+        io::{AsRawFd, RawFd},
+        net::UnixStream,
+    },
     path::Path,
     time::{Duration, Instant},
 };
-use tracing::info;
+use tracing::{debug, info, warn};
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -112,7 +112,7 @@ impl UnixTerminal {
         set_blocking(waker_read.as_raw_fd(), false)?;
 
         let capabilities = TerminalCaps::default();
-        Self {
+        let mut term = Self {
             tty_handle,
             encoder: TTYEncoder::new(capabilities.clone()),
             write_queue: Default::default(),
@@ -126,8 +126,10 @@ impl UnixTerminal {
             tee: None,
             image_handler: Box::new(DummyImageHandler),
             capabilities,
-        }
-        .detect()
+        };
+
+        capabilities_detect(&mut term)?;
+        Ok(term)
     }
 
     /// Duplicate all output to specified tee file. Used for debugging.
@@ -145,36 +147,6 @@ impl UnixTerminal {
     /// Get a reference an image handler
     pub fn image_handler(&mut self) -> &mut dyn ImageHandler {
         &mut self.image_handler
-    }
-
-    /// Detect termincal capabilieties
-    fn detect(mut self) -> Result<Self, Error> {
-        // color depth
-        let depth = match std::env::var("COLORTERM") {
-            Ok(value) if value == "truecolor" || value == "24bit" => ColorDepth::TrueColor,
-            _ => ColorDepth::EightBit,
-        };
-        let depth = match std::env::var("TERM").as_deref() {
-            Ok("linux") => ColorDepth::Gray,
-            _ => depth,
-        };
-
-        // image handler
-        let image_handler = image_handler_detect(&mut self)?;
-
-        // update capabilieties
-        self.capabilities.glyphs = matches!(
-            image_handler.kind(),
-            ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
-        ) && !self.size()?.pixels.is_empty();
-        self.capabilities.depth = depth;
-
-        // update fields
-        self.encoder = TTYEncoder::new(self.capabilities.clone());
-        self.image_handler = image_handler;
-
-        info!("capabilities: {:?}", self.capabilities);
-        Ok(self)
     }
 
     /// Close all descriptors free all the resources
@@ -234,31 +206,115 @@ impl UnixTerminal {
     }
 }
 
-/*
-/// Detect terminal capabilities
-fn capabilities_detect(term: &mut UnixTerminal) -> Result<TerminalCaps, Error> {
+/// Detect and set terminal capabilities
+fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
+    let mut caps = TerminalCaps::default();
+    if let Ok("truecolor") | Ok("24bit") = std::env::var("COLORTERM").as_deref() {
+        caps.depth = ColorDepth::TrueColor;
+    }
+    if let Ok("linux") | Ok("dumb") = std::env::var("TERM").as_deref() {
+        caps.depth = ColorDepth::EightBit;
+    }
+
     // drain all pending events
     term.drain().count();
+    // NOTE: using `write!` here instead of execute, to not accidentally use
+    //       existing configuration from passed terminal.
 
     // 1x1 pixel kitty image (NOTE: it will be consumed by handler if it is already set)
-    term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?;
+    write!(term, "\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?;
 
-    // OSC - Get default background color (used for sixel blending)
-    term.write_all(b"\x1b]11;?\x1b\\")?;
+    // OSC - Get default background color for transparent blending
+    write!(term, "\x1b]11;?\x1b\\")?;
 
     // Set background color with SGR, and try to get it back to
     // detect truecolor support https://github.com/termstandard/colors
+    let face_expected = "bg=#010203".parse()?;
+    write!(term, "\x1b[00;48;2;1;2;3m")?; // change background
+    write!(term, "\x1bP$qm\x1b\\")?; // DECRQSS with `m` descriptor
+    write!(term, "\x1b[00m")?; // reset current face
+
+    // Detect terminal size
+    // Some terminals return incomplete size info with ioctl
+    write!(term, "\x1b[14t\x1b[18t")?;
 
     // DA1 - sync and sixel info
-    // Device Attribute comand is used as "sync" event it is supported
-    // by most terminals at least in its basic form, so we expect to
+    // Device Attribute comand is used as "sync" event, it is supported
+    // by most terminals, at least in its basic form, so we expect to
     // receive a response to it. Which means it should go LAST
-    term.execute(TerminalCommand::DeviceAttrs)?;
+    write!(term, "\x1b[c")?;
+
+    let mut image_handlers = HashSet::new();
+    let mut bg: Option<RGBA> = None;
+    let mut term_size = term.size()?;
+    loop {
+        match term.poll(Some(Duration::from_secs(1)))? {
+            Some(TerminalEvent::KittyImage { .. }) => {
+                debug!("[detected] kitty image protocol");
+                image_handlers.insert(ImageHandlerKind::Kitty);
+            }
+            Some(TerminalEvent::Color { color, .. }) => {
+                debug!("[detected] background color: {:?}", color);
+                bg.replace(color);
+            }
+            Some(TerminalEvent::FaceGet(face)) => {
+                if face == face_expected {
+                    debug!("[detected] true color support");
+                    caps.depth = ColorDepth::TrueColor;
+                }
+            }
+            Some(TerminalEvent::DeviceAttrs(attrs)) => {
+                // 4 - attribute indicates sixel support
+                if attrs.contains(&4) {
+                    debug!("[detected] sixel image protocol");
+                    image_handlers.insert(ImageHandlerKind::Sixel);
+                }
+                break; // this is last "sync" event
+            }
+            Some(TerminalEvent::Size(size)) => {
+                if !size.cells.is_empty() {
+                    term_size.cells = size.cells;
+                }
+                if !size.pixels.is_empty() {
+                    term_size.pixels = size.pixels;
+                }
+            }
+            Some(event) => {
+                warn!("unexpected event during detection: {:?}", event);
+                continue;
+            }
+            None => break,
+        }
+    }
 
     // drain terminal
     term.drain().count();
+
+    // image handler
+    let image_handler: Box<dyn ImageHandler> = {
+        if image_handlers.contains(&ImageHandlerKind::Kitty) {
+            Box::new(KittyImageHandler::new())
+        } else if image_handlers.contains(&ImageHandlerKind::Sixel) {
+            Box::new(SixelImageHandler::new(bg))
+        } else {
+            Box::new(DummyImageHandler)
+        }
+    };
+
+    // glyph support
+    caps.glyphs = matches!(
+        image_handler.kind(),
+        ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
+    ) && !term_size.pixels.is_empty();
+
+    // update terminal
+    info!("capabilities: {:?}", caps);
+    term.encoder = TTYEncoder::new(caps.clone());
+    term.image_handler = image_handler;
+    term.capabilities = caps;
+
+    Ok(())
 }
-*/
 
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {

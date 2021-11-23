@@ -18,7 +18,7 @@ use tracing::{debug, trace};
 const TERMINAL_FRAMES_DROP: usize = 32;
 
 /// Main trait to interact with a Terminal
-pub trait Terminal: Write {
+pub trait Terminal: Write + Send {
     /// Schedue command for execution
     ///
     /// Command will be submitted on the next call to poll `Terminal::poll`

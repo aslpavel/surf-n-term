@@ -7,7 +7,7 @@ use std::{
 };
 
 /// Face style attributes
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct FaceAttrs {
     bits: u16,
 }
@@ -123,7 +123,7 @@ impl fmt::Debug for FaceAttrs {
 }
 
 /// Type describing foreground/background/style-attrs of the terminal cell
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Face {
     /// Foreground color
     pub fg: Option<RGBA>,
@@ -175,16 +175,6 @@ impl Face {
             (None, bg) => bg,
         };
         Face { fg, bg, ..*other }
-    }
-}
-
-impl Default for Face {
-    fn default() -> Self {
-        Self {
-            fg: None,
-            bg: None,
-            attrs: FaceAttrs::EMPTY,
-        }
     }
 }
 

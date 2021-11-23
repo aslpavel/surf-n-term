@@ -277,7 +277,7 @@ enum TTYTag {
 #[derive(Clone)]
 enum _Void {}
 
-trait TTYMatcher: fmt::Debug {
+trait TTYMatcher: fmt::Debug + Send {
     /// NFA that should match desired escape sequence
     fn matcher(&self) -> NFA<_Void>;
 
