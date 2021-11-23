@@ -234,6 +234,32 @@ impl UnixTerminal {
     }
 }
 
+/*
+/// Detect terminal capabilities
+fn capabilities_detect(term: &mut UnixTerminal) -> Result<TerminalCaps, Error> {
+    // drain all pending events
+    term.drain().count();
+
+    // 1x1 pixel kitty image (NOTE: it will be consumed by handler if it is already set)
+    term.write_all(b"\x1b_Ga=q,i=31,s=1,v=1,f=24;AAAA\x1b\\")?;
+
+    // OSC - Get default background color (used for sixel blending)
+    term.write_all(b"\x1b]11;?\x1b\\")?;
+
+    // Set background color with SGR, and try to get it back to
+    // detect truecolor support https://github.com/termstandard/colors
+
+    // DA1 - sync and sixel info
+    // Device Attribute comand is used as "sync" event it is supported
+    // by most terminals at least in its basic form, so we expect to
+    // receive a response to it. Which means it should go LAST
+    term.execute(TerminalCommand::DeviceAttrs)?;
+
+    // drain terminal
+    term.drain().count();
+}
+*/
+
 impl std::ops::Drop for UnixTerminal {
     fn drop(&mut self) {
         self.dispose().unwrap_or(())
