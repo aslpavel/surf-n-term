@@ -60,6 +60,9 @@ pub struct UnixTerminal {
     tee: Option<BufWriter<File>>,
     image_handler: Box<dyn ImageHandler + 'static>,
     capabilities: TerminalCaps,
+    // if it is None we are going to use escape sequence to detect
+    // terminal size, otherwise ioctl is used.
+    size: Option<TerminalSize>,
 }
 
 impl UnixTerminal {
@@ -126,6 +129,7 @@ impl UnixTerminal {
             tee: None,
             image_handler: Box::new(DummyImageHandler),
             capabilities,
+            size: None,
         };
 
         capabilities_detect(&mut term)?;
@@ -147,6 +151,31 @@ impl UnixTerminal {
     /// Get a reference an image handler
     pub fn image_handler(&mut self) -> &mut dyn ImageHandler {
         &mut self.image_handler
+    }
+
+    /// Determine terminal size with ioctl
+    ///
+    /// Some terminal emulators do not set pixel size, or if it goes through some
+    /// kind of muxer (like `docker exec`) which might not set pixel size. So if this
+    /// condition is detected we are falling back to escape sequence if it detected to
+    /// work.
+    fn size_ioctl(&self) -> Result<TerminalSize, Error> {
+        unsafe {
+            let mut winsize: nix::winsize = std::mem::zeroed();
+            if libc::ioctl(self.tty_handle.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
+                return Err(nix::Error::last().into());
+            }
+            Ok(TerminalSize {
+                cells: Size {
+                    height: winsize.ws_row as usize,
+                    width: winsize.ws_col as usize,
+                },
+                pixels: Size {
+                    height: winsize.ws_ypixel as usize,
+                    width: winsize.ws_xpixel as usize,
+                },
+            })
+        }
     }
 
     /// Close all descriptors free all the resources
@@ -206,6 +235,10 @@ impl UnixTerminal {
     }
 }
 
+/// Fallback way to determine terminal size if it is detected to work
+/// and ioctl is not.
+const GET_TERM_SIZE: &[u8] = b"\x1b[18t\x1b[14t";
+
 /// Detect and set terminal capabilities
 fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     let mut caps = TerminalCaps::default();
@@ -236,7 +269,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
 
     // Detect terminal size
     // Some terminals return incomplete size info with ioctl
-    write!(term, "\x1b[14t\x1b[18t")?;
+    term.write_all(GET_TERM_SIZE)?;
 
     // DA1 - sync and sixel info
     // Device Attribute comand is used as "sync" event, it is supported
@@ -246,7 +279,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
 
     let mut image_handlers = HashSet::new();
     let mut bg: Option<RGBA> = None;
-    let mut term_size = term.size()?;
+    let mut size_escape = TerminalSize::default();
     loop {
         match term.poll(Some(Duration::from_secs(1)))? {
             Some(TerminalEvent::KittyImage { .. }) => {
@@ -272,12 +305,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
                 break; // this is last "sync" event
             }
             Some(TerminalEvent::Size(size)) => {
-                if !size.cells.is_empty() {
-                    term_size.cells = size.cells;
-                }
-                if !size.pixels.is_empty() {
-                    term_size.pixels = size.pixels;
-                }
+                size_escape = size;
             }
             Some(event) => {
                 warn!("unexpected event during detection: {:?}", event);
@@ -289,6 +317,13 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
 
     // drain terminal
     term.drain().count();
+
+    // term size interface
+    let size_ioctl = term.size_ioctl()?;
+    if size_ioctl.pixels.is_empty() && !size_escape.pixels.is_empty() {
+        warn!("[detect] fallback to escape sequence for term size detection");
+        term.size = Some(size_escape);
+    }
 
     // image handler
     let image_handler: Box<dyn ImageHandler> = {
@@ -305,7 +340,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     caps.glyphs = matches!(
         image_handler.kind(),
         ImageHandlerKind::Kitty | ImageHandlerKind::Sixel
-    ) && !term_size.pixels.is_empty();
+    ) && !term.size()?.pixels.is_empty();
 
     // update terminal
     info!("capabilities: {:?}", caps);
@@ -397,8 +432,12 @@ impl Terminal for UnixTerminal {
                 for signal in self.signal_delivery.pending() {
                     match signal {
                         SIGWINCH => {
-                            self.events_queue
-                                .push_back(TerminalEvent::Resize(self.size()?));
+                            if self.size.is_none() {
+                                self.events_queue
+                                    .push_back(TerminalEvent::Resize(self.size()?));
+                            } else {
+                                self.write_all(GET_TERM_SIZE)?;
+                            }
                         }
                         SIGTERM | SIGINT | SIGQUIT => {
                             return Err(Error::Quit);
@@ -425,6 +464,13 @@ impl Terminal for UnixTerminal {
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
                 while let Some(event) = self.decoder.decode(&mut read_queue)? {
+                    if let TerminalEvent::Size(size) = event {
+                        // we are using escape sequence to determine terminal resize
+                        if let Some(term_size) = self.size.as_mut() {
+                            *term_size = size;
+                            self.events_queue.push_back(TerminalEvent::Resize(size));
+                        }
+                    }
                     if !self.image_handler.handle(&event)? {
                         self.events_queue.push_back(event)
                     }
@@ -456,21 +502,9 @@ impl Terminal for UnixTerminal {
     }
 
     fn size(&self) -> Result<TerminalSize, Error> {
-        unsafe {
-            let mut winsize: nix::winsize = std::mem::zeroed();
-            if libc::ioctl(self.tty_handle.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
-                return Err(nix::Error::last().into());
-            }
-            Ok(TerminalSize {
-                cells: Size {
-                    height: winsize.ws_row as usize,
-                    width: winsize.ws_col as usize,
-                },
-                pixels: Size {
-                    height: winsize.ws_ypixel as usize,
-                    width: winsize.ws_xpixel as usize,
-                },
-            })
+        match self.size {
+            Some(size) => Ok(size),
+            None => self.size_ioctl(),
         }
     }
 

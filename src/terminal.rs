@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tracing::{debug, trace};
+use tracing::{trace, warn};
 
 /// How many frames needs to be pending before we start dropping them
 const TERMINAL_FRAMES_DROP: usize = 32;
@@ -105,7 +105,7 @@ pub trait Terminal: Write + Send {
                     let action = handler(self, event, renderer.view())?;
                     // drop frames if we are too far behind
                     if self.frames_pending() > TERMINAL_FRAMES_DROP {
-                        debug!("dropping frames: {}", self.frames_pending());
+                        warn!("dropping frames: {}", self.frames_pending());
                         self.frames_drop();
                         renderer.clear(self)?;
                     }
@@ -427,7 +427,7 @@ pub enum TerminalEvent {
 }
 
 /// Size
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
@@ -449,7 +449,7 @@ impl Size {
 }
 
 /// Terminal size object
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TerminalSize {
     /// Size of the terminal in cells
     pub cells: Size,

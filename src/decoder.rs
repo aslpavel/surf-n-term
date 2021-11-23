@@ -647,45 +647,46 @@ impl TTYMatcher for CursorPositionMatcher {
 /// Reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
 /// "\x1b[18t" - Report the size of the text area in characters ("\x1b[8{height};{width}t")
 /// "\x1b[14t" - Report text area size in pixels ("\x1b[4{height};{width}t")
+///
+/// This matcher expects to receive two responses at once and used as a fallback to
+/// way to get terminal size if ioctl does not work as expected.
 #[derive(Debug)]
 struct TermSizeMatcher;
 
 impl TTYMatcher for TermSizeMatcher {
     fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence(vec![
-            NFA::from("\x1b["),
-            NFA::from("8") | NFA::from("4"),
+        let size = NFA::sequence([
             NFA::from(";"),
             NFA::number(),
             NFA::from(";"),
             NFA::number(),
             NFA::from("t"),
-        ])
+        ]);
+        NFA::sequence([NFA::from("\x1b[8"), size.clone(), NFA::from("\x1b[4"), size])
     }
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
-        // "\x1b[(4|8);{height};{width}t"
-        let code = data[2];
-        let mut nums = numbers_decode(&data[4..data.len() - 1]);
-        let height = nums.next()?;
-        let width = nums.next()?;
-        match code {
-            b'8' => Some(TerminalEvent::Size(TerminalSize {
-                cells: Size { height, width },
-                pixels: Size {
-                    height: 0,
-                    width: 0,
-                },
-            })),
-            b'4' => Some(TerminalEvent::Size(TerminalSize {
-                cells: Size {
-                    height: 0,
-                    width: 0,
-                },
-                pixels: Size { width, height },
-            })),
-            _ => None,
-        }
+        // "\x1b[8;{cell_height};{cell_width}t\x1b[4;{pixel_height};{pixel_width}t"
+        let mut chunks = data.split(|c| *c == b'\x1b');
+        chunks.next()?; // empty
+        let cell_size = chunks.next()?;
+        let mut nums = numbers_decode(&cell_size[3..cell_size.len() - 1]);
+        let cell_height = nums.next()?;
+        let cell_width = nums.next()?;
+        let pixel_size = chunks.next()?;
+        let mut nums = numbers_decode(&pixel_size[3..pixel_size.len() - 1]);
+        let pixel_height = nums.next()?;
+        let pixel_width = nums.next()?;
+        Some(TerminalEvent::Size(TerminalSize {
+            cells: Size {
+                height: cell_height,
+                width: cell_width,
+            },
+            pixels: Size {
+                height: pixel_height,
+                width: pixel_width,
+            },
+        }))
     }
 }
 
@@ -1038,22 +1039,7 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
-        write!(cursor.get_mut(), "\x1b[4;3104;1482t")?;
-        assert_eq!(
-            decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Size(TerminalSize {
-                cells: Size {
-                    width: 0,
-                    height: 0,
-                },
-                pixels: Size {
-                    width: 1482,
-                    height: 3104,
-                }
-            })),
-        );
-
-        write!(cursor.get_mut(), "\x1b[8;101;202t")?;
+        write!(cursor.get_mut(), "\x1b[8;101;202t\x1b[4;3104;1482t")?;
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::Size(TerminalSize {
@@ -1062,8 +1048,8 @@ mod tests {
                     height: 101,
                 },
                 pixels: Size {
-                    width: 0,
-                    height: 0,
+                    width: 1482,
+                    height: 3104,
                 }
             })),
         );
