@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sgr() -> Result<(), Error> {
+    fn test_gray_sgr() -> Result<(), Error> {
         let mut encoder = TTYEncoder::new(TerminalCaps {
             depth: ColorDepth::Gray,
             glyphs: false,
@@ -334,7 +334,7 @@ mod tests {
 
         assert_eq!(
             std::str::from_utf8(out.as_ref()).as_deref(),
-            Ok("\x1b[00;30;47m")
+            Ok("\x1b[00;30;107m")
         );
         Ok(())
     }
