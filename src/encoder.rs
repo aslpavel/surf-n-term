@@ -285,10 +285,11 @@ pub fn color_sgr_encode<C: Color, W: Write>(
         }
         ColorDepth::Gray => {
             let luma = color.luma();
-            let index = match nearest(luma, &[0.0, 0.7, 1.0]) {
+            let index = match nearest(luma, &[0.0, 0.33, 0.66, 1.0]) {
                 0 => 30,
                 1 => 90,
-                _ => 37,
+                2 => 37,
+                _ => 97,
             };
             let index = if foreground { index } else { index + 10 };
             write!(out, ";{}", index)?;
