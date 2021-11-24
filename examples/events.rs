@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "TN".to_string(),
         "Co".to_string(),
     ]))?;
-    term.write_all(b"\x1b[14t\x1b[18t")?;
+    term.write_all(b"\x1b[18t\x1b[14t")?;
     term.execute(TerminalCommand::Title("events test title".to_string()))?;
 
     let caps = term.capabilities().clone();
