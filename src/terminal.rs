@@ -182,6 +182,7 @@ impl<'a, T: Terminal + ?Sized> Terminal for &'a mut T {
 pub struct TerminalCaps {
     pub depth: ColorDepth,
     pub glyphs: bool,
+    pub kitty_keyboard: bool,
 }
 
 impl Default for TerminalCaps {
@@ -189,6 +190,7 @@ impl Default for TerminalCaps {
         Self {
             depth: ColorDepth::EightBit,
             glyphs: false,
+            kitty_keyboard: false,
         }
     }
 }
@@ -410,6 +412,8 @@ pub enum TerminalEvent {
     },
     /// Kitty image result
     KittyImage { id: u64, error: Option<String> },
+    /// Kitty keyboard level
+    KeyboardLevel(usize),
     /// Terminal have been woken by waker object
     Wake,
     /// Termcap/Terminfo repsponse to XTGETTCAP

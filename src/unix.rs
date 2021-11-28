@@ -275,6 +275,9 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // Some terminals return incomplete size info with ioctl
     term.write_all(GET_TERM_SIZE)?;
 
+    // Detect kitty keyboard protocol support
+    write!(term, "\x1b[?u")?;
+
     // DA1 - sync and sixel info
     // Device Attribute comand is used as "sync" event, it is supported
     // by most terminals, at least in its basic form, so we expect to
@@ -310,6 +313,10 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
             }
             Some(TerminalEvent::Size(size)) => {
                 size_escape = size;
+            }
+            Some(TerminalEvent::KeyboardLevel(_)) => {
+                debug!("[detect] kitty keyboard protocol");
+                caps.kitty_keyboard = true;
             }
             Some(event) => {
                 warn!("unexpected event during detection: {:?}", event);

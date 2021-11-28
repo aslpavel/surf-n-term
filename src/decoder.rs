@@ -183,6 +183,7 @@ impl TTYDecoder {
             Box::new(DeviceAttrsMatcher),
             Box::new(GraphicRenditionMatcher::default()),
             Box::new(KittyImageMatcher),
+            Box::new(KittyKeyboardMatcher),
             Box::new(MouseEventMatcher),
             Box::new(OSControlMatcher),
             Box::new(ReportSettingMatcher),
@@ -324,6 +325,31 @@ impl TTYMatcher for KittyImageMatcher {
             Some(String::from_utf8_lossy(msg).to_string())
         };
         Some(TerminalEvent::KittyImage { id, error })
+    }
+}
+
+/// Kitty Keyboard Protocol
+///
+/// Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol
+#[derive(Debug)]
+struct KittyKeyboardMatcher;
+
+impl TTYMatcher for KittyKeyboardMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        NFA::sequence([
+            NFA::from("\x1b["),
+            NFA::choice([NFA::from("?") + NFA::digit().some()]),
+            NFA::from("u"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        let data = &data[2..]; // skip CSI
+        if data[0] == b'?' {
+            let level = number_decode(&data[1..data.len() - 1])?;
+            return Some(TerminalEvent::KeyboardLevel(level));
+        }
+        None
     }
 }
 
@@ -1362,6 +1388,21 @@ mod tests {
         decoder.decode_into(&mut cursor, &mut result)?;
 
         assert_eq!(result, vec![TerminalEvent::FaceGet("bg=#010203".parse()?)],);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_kitty_keyboard() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[?15u")?;
+
+        let mut result = Vec::new();
+        decoder.decode_into(&mut cursor, &mut result)?;
+
+        assert_eq!(result, vec![TerminalEvent::KeyboardLevel(15)],);
 
         Ok(())
     }

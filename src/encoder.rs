@@ -253,7 +253,7 @@ pub fn color_sgr_encode<C: Color, W: Write>(
             } else {
                 out.write_all(b";48")?;
             }
-            write!(out, ";2;{};{};{}", r, g, b)?;
+            write!(out, ":2:{}:{}:{}", r, g, b)?;
         }
         ColorDepth::EightBit => {
             let color: ColorLinear = color.into();
@@ -324,7 +324,7 @@ mod tests {
     fn test_gray_sgr() -> Result<(), Error> {
         let mut encoder = TTYEncoder::new(TerminalCaps {
             depth: ColorDepth::Gray,
-            glyphs: false,
+            ..TerminalCaps::default()
         });
         let mut out = Vec::new();
         encoder.encode(
