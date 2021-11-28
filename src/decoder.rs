@@ -769,14 +769,14 @@ fn tty_event_nfa() -> NFA<TerminalEvent> {
         (KeyName::End, "4"),
         (KeyName::PageUp, "5"),
         (KeyName::PageDown, "6"),
-        (KeyName::F5, "15"),
-        (KeyName::F6, "17"),
-        (KeyName::F7, "18"),
-        (KeyName::F8, "19"),
-        (KeyName::F9, "20"),
-        (KeyName::F10, "21"),
-        (KeyName::F11, "23"),
-        (KeyName::F12, "24"),
+        (KeyName::F(5), "15"),
+        (KeyName::F(6), "17"),
+        (KeyName::F(7), "18"),
+        (KeyName::F(8), "19"),
+        (KeyName::F(9), "20"),
+        (KeyName::F(10), "21"),
+        (KeyName::F(11), "23"),
+        (KeyName::F(12), "24"),
     ]
     .iter()
     {
@@ -795,10 +795,10 @@ fn tty_event_nfa() -> NFA<TerminalEvent> {
         (KeyName::Left, "[", "D"),
         (KeyName::End, "[", "F"),
         (KeyName::Home, "[", "H"),
-        (KeyName::F1, "O", "P"),
-        (KeyName::F2, "O", "Q"),
-        (KeyName::F3, "O", "R"),
-        (KeyName::F4, "O", "S"),
+        (KeyName::F(1), "O", "P"),
+        (KeyName::F(2), "O", "Q"),
+        (KeyName::F(3), "O", "R"),
+        (KeyName::F(4), "O", "S"),
     ]
     .iter()
     {
@@ -991,13 +991,13 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(KeyName::F3.into()))
+            Some(TerminalEvent::Key(KeyName::F(3).into()))
         );
         assert_eq!(cursor.position(), 3);
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(KeyName::F5.into()))
+            Some(TerminalEvent::Key(KeyName::F(5).into()))
         );
         assert_eq!(cursor.position(), 3 + 5);
 

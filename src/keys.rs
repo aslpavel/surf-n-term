@@ -105,18 +105,7 @@ impl FromStr for Key {
 /// Key name
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KeyName {
-    F1,
-    F2,
-    F3,
-    F4,
-    F5,
-    F6,
-    F7,
-    F8,
-    F9,
-    F10,
-    F11,
-    F12,
+    F(usize),
     Backspace,
     Char(char),
     Delete,
@@ -140,18 +129,7 @@ pub enum KeyName {
 impl fmt::Debug for KeyName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            KeyName::F1 => write!(f, "f1"),
-            KeyName::F2 => write!(f, "f2"),
-            KeyName::F3 => write!(f, "f3"),
-            KeyName::F4 => write!(f, "f4"),
-            KeyName::F5 => write!(f, "f5"),
-            KeyName::F6 => write!(f, "f6"),
-            KeyName::F7 => write!(f, "f7"),
-            KeyName::F8 => write!(f, "f8"),
-            KeyName::F9 => write!(f, "f9"),
-            KeyName::F10 => write!(f, "f10"),
-            KeyName::F11 => write!(f, "f11"),
-            KeyName::F12 => write!(f, "f12"),
+            KeyName::F(index) => write!(f, "f{}", index),
             KeyName::Left => write!(f, "left"),
             KeyName::Right => write!(f, "right"),
             KeyName::Down => write!(f, "down"),
@@ -193,18 +171,6 @@ impl FromStr for KeyName {
     #[allow(clippy::match_str_case_mismatch)]
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         let key = match string.to_lowercase().as_ref() {
-            "f1" => KeyName::F1,
-            "f2" => KeyName::F2,
-            "f3" => KeyName::F3,
-            "f4" => KeyName::F4,
-            "f5" => KeyName::F5,
-            "f6" => KeyName::F6,
-            "f7" => KeyName::F7,
-            "f8" => KeyName::F8,
-            "f9" => KeyName::F9,
-            "f10" => KeyName::F10,
-            "f11" => KeyName::F11,
-            "f12" => KeyName::F12,
             "left" => KeyName::Left,
             "up" => KeyName::Up,
             "right" => KeyName::Right,
@@ -219,6 +185,13 @@ impl FromStr for KeyName {
             "space" => KeyName::Char(' '),
             "backspace" => KeyName::Backspace,
             "delete" => KeyName::Delete,
+            f if f.starts_with("f")
+                && f.len() > 1
+                && string[1..].chars().all(|c| c.is_ascii_digit()) =>
+            {
+                let index = string[1..].parse().expect("coding error");
+                KeyName::F(index)
+            }
             cs if cs.chars().count() == 1 => {
                 let c = cs.chars().next().unwrap();
                 match c {
