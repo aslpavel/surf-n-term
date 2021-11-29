@@ -193,7 +193,7 @@ impl FromStr for KeyName {
             "space" => KeyName::Char(' '),
             "backspace" => KeyName::Backspace,
             "delete" => KeyName::Delete,
-            f if f.starts_with("f")
+            f if f.starts_with('f')
                 && f.len() > 1
                 && string[1..].chars().all(|c| c.is_ascii_digit()) =>
             {
