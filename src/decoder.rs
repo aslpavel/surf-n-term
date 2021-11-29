@@ -338,19 +338,69 @@ impl TTYMatcher for KittyKeyboardMatcher {
     fn matcher(&self) -> NFA<_Void> {
         NFA::sequence([
             NFA::from("\x1b["),
-            NFA::choice([NFA::from("?") + NFA::digit().some()]),
+            NFA::choice([
+                NFA::from("?") + NFA::digit().some(),
+                NFA::predicate(|c| matches!(c, b';' | b':' | b'0'..=b'9')).many(),
+            ]),
             NFA::from("u"),
         ])
     }
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
-        let data = &data[2..]; // skip CSI
+        let data = &data[2..data.len() - 1]; // skip CSI and `u`
         if data[0] == b'?' {
-            let level = number_decode(&data[1..data.len() - 1])?;
+            let level = number_decode(&data[1..data.len()])?;
             return Some(TerminalEvent::KeyboardLevel(level));
         }
-        None
+
+        let mut fields = data.split(|c| *c == b';');
+
+        // decode key
+        let name = match fields.next() {
+            Some(codes) => {
+                // TODO: decode alternative keys
+                let mut codes = numbers_decode(codes, b':');
+                keyboard_decode_key(codes.next().unwrap_or(1))?
+            }
+            None => return None,
+        };
+
+        // decode modifiers
+        let mode = match fields.next() {
+            Some(modes) => {
+                let mut modes = numbers_decode(modes, b':');
+                let mode = match modes.next() {
+                    Some(mode) if mode > 1 => KeyMod::from_bits((mode - 1) as u32),
+                    _ => KeyMod::EMPTY,
+                };
+                let event_type = modes.next().unwrap_or(0);
+                // TODO: decode press/release/repeat
+                if event_type != 0 {
+                    return None;
+                }
+                mode
+            }
+            None => KeyMod::EMPTY,
+        };
+
+        // TODO: decode text as codepoint
+        let _text = fields.next();
+
+        Some(TerminalEvent::Key(Key { name, mode }))
     }
+}
+
+fn keyboard_decode_key(code: usize) -> Option<KeyName> {
+    let key = match code {
+        27 => KeyName::Esc,
+        13 => KeyName::Enter,
+        9 => KeyName::Tab,
+        127 => KeyName::Backspace,
+        code @ 57376..=57398 => KeyName::F(code - 57376 + 13),
+        code if code <= u32::MAX as usize => KeyName::Char(char::from_u32(code as u32)?),
+        _ => return None,
+    };
+    Some(key)
 }
 
 /// DECRPM - DEC mode report
@@ -372,7 +422,7 @@ impl TTYMatcher for DecModeMatcher {
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
         // "\x1b[?{mode};{status}$y"
-        let mut nums = numbers_decode(&data[3..data.len() - 2]);
+        let mut nums = numbers_decode(&data[3..data.len() - 2], b';');
         Some(TerminalEvent::DecMode {
             mode: crate::terminal::DecMode::from_usize(nums.next()?)?,
             status: DecModeStatus::from_usize(nums.next()?)?,
@@ -398,7 +448,7 @@ impl TTYMatcher for DeviceAttrsMatcher {
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
         Some(TerminalEvent::DeviceAttrs(
-            numbers_decode(&data[3..data.len() - 1])
+            numbers_decode(&data[3..data.len() - 1], b';')
                 .filter(|v| v > &0)
                 .collect(),
         ))
@@ -525,12 +575,12 @@ impl TTYMatcher for MouseEventMatcher {
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
         // "\x1b[<{event};{row};{col}(m|M)"
-        let mut nums = numbers_decode(&data[3..data.len() - 1]);
+        let mut nums = numbers_decode(&data[3..data.len() - 1], b';');
         let event = nums.next()?;
         let col = nums.next()? - 1;
         let row = nums.next()? - 1;
 
-        let mut mode = KeyMod::from_bits(((event >> 2) & 7) as u8);
+        let mut mode = KeyMod::from_bits(((event >> 2) & 7) as u32);
         if data[data.len() - 1] == b'M' {
             mode |= KeyMod::PRESS;
         }
@@ -660,7 +710,7 @@ impl TTYMatcher for CursorPositionMatcher {
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
         // "\x1b[{row};{col}R"
-        let mut nums = numbers_decode(&data[2..data.len() - 1]);
+        let mut nums = numbers_decode(&data[2..data.len() - 1], b';');
         Some(TerminalEvent::CursorPosition {
             row: nums.next()? - 1,
             col: nums.next()? - 1,
@@ -696,11 +746,11 @@ impl TTYMatcher for TermSizeMatcher {
         let mut chunks = data.split(|c| *c == b'\x1b');
         chunks.next()?; // empty
         let cell_size = chunks.next()?;
-        let mut nums = numbers_decode(&cell_size[3..cell_size.len() - 1]);
+        let mut nums = numbers_decode(&cell_size[3..cell_size.len() - 1], b';');
         let cell_height = nums.next()?;
         let cell_width = nums.next()?;
         let pixel_size = chunks.next()?;
-        let mut nums = numbers_decode(&pixel_size[3..pixel_size.len() - 1]);
+        let mut nums = numbers_decode(&pixel_size[3..pixel_size.len() - 1], b';');
         let pixel_height = nums.next()?;
         let pixel_width = nums.next()?;
         Some(TerminalEvent::Size(TerminalSize {
@@ -915,8 +965,8 @@ fn key_value_decode(sep: u8, data: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])
 }
 
 /// Semi-colon separated positve numers
-fn numbers_decode(data: &[u8]) -> impl Iterator<Item = usize> + '_ {
-    data.split(|b| *b == b';').filter_map(number_decode)
+fn numbers_decode(data: &[u8], sep: u8) -> impl Iterator<Item = usize> + '_ {
+    data.split(move |b| *b == sep).filter_map(number_decode)
 }
 
 // Decode positive integer number
@@ -1398,11 +1448,20 @@ mod tests {
         let mut decoder = TTYDecoder::new();
 
         write!(cursor.get_mut(), "\x1b[?15u")?;
+        write!(cursor.get_mut(), "\x1b[27;7u")?;
+        write!(cursor.get_mut(), "\x1b[99;5u")?;
 
         let mut result = Vec::new();
         decoder.decode_into(&mut cursor, &mut result)?;
 
-        assert_eq!(result, vec![TerminalEvent::KeyboardLevel(15)],);
+        assert_eq!(
+            result,
+            vec![
+                TerminalEvent::KeyboardLevel(15),
+                TerminalEvent::Key("ctrl+alt+esc".parse()?),
+                TerminalEvent::Key("ctrl+c".parse()?),
+            ],
+        );
 
         Ok(())
     }

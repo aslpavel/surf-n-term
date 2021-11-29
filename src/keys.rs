@@ -84,6 +84,9 @@ impl FromStr for Key {
                 "ctrl" => key_mod |= KeyMod::CTRL,
                 "shift" => key_mod |= KeyMod::SHIFT,
                 "press" => key_mod |= KeyMod::PRESS,
+                "super" => key_mod |= KeyMod::SUPER,
+                "hyper" => key_mod |= KeyMod::HYPER,
+                "meta" => key_mod |= KeyMod::META,
                 name => match name.parse::<KeyName>() {
                     Ok(name) => {
                         if key_name.replace(name).is_some() {
@@ -105,13 +108,14 @@ impl FromStr for Key {
 /// Key name
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KeyName {
-    F(usize),
     Backspace,
     Char(char),
     Delete,
     Down,
     End,
+    Enter,
     Esc,
+    F(usize),
     Home,
     Left,
     MouseLeft,
@@ -123,30 +127,14 @@ pub enum KeyName {
     PageDown,
     PageUp,
     Right,
+    Tab,
     Up,
 }
 
 impl fmt::Debug for KeyName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            KeyName::F(index) => write!(f, "f{}", index),
-            KeyName::Left => write!(f, "left"),
-            KeyName::Right => write!(f, "right"),
-            KeyName::Down => write!(f, "down"),
-            KeyName::Up => write!(f, "up"),
-            KeyName::PageUp => write!(f, "pageup"),
-            KeyName::PageDown => write!(f, "pagedown"),
-            KeyName::End => write!(f, "end"),
-            KeyName::Home => write!(f, "home"),
-            KeyName::Esc => write!(f, "esc"),
             KeyName::Backspace => write!(f, "backspace"),
-            KeyName::Delete => write!(f, "delete"),
-            KeyName::MouseLeft => write!(f, "mouseleft"),
-            KeyName::MouseMiddle => write!(f, "mousemiddle"),
-            KeyName::MouseMove => write!(f, "mousemove"),
-            KeyName::MouseRight => write!(f, "mouseright"),
-            KeyName::MouseWheelDown => write!(f, "mousewheeldown"),
-            KeyName::MouseWheelUp => write!(f, "mousewheelup"),
             KeyName::Char(c) => match c {
                 ' ' => write!(f, "space"),
                 '\t' => write!(f, "tab"),
@@ -155,6 +143,25 @@ impl fmt::Debug for KeyName {
                 '`' | '-' | '=' | '[' | ']' | '\\' | ';' | ',' | '.' | '/' => write!(f, "{}", c),
                 _ => write!(f, "\"{}\"", c),
             },
+            KeyName::Delete => write!(f, "delete"),
+            KeyName::Down => write!(f, "down"),
+            KeyName::End => write!(f, "end"),
+            KeyName::Enter => write!(f, "enter"),
+            KeyName::Esc => write!(f, "esc"),
+            KeyName::F(index) => write!(f, "f{}", index),
+            KeyName::Home => write!(f, "home"),
+            KeyName::Left => write!(f, "left"),
+            KeyName::MouseLeft => write!(f, "mouseleft"),
+            KeyName::MouseMiddle => write!(f, "mousemiddle"),
+            KeyName::MouseMove => write!(f, "mousemove"),
+            KeyName::MouseRight => write!(f, "mouseright"),
+            KeyName::MouseWheelDown => write!(f, "mousewheeldown"),
+            KeyName::MouseWheelUp => write!(f, "mousewheelup"),
+            KeyName::PageDown => write!(f, "pagedown"),
+            KeyName::PageUp => write!(f, "pageup"),
+            KeyName::Right => write!(f, "right"),
+            KeyName::Tab => write!(f, "tab"),
+            KeyName::Up => write!(f, "up"),
         }
     }
 }
@@ -179,9 +186,10 @@ impl FromStr for KeyName {
             "pagedown" => KeyName::PageDown,
             "end" => KeyName::End,
             "home" => KeyName::Home,
-            "tab" => KeyName::Char('\t'),
-            "enter" => KeyName::Char('\n'),
+            "tab" => KeyName::Tab,
+            "enter" => KeyName::Enter,
             "escape" => KeyName::Esc,
+            "esc" => KeyName::Esc,
             "space" => KeyName::Char(' '),
             "backspace" => KeyName::Backspace,
             "delete" => KeyName::Delete,
@@ -209,7 +217,7 @@ impl FromStr for KeyName {
 /// Key mode object
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyMod {
-    bits: u8,
+    bits: u32,
 }
 
 impl KeyMod {
@@ -218,7 +226,13 @@ impl KeyMod {
     pub const SHIFT: Self = KeyMod { bits: 1 };
     pub const ALT: Self = KeyMod { bits: 2 };
     pub const CTRL: Self = KeyMod { bits: 4 };
-    pub const PRESS: Self = KeyMod { bits: 8 };
+    pub const SUPER: Self = KeyMod { bits: 8 };
+    pub const HYPER: Self = KeyMod { bits: 16 };
+    pub const META: Self = KeyMod { bits: 32 };
+    pub const CAPSLOCK: Self = KeyMod { bits: 64 };
+    pub const NUMLOCK: Self = KeyMod { bits: 128 };
+    pub const PRESS: Self = KeyMod { bits: 256 };
+    pub const ALL: Self = KeyMod { bits: 511 };
 
     /// Key mode is empty
     pub fn is_empty(self) -> bool {
@@ -231,8 +245,10 @@ impl KeyMod {
     }
 
     /// Create mod from byte
-    pub fn from_bits(bits: u8) -> Self {
-        Self { bits }
+    pub fn from_bits(bits: u32) -> Self {
+        Self {
+            bits: bits & Self::ALL.bits,
+        }
     }
 }
 
@@ -259,9 +275,12 @@ impl fmt::Debug for KeyMod {
         } else {
             let mut first = true;
             for (flag, name) in &[
+                (Self::SHIFT, "shift"),
                 (Self::ALT, "alt"),
                 (Self::CTRL, "ctrl"),
-                (Self::SHIFT, "shift"),
+                (Self::SUPER, "super"),
+                (Self::HYPER, "hyper"),
+                (Self::META, "meta"),
                 (Self::PRESS, "press"),
             ] {
                 if self.contains(*flag) {
