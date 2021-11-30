@@ -334,6 +334,8 @@ impl TTYMatcher for KittyImageMatcher {
 #[derive(Debug)]
 struct KittyKeyboardMatcher;
 
+pub(crate) const KEYBOARD_LEVEL: usize = 1;
+
 impl TTYMatcher for KittyKeyboardMatcher {
     fn matcher(&self) -> NFA<_Void> {
         NFA::sequence([
@@ -1206,12 +1208,12 @@ mod tests {
             }),
         );
 
-        write!(cursor.get_mut(), "\x1b[?2017;0$y")?;
+        write!(cursor.get_mut(), "\x1b[?2026;0$y")?;
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::DecMode {
-                mode: DecMode::KittyKeyboard,
+                mode: DecMode::SynchronizedOutput,
                 status: DecModeStatus::NotRecognized,
             }),
         );
@@ -1450,6 +1452,7 @@ mod tests {
         write!(cursor.get_mut(), "\x1b[?15u")?;
         write!(cursor.get_mut(), "\x1b[27;7u")?;
         write!(cursor.get_mut(), "\x1b[99;5u")?;
+        write!(cursor.get_mut(), "\x1b[1;6P")?;
 
         let mut result = Vec::new();
         decoder.decode_into(&mut cursor, &mut result)?;
@@ -1460,6 +1463,7 @@ mod tests {
                 TerminalEvent::KeyboardLevel(15),
                 TerminalEvent::Key("ctrl+alt+esc".parse()?),
                 TerminalEvent::Key("ctrl+c".parse()?),
+                TerminalEvent::Key("ctrl+shift+f1".parse()?),
             ],
         );
 

@@ -1,6 +1,7 @@
 //! Encoders
 use crate::{
-    error::Error, Color, ColorLinear, FaceAttrs, TerminalCaps, TerminalColor, TerminalCommand,
+    decoder::KEYBOARD_LEVEL, error::Error, Color, ColorLinear, DecMode, FaceAttrs, TerminalCaps,
+    TerminalColor, TerminalCommand,
 };
 use std::{cmp::Ordering, io::Write};
 
@@ -29,6 +30,13 @@ impl TTYEncoder {
     pub fn new(caps: TerminalCaps) -> Self {
         Self { caps }
     }
+
+    fn kitty_level<W: Write>(&self, mut out: W, level: usize) -> Result<(), Error> {
+        if self.caps.kitty_keyboard {
+            write!(out, "\x1b[={}u", level)?;
+        }
+        Ok(())
+    }
 }
 
 impl Encoder for TTYEncoder {
@@ -40,8 +48,17 @@ impl Encoder for TTYEncoder {
 
         match cmd {
             DecModeSet { enable, mode } => {
+                // kitty keyboard level maintained separetely for alt-screen
+                if !enable && mode == DecMode::AltScreen {
+                    self.kitty_level(&mut out, 0)?;
+                }
+
                 let flag = if enable { "h" } else { "l" };
                 write!(out, "\x1b[?{}{}", mode as usize, flag)?;
+
+                if enable && mode == DecMode::AltScreen {
+                    self.kitty_level(out, KEYBOARD_LEVEL)?;
+                }
             }
             DecModeGet(mode) => {
                 write!(out, "\x1b[?{}$p", mode as usize)?;
@@ -129,6 +146,9 @@ impl Encoder for TTYEncoder {
             }
             DeviceAttrs => {
                 write!(out, "\x1b[c")?;
+            }
+            KeyboardLevel(level) => {
+                self.kitty_level(out, level)?;
             }
         }
 

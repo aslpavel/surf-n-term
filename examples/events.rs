@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     term.execute(DecModeGet(DecMode::MouseSGR))?;
     term.execute(DecModeGet(DecMode::MouseMotions))?;
     term.execute(DecModeGet(DecMode::AltScreen))?;
-    term.execute(DecModeGet(DecMode::KittyKeyboard))?;
+    term.execute(DecModeGet(DecMode::SynchronizedOutput))?;
     term.execute(Color {
         name: TerminalColor::Palette(1),
         color: None,

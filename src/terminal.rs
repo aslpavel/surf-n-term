@@ -287,6 +287,8 @@ pub enum TerminalCommand {
     Title(String),
     /// [Primary Device Attributes](https://vt100.net/docs/vt510-rm/DA1.html)
     DeviceAttrs,
+    /// Set kitty keyboard protocol level
+    KeyboardLevel(usize),
 }
 
 /// Kind of terminal color
@@ -312,8 +314,6 @@ pub enum DecMode {
     MouseSGR = 1006,
     /// Alternative screen mode
     AltScreen = 1049,
-    /// Kitty keyboard mode https://sw.kovidgoyal.net/kitty/protocol-extensions.html
-    KittyKeyboard = 2017,
     /// Synchronized output https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036
     SynchronizedOutput = 2026,
 }
@@ -344,7 +344,7 @@ impl DecMode {
             MouseMotions,
             MouseSGR,
             AltScreen,
-            KittyKeyboard,
+            SynchronizedOutput,
         ]
         .iter()
         {

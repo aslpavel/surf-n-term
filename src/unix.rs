@@ -1,5 +1,6 @@
 //! Unix systems specific `Terminal` implementation.
 use crate::common::IOQueue;
+use crate::decoder::KEYBOARD_LEVEL;
 use crate::encoder::ColorDepth;
 use crate::image::ImageHandlerKind;
 use crate::{
@@ -133,6 +134,7 @@ impl UnixTerminal {
         };
 
         capabilities_detect(&mut term)?;
+        term.execute(TerminalCommand::KeyboardLevel(KEYBOARD_LEVEL))?;
         Ok(term)
     }
 
@@ -208,6 +210,7 @@ impl UnixTerminal {
                 enable: true,
                 mode: DecMode::AutoWrap,
             },
+            TerminalCommand::KeyboardLevel(0),
         ];
         epilogue
             .iter()
