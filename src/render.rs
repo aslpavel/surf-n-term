@@ -2,8 +2,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    decoder::Decoder, error::Error, Face, FaceAttrs, Glyph, Image, Position, Surface, SurfaceMut,
-    SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand, TerminalSize, RGBA,
+    decoder::Decoder, error::Error, Face, FaceAttrs, Glyph, Image, Position, Size, Surface,
+    SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
+    TerminalSize, RGBA,
 };
 
 /// Terminal cell kind
@@ -418,11 +419,21 @@ impl<'a> TerminalWriter<'a> {
         self
     }
 
-    /// Get current position
+    /// Get current position inside allocated view
     pub fn position(&self) -> (usize, usize) {
         self.iter.position()
     }
 
+    /// Get size of the view backing this writer
+    pub fn size(&self) -> Size {
+        let shape = self.iter.shape();
+        Size {
+            height: shape.height,
+            width: shape.width,
+        }
+    }
+
+    /// Render terminal writable value
     pub fn display(&mut self, value: impl TerminalWritable) -> std::io::Result<()> {
         value.fmt(self)
     }
