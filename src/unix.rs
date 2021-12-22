@@ -109,7 +109,7 @@ impl UnixTerminal {
             const WAKE: &[u8] = b"\x00";
             // use write syscall instead of locking so it would be safe to use in a signal handler
             match nix::write(waker_write.as_raw_fd(), WAKE) {
-                Ok(_) | Err(nix::Error::Sys(nix::Errno::EINTR | nix::Errno::EAGAIN)) => Ok(()),
+                Ok(_) | Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => Ok(()),
                 Err(error) => Err(error.into()),
             }
         });
@@ -426,7 +426,7 @@ impl Terminal for UnixTerminal {
             // wait for descriptors
             let select = nix::select(None, &mut read_set, &mut write_set, None, &mut delay);
             match select {
-                Err(nix::Error::Sys(nix::Errno::EINTR | nix::Errno::EAGAIN)) => return Ok(None),
+                Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => return Ok(None),
                 Err(error) => return Err(error.into()),
                 Ok(count) => tracing::trace!("select count={}", count),
             };

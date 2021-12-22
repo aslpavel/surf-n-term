@@ -12,6 +12,7 @@ use crate::{
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
@@ -113,10 +114,10 @@ impl Image {
     /// Write image as PNG
     pub fn write_png(&self, w: impl Write) -> Result<(), png::EncodingError> {
         let mut encoder = png::Encoder::new(w, self.width() as u32, self.height() as u32);
-        encoder.set_color(png::ColorType::RGBA);
+        encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header()?;
-        let mut stream_writer = writer.stream_writer();
+        let mut stream_writer = writer.stream_writer()?;
         for color in self.iter() {
             stream_writer.write_all(&color.rgba_u8())?;
         }
@@ -298,7 +299,7 @@ impl ImageHandler for ItermImageHandler {
         let mut base64 = Base64Encoder::new(&mut data);
         img.write_png(&mut base64).map_err(|err| match err {
             png::EncodingError::IoError(err) => err.into(),
-            png::EncodingError::Format(err) => Error::Other(err),
+            err => Error::Other(Cow::from(err.to_string())),
         })?;
         base64.finish()?;
         data.write_all(b"\x07")?;
