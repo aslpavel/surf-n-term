@@ -87,6 +87,7 @@ impl FromStr for Key {
                 "super" => key_mod |= KeyMod::SUPER,
                 "hyper" => key_mod |= KeyMod::HYPER,
                 "meta" => key_mod |= KeyMod::META,
+                "capslock" => key_mod |= KeyMod::CAPSLOCK,
                 name => match name.parse::<KeyName>() {
                     Ok(name) => {
                         if key_name.replace(name).is_some() {
@@ -282,6 +283,7 @@ impl fmt::Debug for KeyMod {
                 (Self::HYPER, "hyper"),
                 (Self::META, "meta"),
                 (Self::PRESS, "press"),
+                (Self::CAPSLOCK, "capslock"),
             ] {
                 if self.contains(*flag) {
                     if first {
