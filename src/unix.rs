@@ -1,5 +1,5 @@
 //! Unix systems specific `Terminal` implementation.
-use crate::common::IOQueue;
+use crate::common::{env_cfg, IOQueue};
 use crate::decoder::KEYBOARD_LEVEL;
 use crate::encoder::ColorDepth;
 use crate::image::ImageHandlerKind;
@@ -13,7 +13,7 @@ use crate::{
     },
     DecMode, ImageHandler,
 };
-use crate::{KittyImageHandler, SixelImageHandler, TerminalCaps, RGBA};
+use crate::{TerminalCaps, RGBA};
 use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
@@ -332,6 +332,11 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // drain terminal
     term.drain().count();
 
+    // color depth
+    if let Some(depth) = env_cfg::<ColorDepth>("depth") {
+        caps.depth = depth;
+    }
+
     // term size interface
     let size_ioctl = term.size_ioctl()?;
     if size_ioctl.pixels.is_empty() && !size_escape.pixels.is_empty() {
@@ -340,15 +345,11 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     }
 
     // image handler
-    let image_handler: Box<dyn ImageHandler> = {
-        if image_handlers.contains(&ImageHandlerKind::Kitty) {
-            Box::new(KittyImageHandler::new())
-        } else if image_handlers.contains(&ImageHandlerKind::Sixel) {
-            Box::new(SixelImageHandler::new(bg))
-        } else {
-            Box::new(DummyImageHandler)
-        }
-    };
+    let image_handler = env_cfg::<ImageHandlerKind>("image")
+        .or(image_handlers.get(&ImageHandlerKind::Kitty).copied())
+        .or(image_handlers.get(&ImageHandlerKind::Sixel).copied())
+        .unwrap_or(ImageHandlerKind::Dummy)
+        .into_image_handler(bg);
 
     // glyph support
     caps.glyphs = matches!(

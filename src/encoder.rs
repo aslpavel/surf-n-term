@@ -3,7 +3,7 @@ use crate::{
     decoder::KEYBOARD_LEVEL, error::Error, Color, ColorLinear, DecMode, FaceAttrs, TerminalCaps,
     TerminalColor, TerminalCommand,
 };
-use std::{cmp::Ordering, io::Write};
+use std::{cmp::Ordering, io::Write, str::FromStr};
 
 /// Encoder interface
 pub trait Encoder {
@@ -229,6 +229,26 @@ pub enum ColorDepth {
     TrueColor,
     EightBit,
     Gray,
+}
+
+impl FromStr for ColorDepth {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use ColorDepth::*;
+        match s.to_ascii_lowercase().as_str() {
+            "truecolor" => Ok(TrueColor),
+            "24" => Ok(TrueColor),
+            "256" => Ok(EightBit),
+            "8" => Ok(EightBit),
+            "gray" => Ok(Gray),
+            "2" => Ok(Gray),
+            _ => Err(Error::ParseError(
+                "ColorDepth",
+                format!("invalid color depth: {}", s),
+            )),
+        }
+    }
 }
 
 /// Color cube grid [0, 95, 135, 175, 215, 255] converted to linear RGB colors space.

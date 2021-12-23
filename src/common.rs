@@ -1,7 +1,8 @@
 //! Common utility funcitons used across different modules
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     io::{BufRead, Read, Write},
+    str::FromStr,
 };
 
 /// Clamp value to the value between `min` and `max`
@@ -17,6 +18,28 @@ where
     } else {
         val
     }
+}
+
+lazy_static::lazy_static! {
+    static ref ENV_CONFIG: HashMap<String, String> = {
+        let mut config = HashMap::new();
+        let config_str = match std::env::var("SURFNTERM") {
+            Ok(config_str) => config_str,
+            _ => return config,
+        };
+        for kv in config_str.split(",") {
+            let mut kv = kv.trim().splitn(2, "=");
+            if let Some(key) = kv.next() {
+                config.insert(key.trim().to_string(), kv.next().unwrap_or("").trim().to_string());
+            }
+        }
+        config
+    };
+}
+
+pub fn env_cfg<V: FromStr>(key: &str) -> Option<V> {
+    let value = ENV_CONFIG.get(key)?;
+    value.parse().ok()
 }
 
 /// Readable and writable IO queue

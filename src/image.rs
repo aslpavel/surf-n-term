@@ -19,6 +19,7 @@ use std::{
     io::Write,
     iter::FromIterator,
     ops::{Add, AddAssign, Mul},
+    str::FromStr,
     sync::Arc,
 };
 use tracing::debug_span;
@@ -180,6 +181,36 @@ pub enum ImageHandlerKind {
     Sixel,
     ITerm,
     Dummy,
+}
+
+impl ImageHandlerKind {
+    pub(crate) fn into_image_handler(&self, bg: Option<RGBA>) -> Box<dyn ImageHandler> {
+        use ImageHandlerKind::*;
+        match self {
+            Kitty => Box::new(KittyImageHandler::new()),
+            Sixel => Box::new(SixelImageHandler::new(bg)),
+            ITerm => Box::new(ItermImageHandler::new()),
+            Dummy => Box::new(DummyImageHandler),
+        }
+    }
+}
+
+impl FromStr for ImageHandlerKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use ImageHandlerKind::*;
+        match s.to_ascii_lowercase().as_str() {
+            "kitty" => Ok(Kitty),
+            "sixel" => Ok(Sixel),
+            "iterm" => Ok(ITerm),
+            "dummy" => Ok(Dummy),
+            _ => Err(Error::ParseError(
+                "ImageHandlerKind",
+                format!("invalid image handler type: {}", s),
+            )),
+        }
+    }
 }
 
 /// Image rendering/handling interface
