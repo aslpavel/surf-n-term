@@ -293,7 +293,7 @@ pub fn color_sgr_encode<C: Color, W: Write>(
             } else {
                 out.write_all(b";48")?;
             }
-            write!(out, ":2:{}:{}:{}", r, g, b)?;
+            write!(out, ";2;{};{};{}", r, g, b)?;
         }
         ColorDepth::EightBit => {
             let color: ColorLinear = color.into();
