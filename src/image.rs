@@ -184,7 +184,7 @@ pub enum ImageHandlerKind {
 }
 
 impl ImageHandlerKind {
-    pub(crate) fn into_image_handler(&self, bg: Option<RGBA>) -> Box<dyn ImageHandler> {
+    pub(crate) fn into_image_handler(self, bg: Option<RGBA>) -> Box<dyn ImageHandler> {
         use ImageHandlerKind::*;
         match self {
             Kitty => Box::new(KittyImageHandler::new()),

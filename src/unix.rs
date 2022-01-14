@@ -346,8 +346,8 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
 
     // image handler
     let image_handler = env_cfg::<ImageHandlerKind>("image")
-        .or(image_handlers.get(&ImageHandlerKind::Kitty).copied())
-        .or(image_handlers.get(&ImageHandlerKind::Sixel).copied())
+        .or_else(|| image_handlers.get(&ImageHandlerKind::Kitty).copied())
+        .or_else(|| image_handlers.get(&ImageHandlerKind::Sixel).copied())
         .unwrap_or(ImageHandlerKind::Dummy)
         .into_image_handler(bg);
 

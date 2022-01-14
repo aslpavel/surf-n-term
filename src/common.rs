@@ -27,8 +27,8 @@ lazy_static::lazy_static! {
             Ok(config_str) => config_str,
             _ => return config,
         };
-        for kv in config_str.split(",") {
-            let mut kv = kv.trim().splitn(2, "=");
+        for kv in config_str.split(',') {
+            let mut kv = kv.trim().splitn(2, '=');
             if let Some(key) = kv.next() {
                 config.insert(key.trim().to_string(), kv.next().unwrap_or("").trim().to_string());
             }
