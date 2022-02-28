@@ -12,7 +12,7 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.3.12"
+version = "0.3.13"
 
 [dependencies]
 flate2 = "^1.0"
@@ -25,11 +25,11 @@ png = "^0.17"
 serde = { version = "^1.0", features = ["derive"] }
 signal-hook = "^0.3"
 tracing = "^0.1"
-rasterize = "^0.1.8"
+rasterize = "^0.1.10"
 # rasterize = { path = "../rasterize" }
 
 [dev-dependencies]
-criterion = "^0.3"
+criterion = { version = "^0.3", features = ["html_reports"] }
 serde_json = "^1.0"
 
 [[bench]]
