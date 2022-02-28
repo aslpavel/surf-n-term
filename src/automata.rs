@@ -2,7 +2,7 @@
 //!
 //! This module implements NFA (Nondeterministic finite automaton) which is can be combined
 //! in more complicated one with Thompson's construction and complied to DFA (Deterministic
-//! finaite automaton) with power set construction.
+//! finite automaton) with power set construction.
 use std::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
@@ -239,7 +239,7 @@ impl<T> NFA<T> {
 
     /// Merge multiple NFAs
     ///
-    /// - recalulate ids so ids from differnt NFAs would be different
+    /// - recalculate ids, so ids, from different NFAs would be different
     /// - merges states into a single mapping
     /// - merges stops and starts preserving order
     fn merge_states(
@@ -296,7 +296,7 @@ impl<T> NFA<T> {
         (states_out, ends_out)
     }
 
-    /// NFA to DFA using powerset construction
+    /// NFA to DFA using power-set construction
     pub fn compile(&self) -> DFA<T>
     where
         T: Clone + Ord,
@@ -511,7 +511,7 @@ pub struct DFA<T> {
 }
 
 impl<T> DFA<T> {
-    /// Nuber of states in DFA
+    /// Number of states in DFA
     pub fn size(&self) -> usize {
         self.states.len() / self.lang_size
     }

@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         waker.wake().expect("wake failed");
     });
 
-    // run programm
+    // run program
     term.run(None, |mut term, event| -> Result<_, Box<dyn Error>> {
         use surf_n_term::terminal::TerminalAction::*;
         match event {

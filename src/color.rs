@@ -62,7 +62,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
         color.into()
     }
 
-    /// Calculate luma of the color.
+    /// Calculate LUMA of the color.
     fn luma(self) -> f64 {
         let [r, g, b] = self.rgb_u8();
         0.2126 * (r as f64 / 255.0) + 0.7152 * (g as f64 / 255.0) + 0.0722 * (b as f64 / 255.0)
@@ -188,7 +188,7 @@ impl RGBA {
         } else if let Some(rgba) = rgba.strip_prefix("rgb:") {
             // rgb:r{1-4}/g{1-4}/b{1-4}
             // This format is used when querying colors with OCS,
-            // refrence [xparsecolor](https://linux.die.net/man/3/xparsecolor)
+            // reference [`xparsecolor`](https://linux.die.net/man/3/xparsecolor)
             fn parse_component(string: &str) -> Option<u8> {
                 let value = usize::from_str_radix(string, 16).ok()?;
                 let value = match string.len() {
@@ -292,6 +292,7 @@ impl fmt::Debug for RGBA {
 // sRGB to Linear RGB component lookup table
 //
 // This table is calculating by evaluating `true_s2l` on all u8 values
+// ```
 // fn srgb_to_linear(value: f64) -> f64 {
 //     if value <= 0.04045 {
 //         value / 12.92
@@ -299,6 +300,7 @@ impl fmt::Debug for RGBA {
 //         ((value + 0.055) / 1.055).powf(2.4)
 //     }
 // }
+// ```
 // Lookup in this table is fast as it is small enough to fit in the cache
 const SRGB_TO_LIN: [f64; 256] = [
     0.0, 0.00030353, 0.00060705, 0.00091058, 0.00121411, 0.00151763, 0.00182116, 0.00212469,

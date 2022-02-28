@@ -337,7 +337,7 @@ impl<V> KeyMap<V> {
 
     /// Register key chord to produce the value.
     ///
-    /// Returns previously registred value or key_map associated with provied chord.
+    /// Returns previously registered value or key_map associated with provided chord.
     pub fn register(&mut self, chord: &[Key], value: V) -> Option<Result<V, KeyMap<V>>> {
         fn register_rec<'a, V>(key_map: &'a mut KeyMap<V>, chord: &[Key]) -> &'a mut KeyMap<V> {
             match chord.split_first() {
@@ -419,7 +419,7 @@ impl<V> KeyMap<V> {
         }
     }
 
-    /// The a helper function which manges provied chord state for your
+    /// The a helper function which manges provided chord state for your
     pub fn lookup_state(&self, chord: &mut Vec<Key>, key: Key) -> Option<&V> {
         chord.push(key);
         for _ in 0..2 {

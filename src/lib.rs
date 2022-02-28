@@ -1,4 +1,4 @@
-//! This crate is used to interract with Posix terminal. It can be used to
+//! This crate is used to interact with Posix terminal. It can be used to
 //!  - Read events from the terminal
 //!  - Send commands to the terminal
 //!  - Render on a surface which will be reconciled with current content of the terminal
@@ -14,9 +14,9 @@
 //!     let mut term = SystemTerminal::new()?;
 //!     term.run_render(|term, event, mut view| -> Result<_, Error> {
 //!         // This function will be executed on each event from terminal
-//!         // - term  - implementes Terminal trait
+//!         // - term  - implements Terminal trait
 //!         // - event - is a TerminalEvent
-//!         // - view  - is a Suface that can be used to render on, see render module for defails
+//!         // - view  - is a Surface that can be used to render on, see render module for details
 //!         match event {
 //!             Some(event) if &event == &ctrl_c => {
 //!                 // exit if 'ctrl+c' is pressed

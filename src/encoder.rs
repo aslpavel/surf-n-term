@@ -48,7 +48,7 @@ impl Encoder for TTYEncoder {
 
         match cmd {
             DecModeSet { enable, mode } => {
-                // kitty keyboard level maintained separetely for alt-screen
+                // kitty keyboard level maintained separately for alt-screen
                 if !enable && mode == DecMode::AltScreen {
                     self.kitty_level(&mut out, 0)?;
                 }

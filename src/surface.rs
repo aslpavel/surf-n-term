@@ -14,7 +14,7 @@ use std::{
 /// Shape object describing layout of data in the surface object
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
-    /// Offsest of the first element.
+    /// Offset of the first element.
     pub start: usize,
     /// Offset of the last + 1 element.
     pub end: usize,
@@ -35,14 +35,14 @@ impl Shape {
         self.start + row * self.row_stride + col * self.col_stride
     }
 
-    /// Get current index of the in row-major order coressponding
+    /// Get current index of the in row-major order corresponding
     /// to provided row and column.
     #[inline]
     pub fn index(&self, row: usize, col: usize) -> usize {
         row * self.width + col
     }
 
-    /// Get row and column corresonding to nth element in row-major order
+    /// Get row and column corresponding to nth element in row-major order
     #[inline]
     pub fn nth(&self, n: usize) -> Option<(usize, usize)> {
         if self.width == 0 {
@@ -64,7 +64,7 @@ pub trait Surface {
     /// Slice containing all the items
     ///
     /// **Note:** This slice contains all elements backed by parent object
-    /// and elements should be accesed using the offeset calculcated by `Shape::offset`
+    /// and elements should be accessed using the offset calculated by `Shape::offset`
     fn data(&self) -> &[Self::Item];
 
     /// Check if surface is empty
@@ -96,7 +96,7 @@ pub trait Surface {
         hasher.finish()
     }
 
-    /// Get immutable reference to the elemetn specified by row and column
+    /// Get immutable reference to the element specified by row and column
     fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
         let shape = self.shape();
         if row >= shape.height || col >= shape.width {
@@ -196,7 +196,7 @@ pub trait SurfaceMut: Surface {
     /// Mutable slice containing all the items
     fn data_mut(&mut self) -> &mut [Self::Item];
 
-    /// Get mutable reference to the elemetn specified by row and column
+    /// Get mutable reference to the element specified by row and column
     fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut Self::Item> {
         let shape = self.shape();
         if row >= shape.height || col >= shape.width {
@@ -268,7 +268,7 @@ pub trait SurfaceMut: Surface {
         }
     }
 
-    /// Fill all the elments of the surface by colling af function.
+    /// Fill all the elements of the surface by calling a function.
     ///
     /// Function is called it row, column and the current item value as its arguments.
     fn fill_with<F>(&mut self, mut fill: F)
@@ -598,7 +598,7 @@ impl<'a, T: 'a> SurfaceMut for SurfaceMutView<'a, T> {
     }
 }
 
-/// Everything that can be intepreted as a view bounds.
+/// Everything that can be interpreted as a view bounds.
 pub trait ViewBounds {
     /// Resolve bounds the same way python numpy does for ranges when indexing ndarrays
     ///
@@ -727,7 +727,7 @@ fn range_bounds(bound: impl RangeBounds<i64>, size: usize) -> Option<(usize, usi
     }
 }
 
-/// Construt new offset and shape for
+/// Construct new offset and shape for
 fn view_shape<RS, CS>(shape: Shape, rows: RS, cols: CS) -> Shape
 where
     RS: ViewBounds,

@@ -19,7 +19,7 @@ const TERMINAL_FRAMES_DROP: usize = 32;
 
 /// Main trait to interact with a Terminal
 pub trait Terminal: Write + Send {
-    /// Schedue command for execution
+    /// Schedule command for execution
     ///
     /// Command will be submitted on the next call to poll `Terminal::poll`
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error>;
@@ -41,7 +41,7 @@ pub trait Terminal: Write + Send {
         TerminalDrain(self.dyn_ref())
     }
 
-    /// Create dynamic reference to the temrinal object
+    /// Create dynamic reference to the terminal object
     fn dyn_ref(&mut self) -> &mut dyn Terminal;
 
     /// Get terminal size
@@ -67,10 +67,10 @@ pub trait Terminal: Write + Send {
     /// Run terminal with render event handler
     ///
     /// Handler accepts mutable reference to the terminal, event that
-    /// trigered the handler and terminal surface that should be used to
+    /// triggered the handler and terminal surface that should be used to
     /// render current frame (on each frame, it operates in immediate mode).
-    /// Renderer will calculcate the difference between new terminal surface
-    /// and terminal surface on the previous frame and will issue appropirate
+    /// Renderer will calculate the difference between new terminal surface
+    /// and terminal surface on the previous frame and will issue appropriate
     /// terminal commands to produce the desired result.
     fn run_render<H, R, E>(&mut self, mut handler: H) -> Result<R, E>
     where
@@ -132,14 +132,14 @@ pub trait Terminal: Write + Send {
 
     /// Number of pending frames (equal to number of flush calls) to be rendered
     ///
-    /// This information can be usefull to provide back pressure, if terminal
+    /// This information can be useful to provide back pressure, if terminal
     /// is not fast enough.
     fn frames_pending(&self) -> usize;
 
     /// Drop all pending frames (equal to number of flush calls)
     fn frames_drop(&mut self);
 
-    /// Get terminal capabiliets
+    /// Get terminal capabilities
     fn capabilities(&self) -> &TerminalCaps;
 }
 
@@ -250,7 +250,7 @@ pub enum TerminalCommand {
     DecModeSet { enable: bool, mode: DecMode },
     /// Report specified DEC mode (DECRQM)
     DecModeGet(DecMode),
-    /// Request current cursor postion
+    /// Request current cursor position
     CursorGet,
     /// Move cursor to specified row and column
     CursorTo(Position),
@@ -264,7 +264,7 @@ pub enum TerminalCommand {
     EraseLineRight,
     /// Erase line using current background color
     EraseLine,
-    /// Erase specified ammount of characters to the right from current cursor position
+    /// Erase specified amount of characters to the right from current cursor position
     EraseChars(usize),
     /// Scroll, positive is up and negative is down
     Scroll(i32),
@@ -318,7 +318,7 @@ pub enum DecMode {
     SynchronizedOutput = 2026,
 }
 
-/// Current/requested postion of terminal
+/// Current/requested position of terminal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position {
     /// Row
@@ -416,7 +416,7 @@ pub enum TerminalEvent {
     KeyboardLevel(usize),
     /// Terminal have been woken by waker object
     Wake,
-    /// Termcap/Terminfo repsponse to XTGETTCAP
+    /// Termcap/Terminfo response to XTGETTCAP
     Termcap(BTreeMap<String, Option<String>>),
     /// Terminal Attributes DA1 response
     DeviceAttrs(BTreeSet<usize>),

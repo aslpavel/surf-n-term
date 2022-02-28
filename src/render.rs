@@ -10,9 +10,9 @@ use crate::{
 /// Terminal cell kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CellKind {
-    /// Contains usefull content
+    /// Contains useful content
     Content,
-    /// Must be skiped during rendering
+    /// Must be skipped during rendering
     Ignore,
     /// Must be re-rendered
     Damaged,
@@ -171,7 +171,7 @@ impl TerminalRenderer {
                         ))?;
                     }
                 }
-                // mark all cells effected by the image as dameged
+                // mark all cells effected by the image as damaged
                 if let Some(size) = front.image.as_ref().map(|img| img.size_cells(self.size)) {
                     let mut view = self
                         .front
@@ -218,9 +218,9 @@ impl TerminalRenderer {
                     }
                     // render image if changed
                     if image_changed {
-                        // issure render command
+                        // issue render command
                         term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
-                        // set position large enough so it would tirgger position update
+                        // set position large enough so it would trigger position update
                         self.cursor = Position::new(100000, 1000000);
                     }
                     col += 1;
@@ -235,7 +235,7 @@ impl TerminalRenderer {
                     if repeats > 4 {
                         // NOTE:
                         //   - only use erase command when it is more efficient
-                        //     this value choosen arbirtraraly
+                        //     this value chosen arbitrarily
                         //   - erase is not moving cursor
                         term.execute(TerminalCommand::EraseChars(repeats))?;
                     } else {
@@ -296,7 +296,7 @@ impl TerminalRenderer {
     }
 }
 
-/// Terminal surface extention trait
+/// Terminal surface extension trait
 pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Draw box
     fn draw_box(&mut self, face: Option<Face>);
@@ -333,7 +333,7 @@ where
         self.view_mut(-1, 0).fill(Cell::new(face, Some('└')));
     }
 
-    // draw image using unicode uppper half block symbol \u{2580}
+    // draw image using unicode upper half block symbol \u{2580}
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>) {
         let height = img.height() / 2 + img.height() % 2;
         let width = img.width();
@@ -411,7 +411,7 @@ impl<'a> TerminalWriter<'a> {
         self.face = face;
     }
 
-    /// Skip offset ammount of cells (row major order)
+    /// Skip offset amount of cells (row major order)
     pub fn skip(mut self, offset: usize) -> Self {
         if offset > 0 {
             self.iter.nth(offset - 1);

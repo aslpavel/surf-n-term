@@ -4,7 +4,7 @@
 [![Crate](https://img.shields.io/crates/v/surf-n-term.svg)](https://crates.io/crates/surf-n-term)
 [![API Docs](https://docs.rs/surf_n_term/badge.svg)](https://docs.rs/surf-n-term)
 
-This crate is used to interract with Posix terminal. It can be used to
+This crate is used to interact with Posix terminal. It can be used to
 - Read events from the terminal
 - Send commands to the terminal
 - Render on a surface which will be reconciled with current content of the terminal
@@ -20,9 +20,9 @@ fn main() -> Result<(), Error> {
     let mut term = SystemTerminal::new()?;
     term.run_render(|term, event, mut view| -> Result<_, Error> {
         // This function will be executed on each event from terminal
-        // - term  - implementes Terminal trait
+        // - term  - implements Terminal trait
         // - event - is a TerminalEvent
-        // - view  - is a Suface that can be used to render on, see render module for defails
+        // - view  - is a Surface that can be used to render on, see render module for details
         match event {
             Some(event) if &event == &ctrl_c => {
                 // exit if 'ctrl+c' is pressed
@@ -45,4 +45,4 @@ $ cargo run --example events
 ```
 
 ### Used by
-- you should checkout my [sweep](https://github.com/aslpavel/sweep-rs) program to interactively filtter through list of items
+- you should checkout my [sweep](https://github.com/aslpavel/sweep-rs) program to interactively filter through list of items

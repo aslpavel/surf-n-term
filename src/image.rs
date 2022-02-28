@@ -58,7 +58,7 @@ impl Image {
         Size { height, width }
     }
 
-    /// Qunatize image
+    /// Quantize image
     ///
     /// Perform palette extraction and Floyd–Steinberg dithering.
     #[tracing::instrument(level = "debug")]
@@ -74,7 +74,7 @@ impl Image {
 
         // quantize and dither
         let mut errors: Vec<ColorError> = Vec::new();
-        let ewidth = self.width() + 2; // to evaoid check for first and the last pixels
+        let ewidth = self.width() + 2; // to avoid check for the first and the last pixels
         if dither {
             errors.resize_with(ewidth * 2, ColorError::new);
         }
@@ -86,7 +86,7 @@ impl Image {
                     errors[col + ewidth] = ColorError::new();
                 }
             }
-            // qunatize and spread the error
+            // quantize and spread the error
             for col in 0..self.width() {
                 let mut color = *self.get(row, col)?;
                 if color.rgba_u8()[3] < 255 {
@@ -220,7 +220,7 @@ pub trait ImageHandler: Send + Sync {
 
     /// Draw image
     ///
-    /// Send approprite terminal escape sequence so image would be rendered.
+    /// Send an appropriate terminal escape sequence so the image would be rendered.
     fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error>;
 
     /// Erase image at specified position
@@ -236,7 +236,7 @@ pub trait ImageHandler: Send + Sync {
         pos: Option<Position>,
     ) -> Result<(), Error>;
 
-    /// Handle events frome the terminal
+    /// Handle events from the terminal
     ///
     /// True means event has been handled and should not be propagated to a user
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
@@ -389,14 +389,14 @@ const KITTY_MAX_ID: u64 = 4294967295;
 /// on terminal dimension (width and height).
 const KITTY_MAX_DIM: u64 = 65536;
 
-/// Identificator for image data
+/// Identification for image data
 fn kitty_image_id(img: &Image) -> u64 {
     img.hash() % KITTY_MAX_ID
 }
 
-/// Identificator of particular placement of the image
+/// Identification of particular placement of the image
 ///
-/// In general this identificator is just represents individual placement
+/// In general this identification is just represents individual placement
 /// but in particular implementation it is bound to a physical position on
 /// the screen.
 fn kitty_placement_id(pos: Position) -> u64 {
@@ -411,7 +411,7 @@ impl ImageHandler for KittyImageHandler {
     fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
         let img_id = kitty_image_id(img);
 
-        // transfer image if it has not been transfered yet
+        // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
             debug_span!("transfer image", image_handler = "kitty");
             // zlib compressed and base64 encoded RGBA image data
@@ -423,7 +423,7 @@ impl ImageHandler for KittyImageHandler {
             let payload = payload_write.finish()?.finish()?;
 
             // NOTE:
-            //  - data needs to be transfered in chunks
+            //  - data needs to be transferred in chunks
             //  - chunks should be multiple of 4, otherwise kitty complains that it is not
             //    valid base64 encoded data.
             let chunks = payload.chunks(4096);
@@ -498,7 +498,7 @@ impl ImageHandler for KittyImageHandler {
             TerminalEvent::KittyImage { id, error } => {
                 let filter = if !error.is_none() {
                     tracing::warn!("kitty image error: {:?}", error);
-                    // remove elemnt from cache, and propagate event to
+                    // remove element from cache, and propagate event to
                     // the user which will cause the redraw
                     self.imgs.remove(id);
                     false
@@ -840,7 +840,7 @@ impl OcTreeInfo {
         }
     }
 
-    // Monodial sum over oll infos of nodes in the slice
+    // Monoidal sum over oll infos of nodes in the slice
     fn from_slice(slice: &[OcTreeNode]) -> Self {
         slice
             .iter()
@@ -938,7 +938,7 @@ impl OcTree {
         None
     }
 
-    /// Exteract all colors present in the octree and update leaf color indices
+    /// Extract all colors present in the octree and update leaf color indices
     pub fn build_palette(&mut self) -> Vec<RGBA> {
         fn palette_rec(node: &mut OcTreeNode, palette: &mut Vec<RGBA>) {
             use OcTreeNode::*;
@@ -1135,7 +1135,7 @@ impl OcTree {
 }
 
 /// Iterator which goes over all most significant bits of the color
-/// concatinated together.
+/// concatenated together.
 ///
 /// Example:
 /// For RGB (90, 13, 157) in binary form
@@ -1175,8 +1175,8 @@ impl Iterator for OcTreePath {
             return None;
         }
         self.length -= 1;
-        // - We should pick most significant bit from each compenent
-        //   and concatinate into one value to get an index inside
+        // - We should pick most significant bit from each component
+        //   and concatenate into one value to get an index inside
         //   octree.
         // - Left shift all components and set least significant bits
         //   of all components to zero.
@@ -1188,7 +1188,7 @@ impl Iterator for OcTreePath {
     }
 }
 
-/// 3-dimentional KDTree which is used to quickly find nearest (euclidian distance)
+/// 3-dimensional KDTree which is used to quickly find nearest (euclidean distance)
 /// color from the palette.
 ///
 /// Reference: [k-d tree](https://en.wikipedia.org/wiki/K-d_tree)
@@ -1249,7 +1249,7 @@ impl KDTree {
         Self { nodes }
     }
 
-    /// Find nearest neighbour color (euclidian distance) in the palette
+    /// Find nearest neighbor color (euclidean distance) in the palette
     pub fn find(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(rgb: [u8; 3], node: &KDNode) -> i32 {
             let [r0, g0, b0] = rgb;
@@ -1342,7 +1342,7 @@ impl KDTree {
     }
 }
 
-/// Color palette which implements fast NNS with euclidian distance.
+/// Color palette which implements fast NNS with euclidean distance.
 pub struct ColorPalette {
     colors: Vec<RGBA>,
     kdtree: KDTree,
@@ -1414,7 +1414,7 @@ impl ColorPalette {
         self.kdtree.find(color)
     }
 
-    /// Find nearest color in the palete by going over all colors
+    /// Find nearest color in the palette by going over all colors
     ///
     /// This is a slower version of the find method, used only for testing
     /// find correctness and speed.

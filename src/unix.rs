@@ -227,7 +227,7 @@ impl UnixTerminal {
         // disable signal handler
         self.signal_delivery.handle().close();
 
-        // restore termios settings
+        // restore terminal settings
         nix::tcsetattr(
             self.tty_handle.as_raw_fd(),
             nix::SetArg::TCSAFLUSH,
@@ -268,7 +268,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     write!(term, "\x1b]11;?\x1b\\")?;
 
     // Set background color with SGR, and try to get it back to
-    // detect truecolor support https://github.com/termstandard/colors
+    // detect true color support https://github.com/termstandard/colors
     let face_expected = "bg=#010203".parse()?;
     write!(term, "\x1b[00;48;2;1;2;3m")?; // change background
     write!(term, "\x1bP$qm\x1b\\")?; // DECRQSS with `m` descriptor
@@ -282,7 +282,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     write!(term, "\x1b[?u")?;
 
     // DA1 - sync and sixel info
-    // Device Attribute comand is used as "sync" event, it is supported
+    // Device Attribute command is used as "sync" event, it is supported
     // by most terminals, at least in its basic form, so we expect to
     // receive a response to it. Which means it should go LAST
     write!(term, "\x1b[c")?;
@@ -490,7 +490,7 @@ impl Terminal for UnixTerminal {
                         self.events_queue.push_back(event)
                     }
                 }
-                // Durty hack to exctract ambiguous terminal events (such as Escape key)
+                // Dirty hack to extract ambiguous terminal events (such as Escape key)
                 // we assume that ambiguous events are never split across reads.
                 if let Some(event) = self.decoder.take() {
                     self.events_queue.push_back(event);
@@ -562,7 +562,7 @@ fn set_blocking(fd: RawFd, blocking: bool) -> Result<(), nix::Error> {
 
 fn timeval_from_duration(dur: Duration) -> nix::TimeVal {
     nix::TimeVal::from(libc::timeval {
-        tv_sec: dur.as_secs() as libc::clock_t, // musl complains with libc::time_t
+        tv_sec: dur.as_secs() as libc::clock_t, // musl complains with `libc::time_t`
         tv_usec: dur.subsec_micros() as libc::suseconds_t,
     })
 }

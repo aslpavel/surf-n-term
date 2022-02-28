@@ -47,7 +47,7 @@ impl Glyph {
         }
     }
 
-    /// Rasterize glyph into an image with provied face.
+    /// Rasterize glyph into an image with provided face.
     pub fn rasterize(&self, face: Face, term_size: TerminalSize) -> Image {
         let pixel_size = term_size.cells_in_pixels(self.size);
         let size = rasterize::Size {

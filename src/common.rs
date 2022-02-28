@@ -1,4 +1,4 @@
-//! Common utility funcitons used across different modules
+//! Common utility functions used across different modules
 use std::{
     collections::{HashMap, VecDeque},
     io::{BufRead, Read, Write},
@@ -76,7 +76,7 @@ impl IOQueue {
         }
     }
 
-    /// Number of avaiable chunks
+    /// Number of available chunks
     pub fn chunks_count(&self) -> usize {
         self.chunks.len()
     }
@@ -162,7 +162,7 @@ impl Default for IOQueue {
 
 /// Simple random number generator
 ///
-/// Imlemented as linear congruential generator LCG. Used here instead
+/// Implemented as linear congruential generator LCG. Used here instead
 /// of pooling in `rand` crate to reduce dependencies.
 /// Formula:
 ///     X(n) = ((X(n - 1) * a + c) % m) / d
@@ -187,7 +187,7 @@ impl Rnd {
         Self::with_seed(0)
     }
 
-    /// Create new randon number generator with provided `seed` value
+    /// Create new random number generator with provided `seed` value
     pub fn with_seed(seed: u32) -> Self {
         Self { state: seed }
     }

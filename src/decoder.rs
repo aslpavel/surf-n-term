@@ -16,7 +16,7 @@ pub trait Decoder {
     /// Decode single item from provided buffer
     fn decode<B: BufRead>(&mut self, buf: B) -> Result<Option<Self::Item>, Self::Error>;
 
-    /// Decode all available items from provided buffer and put them into ouput vector
+    /// Decode all available items from provided buffer and put them into output vector
     fn decode_into<B: BufRead>(
         &mut self,
         mut buf: B,
@@ -125,7 +125,7 @@ pub struct TTYDecoder {
     automata: DFA<TTYTag>,
     /// Current DFA state of the parser
     state: DFAState,
-    /// Matchers registred with TTYMatch::Index tag
+    /// Matchers registered with TTYMatch::Index tag
     matchers: Vec<Box<dyn TTYMatcher>>,
     /// Bytes consumed since the initialization of DFA
     buffer: Vec<u8>,
@@ -135,7 +135,7 @@ pub struct TTYDecoder {
     rescheduled: Vec<u8>,
     /// Possible match is filled when we have automata in the accepting state
     /// but it is not terminal (transition to other state is possible). Contains
-    /// TerminalEvent and ammount of data in the buffer when this event was found.
+    /// TerminalEvent and amount of data in the buffer when this event was found.
     possible: Option<(TerminalEvent, usize)>,
 }
 
@@ -244,7 +244,7 @@ impl TTYDecoder {
             }
             None => {
                 let event = self.take().unwrap_or_else(|| {
-                    self.rescheduled.push(byte); // schdule current by for parsing
+                    self.rescheduled.push(byte); // schedule current by for parsing
                     self.state = self.automata.start();
                     self.buffer.pop();
                     TerminalEvent::Raw(std::mem::take(&mut self.buffer))
@@ -254,7 +254,7 @@ impl TTYDecoder {
         }
     }
 
-    /// Take last successfuly parsed event
+    /// Take last successfully parsed event
     pub fn take(&mut self) -> Option<TerminalEvent> {
         self.possible.take().map(|(event, size)| {
             self.rescheduled.extend(self.buffer.drain(size..).rev());
@@ -282,11 +282,11 @@ trait TTYMatcher: fmt::Debug + Send {
     /// NFA that should match desired escape sequence
     fn matcher(&self) -> NFA<_Void>;
 
-    /// Decoder that sould produce terminal event given matched data
+    /// Decoder that should produce terminal event given matched data
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent>;
 }
 
-/// Kitty Image Responsne
+/// Kitty Image Response
 ///
 /// Reference: https://sw.kovidgoyal.net/kitty/graphics-protocol/#display-images-on-screen
 #[derive(Debug)]
@@ -294,7 +294,7 @@ struct KittyImageMatcher;
 
 impl TTYMatcher for KittyImageMatcher {
     fn matcher(&self) -> NFA<_Void> {
-        // "\x1b_Gkey=value(,key=value)*;response\x1b\\"
+        // `\x1b_Gkey=value(,key=value)*;response\x1b\\`
         let key_value = NFA::sequence([
             NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
             NFA::from("="),
@@ -385,7 +385,7 @@ impl TTYMatcher for KittyKeyboardMatcher {
             None => KeyMod::EMPTY,
         };
 
-        // TODO: decode text as codepoint
+        // TODO: decode text as code point
         let _text = fields.next();
 
         Some(TerminalEvent::Key(Key { name, mode }))
@@ -407,7 +407,7 @@ fn keyboard_decode_key(code: usize) -> Option<KeyName> {
 
 /// DECRPM - DEC mode report
 ///
-/// Rerference: https://www.vt100.net/docs/vt510-rm/DECRPM
+/// Reference: https://www.vt100.net/docs/vt510-rm/DECRPM
 #[derive(Debug)]
 struct DecModeMatcher;
 
@@ -649,7 +649,7 @@ impl TTYMatcher for TermCapMatcher {
     }
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
-        // "\x1bP(0|1)+rkey=value(;key=value)\x1b\\"
+        // `\x1bP(0|1)+rkey=value(;key=value)\x1b\\`
         let mut termcap = BTreeMap::new();
         if data[2] == b'1' {
             for (key, value) in key_value_decode(b';', &data[5..data.len() - 2]) {
@@ -778,7 +778,7 @@ fn tty_event_nfa() -> NFA<TerminalEvent> {
     }
 
     // [Reference](http://www.leonerd.org.uk/hacks/fixterms/)
-    // but it does not always match real behaviour
+    // but it does not always match real behavior
 
     cmds.push(basic_key("\x1b", KeyName::Esc));
     cmds.push(basic_key("\x7f", KeyName::Backspace));
@@ -923,7 +923,7 @@ fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
     }
 }
 
-/// Apply SGR cmds to the provided Face
+/// Apply SGR commands to the provided Face
 fn sgr_face<'a>(face: &mut Face, mut cmds: impl Iterator<Item = &'a [u8]>) {
     while let Some(cmd) = cmds.next() {
         match number_decode(cmd) {
@@ -966,7 +966,7 @@ fn key_value_decode(sep: u8, data: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])
     })
 }
 
-/// Semi-colon separated positve numers
+/// Semi-colon separated positive numbers
 fn numbers_decode(data: &[u8], sep: u8) -> impl Iterator<Item = usize> + '_ {
     data.split(move |b| *b == sep).filter_map(number_decode)
 }
@@ -1071,7 +1071,7 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
-        // write possible match sequnce
+        // write possible match sequence
         write!(cursor.get_mut(), "\x1bO")?;
         assert_eq!(decoder.decode(&mut cursor)?, None);
         assert_eq!(cursor.position(), 2);
