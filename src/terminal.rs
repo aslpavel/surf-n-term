@@ -314,7 +314,7 @@ pub enum DecMode {
     MouseSGR = 1006,
     /// Alternative screen mode
     AltScreen = 1049,
-    /// Synchronized output https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036
+    /// Synchronized output <https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036>
     SynchronizedOutput = 2026,
 }
 
