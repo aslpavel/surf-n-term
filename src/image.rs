@@ -1120,16 +1120,16 @@ impl OcTree {
         }
 
         let mut next = 1;
-        writeln!(&mut out, "digraph OcTree {{")?;
-        writeln!(&mut out, "  rankdir=\"LR\"")?;
+        writeln!(out, "digraph OcTree {{")?;
+        writeln!(out, "  rankdir=\"LR\"")?;
         writeln!(
-            &mut out,
+            out,
             "  0 [label=\"{} {}\"]",
             self.info.leaf_count,
             self.info.min_color_count.unwrap_or(0),
         )?;
         to_digraph_rec(self, 0, &mut next, &mut out)?;
-        writeln!(&mut out, "}}")?;
+        writeln!(out, "}}")?;
         Ok(())
     }
 }
@@ -1334,10 +1334,10 @@ impl KDTree {
             Ok(())
         }
 
-        writeln!(&mut out, "digraph KDTree {{")?;
-        writeln!(&mut out, "  rankdir=\"LR\"")?;
+        writeln!(out, "digraph KDTree {{")?;
+        writeln!(out, "  rankdir=\"LR\"")?;
         to_digraph_rec(&mut out, &self.nodes, self.nodes.len() - 1)?;
-        writeln!(&mut out, "}}")?;
+        writeln!(out, "}}")?;
         Ok(())
     }
 }

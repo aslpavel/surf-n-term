@@ -35,7 +35,7 @@ impl Glyph {
 
         let mut hasher = GlyphHasher::new();
         path.write_svg_path(&mut hasher).unwrap();
-        write!(&mut hasher, "{:?}", view_box).unwrap();
+        write!(hasher, "{:?}", view_box).unwrap();
         let hash = hasher.finish();
 
         Self {

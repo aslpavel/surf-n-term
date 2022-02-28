@@ -311,7 +311,7 @@ impl TTYMatcher for KittyImageMatcher {
     }
 
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
-        let mut iter = (&data[3..data.len() - 2]).splitn(2, |b| *b == b';');
+        let mut iter = data[3..data.len() - 2].splitn(2, |b| *b == b';');
         let mut id = 0; // id can not be zero according to the spec
         for (key, value) in key_value_decode(b',', iter.next()?) {
             if key == b"i" {
