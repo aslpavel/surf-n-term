@@ -283,8 +283,8 @@ impl Input {
 
     pub fn handle(&mut self, event: &TerminalEvent) {
         use KeyName::*;
-        if let TerminalEvent::Key(Key { name, mode }) = event {
-            match *mode {
+        match event {
+            TerminalEvent::Key(Key { name, mode }) => match *mode {
                 KeyMod::EMPTY => match name {
                     Char(c) => self.apply(InputAction::Insert(*c)),
                     Backspace => self.apply(InputAction::DeleteBackward),
@@ -305,7 +305,9 @@ impl Input {
                     _ => {}
                 },
                 _ => {}
-            }
+            },
+            TerminalEvent::Paste(text) => self.before.extend(text.chars()),
+            _ => {}
         }
     }
 

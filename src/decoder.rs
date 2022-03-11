@@ -177,6 +177,7 @@ impl Default for TTYDecoder {
 impl TTYDecoder {
     pub fn new() -> Self {
         let mut automatas = vec![tty_event_nfa().map(TTYTag::Event)];
+        // NOTE: order does not matter here, since it is compiled to DNF
         let matchers: Vec<Box<dyn TTYMatcher>> = vec![
             Box::new(CursorPositionMatcher),
             Box::new(DecModeMatcher),
@@ -190,6 +191,7 @@ impl TTYDecoder {
             Box::new(TermCapMatcher),
             Box::new(TermSizeMatcher),
             Box::new(UTF8Matcher),
+            Box::new(BracketedPasteMatcher),
         ];
         for (index, matcher) in matchers.iter().enumerate() {
             automatas.push(
@@ -765,6 +767,24 @@ impl TTYMatcher for TermSizeMatcher {
                 width: pixel_width,
             },
         }))
+    }
+}
+
+#[derive(Debug)]
+struct BracketedPasteMatcher;
+
+impl TTYMatcher for BracketedPasteMatcher {
+    fn matcher(&self) -> NFA<_Void> {
+        NFA::sequence([
+            NFA::from("\x1b[200~"),
+            NFA::predicate(|b| b != b'\x1b').many(),
+            NFA::from("\x1b[201~"),
+        ])
+    }
+
+    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+        let text = String::from_utf8(data[6..data.len() - 6].into()).ok()?;
+        Some(TerminalEvent::Paste(text))
     }
 }
 
@@ -1465,6 +1485,20 @@ mod tests {
                 TerminalEvent::Key("ctrl+c".parse()?),
                 TerminalEvent::Key("ctrl+shift+f1".parse()?),
             ],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bracketed_paste() -> Result<(), Error> {
+        let mut cursor = Cursor::new(Vec::new());
+        let mut decoder = TTYDecoder::new();
+
+        write!(cursor.get_mut(), "\x1b[200~some awesome text\x1b[201~")?;
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Paste("some awesome text".to_string())),
         );
 
         Ok(())

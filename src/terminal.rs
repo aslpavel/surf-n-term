@@ -428,6 +428,8 @@ pub enum TerminalEvent {
     FaceGet(Face),
     /// So we can use single decoder for commands and events
     Command(TerminalCommand),
+    /// Bracketed paste mode
+    Paste(String),
 }
 
 /// Size
