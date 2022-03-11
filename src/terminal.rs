@@ -316,6 +316,8 @@ pub enum DecMode {
     AltScreen = 1049,
     /// Synchronized output <https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036>
     SynchronizedOutput = 2026,
+    /// Bracketed paste
+    BracketedPaste = 2004,
 }
 
 /// Current/requested position of terminal
