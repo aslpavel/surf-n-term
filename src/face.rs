@@ -1,6 +1,9 @@
 //! Type describing foreground/background/style-attrs of the terminal cell
+use serde::{Deserialize, Serialize};
+
 use crate::{Blend, Color, Error, RGBA};
 use std::{
+    borrow::Cow,
     fmt,
     ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign},
     str::FromStr,
@@ -205,17 +208,55 @@ impl FromStr for Face {
     }
 }
 
-impl fmt::Debug for Face {
+impl fmt::Display for Face {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut result = Vec::new();
         if let Some(fg) = self.fg {
-            result.push(format!("fg={:?}", fg));
+            write!(f, "fg={},", fg)?;
         }
         if let Some(bg) = self.bg {
-            result.push(format!("bg={:?}", bg));
+            write!(f, "bg={},", bg)?;
         }
-        result.extend(self.attrs.names().map(String::from));
-        write!(f, "Face({})", result.join(" "))
+        for attr in self.attrs.names() {
+            write!(f, "{},", attr)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Face {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Face(")?;
+        if let Some(fg) = self.fg {
+            write!(f, "fg={:?},", fg)?;
+        }
+        if let Some(bg) = self.bg {
+            write!(f, "bg={:?},", bg)?;
+        }
+        for attr in self.attrs.names() {
+            write!(f, "{},", attr)?;
+        }
+        write!(f, ")")?;
+        Ok(())
+    }
+}
+
+impl Serialize for Face {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Face {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Cow::<'de, str>::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -225,14 +266,17 @@ mod tests {
 
     #[test]
     fn test_parse_face() -> Result<(), Error> {
-        assert_eq!(
-            "fg=#98971a,bg=#bdae93, bold ,underline".parse::<Face>()?,
-            Face {
-                fg: Some(RGBA::new(152, 151, 26, 255)),
-                bg: Some(RGBA::new(189, 174, 147, 255)),
-                attrs: FaceAttrs::BOLD | FaceAttrs::UNDERLINE,
-            }
-        );
+        let face = Face {
+            fg: Some(RGBA::new(152, 151, 26, 255)),
+            bg: Some(RGBA::new(189, 174, 147, 255)),
+            attrs: FaceAttrs::BOLD | FaceAttrs::UNDERLINE,
+        };
+        let face_str: Face = "fg=#98971a,bg=#bdae93, bold ,underline".parse()?;
+        assert_eq!(face, face_str);
+
+        let face_str: Face = face.to_string().parse()?;
+        assert_eq!(face, face_str);
+
         Ok(())
     }
 }

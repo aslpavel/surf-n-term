@@ -1,14 +1,13 @@
 //! Terminal rendering logic
-use std::collections::HashMap;
-
 use crate::{
     decoder::Decoder, error::Error, Face, FaceAttrs, Glyph, Image, Position, Size, Surface,
     SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
     TerminalSize, RGBA,
 };
+use std::{cmp::max, collections::HashMap, num::NonZeroUsize};
 
 /// Terminal cell kind
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum CellKind {
     /// Contains useful content
     Content,
@@ -19,7 +18,7 @@ enum CellKind {
 }
 
 /// Terminal cell
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Cell {
     face: Face,
     character: Option<char>,
@@ -60,6 +59,15 @@ impl Cell {
             glyph: Some(glyph),
             kind: CellKind::Content,
         }
+    }
+
+    /// Width occupied by cell (can be != 1 for Glyph)
+    pub fn width(&self) -> NonZeroUsize {
+        let width = self
+            .glyph
+            .as_ref()
+            .map_or_else(|| 1, |g| max(1, g.size().width));
+        NonZeroUsize::new(width).expect("zero cell width")
     }
 
     /// Create damaged cell
@@ -104,7 +112,7 @@ pub struct TerminalRenderer {
     /// Current terminal size
     size: TerminalSize,
     /// Cache of rendered glyphs
-    glyph_cache: HashMap<Glyph, Image>,
+    glyph_cache: HashMap<Cell, Image>,
 }
 
 impl TerminalRenderer {
@@ -226,10 +234,10 @@ impl TerminalRenderer {
                     col += 1;
                     continue;
                 }
-                // identify glyph
-                let glyph = front.character.unwrap_or(' ');
+                // identify character
+                let chr = front.character.unwrap_or(' ');
                 // find if it is possible to erase instead of using ' '
-                if glyph == ' ' {
+                if chr == ' ' {
                     let repeats = self.find_repeats(row, col);
                     col += repeats;
                     if repeats > 4 {
@@ -241,11 +249,11 @@ impl TerminalRenderer {
                     } else {
                         self.cursor.col += repeats;
                         for _ in 0..repeats {
-                            term.execute(TerminalCommand::Char(glyph))?;
+                            term.execute(TerminalCommand::Char(chr))?;
                         }
                     }
                 } else {
-                    term.execute(TerminalCommand::Char(glyph))?;
+                    term.execute(TerminalCommand::Char(chr))?;
                     self.cursor.col += 1;
                     col += 1;
                 }
@@ -263,11 +271,11 @@ impl TerminalRenderer {
     fn glyphs_reasterize(&mut self, term_size: TerminalSize) {
         for cell in self.front.iter_mut() {
             if let Some(glyph) = &cell.glyph {
-                let image = match self.glyph_cache.get(glyph) {
+                let image = match self.glyph_cache.get(&cell) {
                     Some(image) => image.clone(),
                     None => {
                         let image = glyph.rasterize(cell.face, term_size);
-                        self.glyph_cache.insert(glyph.clone(), image.clone());
+                        self.glyph_cache.insert(cell.clone(), image.clone());
                         image
                     }
                 };
@@ -439,14 +447,23 @@ impl<'a> TerminalWriter<'a> {
     }
 
     /// Put cell
-    pub fn put(&mut self, cell: Cell) -> bool {
-        match self.iter.next() {
+    pub fn put(&mut self, mut cell: Cell) -> bool {
+        let blank = cell.width().get() - 1;
+        // compose cell face with the current face
+        let face = self.face.overlay(&cell.face);
+        let result = match self.iter.next() {
             Some(cell_ref) => {
+                cell.face = cell_ref.face.overlay(&face);
                 *cell_ref = cell;
                 true
             }
             None => false,
+        };
+        // fill the rest of the width with empty spaces
+        for (_, cell) in (0..blank).zip(&mut self.iter) {
+            *cell = Cell::new(face, Some(' '));
         }
+        result
     }
 
     /// Put char
@@ -463,10 +480,10 @@ impl<'a> TerminalWriter<'a> {
                 }
                 true
             }
-            glyph => match self.iter.next() {
+            chr => match self.iter.next() {
                 Some(cell) => {
                     let face = cell.face.overlay(&face);
-                    *cell = Cell::new(face, Some(glyph));
+                    *cell = Cell::new(face, Some(chr));
                     true
                 }
                 None => false,

@@ -5,6 +5,7 @@ use crate::{
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
     Face, Image, Key, KeyMod, KeyName, RGBA,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -453,6 +454,25 @@ impl Size {
 
     pub fn is_empty(&self) -> bool {
         self.height == 0 || self.width == 0
+    }
+}
+
+impl Serialize for Size {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        (self.height, self.width).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Size {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (height, width) = Deserialize::deserialize(deserializer)?;
+        Ok(Size::new(height, width))
     }
 }
 

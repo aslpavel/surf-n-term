@@ -1,16 +1,15 @@
 use crate::{
     Color, ColorLinear, Face, Image, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
 };
-use rasterize::{ActiveEdgeRasterizer, Align, Rasterizer, Scalar, Transform};
+use rasterize::{ActiveEdgeRasterizer, Align, Rasterizer, Transform};
 pub use rasterize::{BBox, FillRule, Path};
-use serde::{de, ser::SerializeStruct, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     hash::{Hash, Hasher},
     io::Write,
     sync::Arc,
 };
-use tracing::debug;
+use tracing::debug_span;
 
 /// Glyph defined as an SVG path
 #[derive(Debug, Clone)]
@@ -28,7 +27,13 @@ pub struct Glyph {
 }
 
 impl Glyph {
-    pub fn new(path: Path, fill_rule: FillRule, view_box: Option<BBox>, size: Size) -> Self {
+    pub fn new(
+        path: impl Into<Arc<Path>>,
+        fill_rule: FillRule,
+        view_box: Option<BBox>,
+        size: Size,
+    ) -> Self {
+        let path = path.into();
         let view_box = view_box
             .or_else(|| path.bbox(Transform::identity()))
             .unwrap_or_else(|| BBox::new((0.0, 0.0), (1.0, 1.0)));
@@ -39,7 +44,7 @@ impl Glyph {
         let hash = hasher.finish();
 
         Self {
-            path: Arc::new(path),
+            path,
             view_box,
             hash,
             size,
@@ -63,6 +68,7 @@ impl Glyph {
             .unwrap_or_else(|| RGBA::new(255, 255, 255, 255))
             .into();
 
+        let _ = debug_span!("glyph rasterize", path=%self.path.to_svg_path(), ?face, ?size).enter();
         let rasterizer = ActiveEdgeRasterizer::default();
         let mut surf = SurfaceOwned::new_with(size.height, size.width, |_, _| bg_rgba);
         let shape = surf.shape();
@@ -71,7 +77,6 @@ impl Glyph {
             data[shape.offset(pixel.y, pixel.x)] = bg.lerp(fg, pixel.alpha).into();
         }
 
-        debug!(path=%self.path.to_svg_path(), ?face, ?size, "glyph rasterized");
         Image::new(surf)
     }
 
@@ -123,38 +128,32 @@ impl Write for GlyphHasher {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct GlyphSerde {
+    path: Arc<Path>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    view_box: Option<BBox>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    fill_rule: FillRule,
+    size: Size,
+}
+
 impl Serialize for Glyph {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        let mut glyph = serializer.serialize_struct("Glyph", 4)?;
-
-        // serialize as SVG d attribute
-        glyph.serialize_field("path", &self.path.to_svg_path())?;
-
-        // same as SVG viewBox attribute
-        glyph.serialize_field(
-            "view_box",
-            &(
-                self.view_box.x(),
-                self.view_box.y(),
-                self.view_box.width(),
-                self.view_box.height(),
-            ),
-        )?;
-
-        // use SVG names for fill-rule attribute
-        let fill_rule = match self.fill_rule {
-            FillRule::EvenOdd => "evenodd",
-            FillRule::NonZero => "nonzero",
+        let view_box = match self.path.bbox(Transform::identity()) {
+            Some(bbox) if bbox == self.view_box => None,
+            _ => Some(self.view_box),
         };
-        glyph.serialize_field("fill_rule", fill_rule)?;
-
-        // size in cells as (height, width)
-        glyph.serialize_field("size", &(self.size.height, self.size.width))?;
-
-        glyph.end()
+        GlyphSerde {
+            path: self.path.clone(),
+            view_box,
+            fill_rule: self.fill_rule,
+            size: self.size,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -163,85 +162,31 @@ impl<'de> Deserialize<'de> for Glyph {
     where
         D: serde::Deserializer<'de>,
     {
-        struct GlyphVisitor;
-        const FIELDS: &[&str] = &["path", "view_box", "fill_rule", "size"];
-
-        impl<'de> de::Visitor<'de> for GlyphVisitor {
-            type Value = Glyph;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("Glyph struct with {path|view_box|fill_rule|size} attributes")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: de::MapAccess<'de>,
-            {
-                let mut path: Option<Path> = None;
-                let mut view_box: Option<BBox> = None;
-                let mut fill_rule: Option<FillRule> = None;
-                let mut size: Option<Size> = None;
-                while let Some(field) = map.next_key::<Cow<'de, str>>()? {
-                    match field.as_ref() {
-                        "path" => {
-                            let path_str: String = map.next_value()?;
-                            path.replace(match path_str.parse() {
-                                Ok(path) => path,
-                                Err(error) => return Err(de::Error::custom(error)),
-                            });
-                        }
-                        "view_box" => {
-                            let (minx, miny, width, height): (Scalar, Scalar, Scalar, Scalar) =
-                                map.next_value()?;
-                            view_box
-                                .replace(BBox::new((minx, miny), (minx + width, miny + height)));
-                        }
-                        "fill_rule" => {
-                            fill_rule.replace(match map.next_value::<Cow<'de, str>>()?.as_ref() {
-                                "evenodd" => FillRule::EvenOdd,
-                                "nonzero" => FillRule::NonZero,
-                                fill_rule => {
-                                    return Err(de::Error::custom(&format!(
-                                    "failed to parse fill_rule {} (expected {{evenodd|nonzero}})",
-                                    fill_rule
-                                )))
-                                }
-                            });
-                        }
-                        "size" => {
-                            let (height, width): (usize, usize) = map.next_value()?;
-                            size.replace(Size { height, width });
-                        }
-                        name => {
-                            return Err(de::Error::unknown_field(name, FIELDS));
-                        }
-                    }
-                }
-                Ok(Glyph::new(
-                    path.unwrap_or_default(),
-                    fill_rule.unwrap_or_default(),
-                    view_box,
-                    size.unwrap_or_else(|| Size::new(1, 1)),
-                ))
-            }
-        }
-
-        deserializer.deserialize_struct("Glyph", FIELDS, GlyphVisitor)
+        let glyph = GlyphSerde::deserialize(deserializer)?;
+        Ok(Glyph::new(
+            glyph.path,
+            glyph.fill_rule,
+            glyph.view_box,
+            glyph.size,
+        ))
     }
+}
+
+/// Check if value is equal to default
+/// useful for skipping serialization if value is equal to default value
+/// by adding `#[serde(default, skip_serializing_if = "is_default")]`
+pub(crate) fn is_default<T: Default + PartialEq>(val: &T) -> bool {
+    val == &T::default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const TERMINAL_ICON: &str = r#"
-    M20,19V7H4V19H20M20,3A2,2 0 0,1 22,5V19A2,2 0 0,1 20,21H4A2,2 0 0,1 2,19V5C2,3.89 2.9,3 4,3H20
-    M13,17V15H18V17H13M9.58,13L5.57,9H8.4L11.7,12.3C12.09,12.69 12.09,13.33 11.7,13.72L8.42,17H5.59L9.58,13Z
-    "#;
+    const TEST_ICON: &str = "M1,1 h18 v18 h-18 Z";
 
     #[test]
     fn test_glyph_serde() -> Result<(), Box<dyn std::error::Error>> {
-        let path: Path = TERMINAL_ICON.parse()?;
+        let path: Path = TEST_ICON.parse()?;
         let term = Glyph::new(
             path,
             FillRule::NonZero,
@@ -252,7 +197,7 @@ mod tests {
         assert_eq!(term, serde_json::from_str(term_str.as_ref())?);
 
         let term_json = serde_json::json!({
-            "path": TERMINAL_ICON,
+            "path": TEST_ICON,
             "fill_rule": "nonzero",
             "view_box": [1, 0, 24, 21],
             "size": [1, 2],

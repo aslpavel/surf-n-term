@@ -413,7 +413,7 @@ impl ImageHandler for KittyImageHandler {
 
         // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
-            debug_span!("transfer image", image_handler = "kitty");
+            let _ = debug_span!("transfer image", image_handler = "kitty").enter();
             // zlib compressed and base64 encoded RGBA image data
             let mut payload_write =
                 ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
