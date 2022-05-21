@@ -271,7 +271,7 @@ impl TerminalRenderer {
     fn glyphs_reasterize(&mut self, term_size: TerminalSize) {
         for cell in self.front.iter_mut() {
             if let Some(glyph) = &cell.glyph {
-                let image = match self.glyph_cache.get(&cell) {
+                let image = match self.glyph_cache.get(cell) {
                     Some(image) => image.clone(),
                     None => {
                         let image = glyph.rasterize(cell.face, term_size);
