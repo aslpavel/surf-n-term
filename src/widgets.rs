@@ -1,6 +1,6 @@
 use crate::{
-    common::clamp, Blend, Cell, Color, Error, Face, FaceAttrs, Key, KeyMod, KeyName, Surface,
-    SurfaceMut, TerminalEvent, TerminalSurfaceExt, TerminalWritable, RGBA,
+    common::clamp, Blend, Cell, Color, Error, Face, FaceAttrs, Key, KeyMod, KeyName, Size, Surface,
+    SurfaceMut, TerminalDisplay, TerminalEvent, TerminalSurfaceExt, RGBA,
 };
 use std::{cmp::max, io::Write, str::FromStr};
 
@@ -327,7 +327,7 @@ impl Input {
         theme: &Theme,
         mut surf: impl SurfaceMut<Item = Cell>,
     ) -> Result<(), Error> {
-        surf.erase(theme.input.bg);
+        surf.erase(theme.input);
         let size = surf.width() * surf.height();
         if size < 2 {
             return Ok(());
@@ -417,9 +417,15 @@ impl ListAction {
 }
 
 pub trait ListItems {
-    type Item: TerminalWritable;
+    type Item: TerminalDisplay;
+
+    /// Number of items in the list
     fn len(&self) -> usize;
+
+    /// Get entry in the list by it's index
     fn get(&self, index: usize) -> Option<Self::Item>;
+
+    /// Check if list is empty
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -504,7 +510,7 @@ impl<T: ListItems> List<T> {
         theme: &Theme,
         mut surf: impl SurfaceMut<Item = Cell>,
     ) -> Result<(), Error> {
-        surf.erase(theme.list_default.bg);
+        surf.erase(theme.list_default);
         if surf.height() < 1 || surf.width() < 5 {
             return Ok(());
         }
@@ -515,26 +521,38 @@ impl<T: ListItems> List<T> {
         }
 
         // items
-        let width = surf.width() - 4; // exclude left border and scroll bar
+        let size = Size {
+            width: surf.width() - 4, // exclude left border and scroll bar
+            height: surf.height(),
+        };
         let items: Vec<_> = (self.offset..self.offset + surf.height())
             .filter_map(|index| {
                 let item = self.items.get(index)?;
-                let height = max(1, item.height_hint(width).unwrap_or(1));
-                Some((index, height, item))
+                let item_size = match item.size_hint(size) {
+                    Some(item_size) => Size {
+                        height: max(1, item_size.height),
+                        width: item_size.width,
+                    },
+                    None => Size {
+                        height: 1,
+                        width: size.width,
+                    },
+                };
+                Some((index, item_size, item))
             })
             .collect();
         // make sure items will fit
         let mut cursor_found = false;
         let mut items_height = 0;
         let mut first = 0;
-        for (index, height, _item) in items.iter() {
-            items_height += height;
+        for (index, size, _item) in items.iter() {
+            items_height += size.height;
             if items_height > surf.height() {
                 if cursor_found {
                     break;
                 }
                 while items_height > surf.height() {
-                    items_height -= items[first].1;
+                    items_height -= items[first].1.height;
                     first += 1;
                 }
             }
@@ -543,15 +561,15 @@ impl<T: ListItems> List<T> {
         self.height_hint = items.len();
         self.offset += first;
         // render items
-        let mut row = 0;
-        for (index, height, item) in items[first..].iter() {
-            let mut item_surf = surf.view_mut(row..row + height, ..-1);
-            row += height;
+        let mut row: usize = 0;
+        for (index, item_size, item) in items[first..].iter() {
+            let mut item_surf = surf.view_mut(row..row + item_size.height, ..-1);
+            row += item_size.height;
             if item_surf.is_empty() {
                 break;
             }
             if *index == self.cursor {
-                item_surf.erase(theme.list_selected.bg);
+                item_surf.erase(theme.list_selected);
                 let mut writer = item_surf
                     .writer()
                     .face(theme.list_selected.with_fg(Some(theme.accent)));
@@ -561,11 +579,12 @@ impl<T: ListItems> List<T> {
                 writer.write_all("   ".as_ref())?;
             };
             let mut text_surf = item_surf.view_mut(.., 3..);
-            let writer = text_surf.writer();
             if *index == self.cursor {
-                writer.face(theme.list_selected).display(item)?;
+                text_surf.erase(theme.list_selected);
+                item.display(&mut text_surf)?;
             } else {
-                writer.face(theme.list_default).display(item)?;
+                text_surf.erase(theme.list_default);
+                item.display(&mut text_surf)?;
             }
         }
 

@@ -312,8 +312,8 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
     /// Draw image
     fn draw_image(&mut self, img: Image);
-    /// Erase surface with provided color
-    fn erase(&mut self, color: Option<RGBA>);
+    /// Erase surface with face
+    fn erase(&mut self, face: Face);
     /// Write object that can be used to add text to the surface
     fn writer(&mut self) -> TerminalWriter<'_>;
 }
@@ -359,8 +359,7 @@ where
         }
     }
 
-    fn erase(&mut self, color: Option<RGBA>) {
-        let face = Face::default().with_bg(color);
+    fn erase(&mut self, face: Face) {
         self.fill_with(|_, _, _| Cell::new(face, None));
     }
 
@@ -369,28 +368,28 @@ where
     }
 }
 
-pub trait TerminalWritable {
-    fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()>;
-
-    /// Estimate height occupied given with of the available surface
-    fn height_hint(&self, _width: usize) -> Option<usize> {
-        None
-    }
+/// Anything that can be show on the terminal
+pub trait TerminalDisplay {
+    /// Display object by updating terminal surface
+    fn display(&self, surf: &mut TerminalSurface<'_>) -> Result<(), Error>;
+    /// Return the size of the displayed object given the surface size
+    fn size_hint(&self, surf_size: Size) -> Option<Size>;
 }
 
-impl<'a, T> TerminalWritable for &'a T
+impl<'a, T> TerminalDisplay for &'a T
 where
-    T: TerminalWritable + ?Sized,
+    T: TerminalDisplay + ?Sized,
 {
-    fn fmt(&self, writer: &mut TerminalWriter<'_>) -> std::io::Result<()> {
-        (*self).fmt(writer)
+    fn display(&self, surf: &mut TerminalSurface<'_>) -> Result<(), Error> {
+        (*self).display(surf)
     }
 
-    fn height_hint(&self, width: usize) -> Option<usize> {
-        (*self).height_hint(width)
+    fn size_hint(&self, surf_size: Size) -> Option<Size> {
+        (*self).size_hint(surf_size)
     }
 }
 
+/// Writable (implements `Write`) object for `TerminalSurface`
 pub struct TerminalWriter<'a> {
     face: Face,
     iter: SurfaceMutIter<'a, Cell>,
@@ -439,11 +438,6 @@ impl<'a> TerminalWriter<'a> {
             height: shape.height,
             width: shape.width,
         }
-    }
-
-    /// Render terminal writable value
-    pub fn display(&mut self, value: impl TerminalWritable) -> std::io::Result<()> {
-        value.fmt(self)
     }
 
     /// Put cell

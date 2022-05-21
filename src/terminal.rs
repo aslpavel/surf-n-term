@@ -91,7 +91,7 @@ pub trait Terminal: Write + Send {
             match event {
                 Err(error) => {
                     // cleanup on error
-                    renderer.view().erase(None);
+                    renderer.view().erase(Face::default());
                     renderer.frame(self)?;
                     let _ = self.poll(Some(Duration::new(0, 0)));
                     return Err(error.into());
