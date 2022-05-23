@@ -22,7 +22,6 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
-use tracing::debug_span;
 
 const IMAGE_CACHE_SIZE: usize = 134217728; // 128MB
 
@@ -409,11 +408,13 @@ impl ImageHandler for KittyImageHandler {
     }
 
     fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
+        tracing::trace!(image_handler = "kitty", ?pos, ?img, "draw image");
         let img_id = kitty_image_id(img);
 
         // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
-            let _ = debug_span!("transfer image", image_handler = "kitty").enter();
+            let _ =
+                tracing::debug_span!("transfer image", image_handler = "kitty", ?pos, ?img).enter();
             // zlib compressed and base64 encoded RGBA image data
             let mut payload_write =
                 ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
@@ -476,6 +477,7 @@ impl ImageHandler for KittyImageHandler {
         img: &Image,
         pos: Option<Position>,
     ) -> Result<(), Error> {
+        tracing::trace!(image_handler = "kitty", ?pos, ?img, "erase image");
         // Delete image by image id and placement id
         // a=d - action delete image
         // d=i - delete by image and placement id without freeing data
@@ -536,12 +538,13 @@ impl ImageHandler for SixelImageHandler {
         ImageHandlerKind::Sixel
     }
 
-    fn draw(&mut self, out: &mut dyn Write, img: &Image, _pos: Position) -> Result<(), Error> {
+    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
+        tracing::debug!(image_handler = "sixel", ?pos, ?img, "draw image");
         if let Some(sixel_image) = self.imgs.get(&img.hash()) {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
         }
-        debug_span!("encode image", image_handler = "sixel");
+        let _ = tracing::debug_span!("encode image", image_handler = "sixel");
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
         // quantization, it will produce smaller or/and better palette for this color depth
         let dimg = Image::new(img.map(|_, _, color| {

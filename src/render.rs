@@ -138,9 +138,19 @@ impl TerminalRenderer {
     /// Clear terminal
     pub fn clear<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // erase all images
-        for cell in self.back.iter() {
-            if let Some(img) = &cell.image {
-                term.execute(TerminalCommand::ImageErase(img.clone(), None))?;
+        let mut iter = self.back.iter();
+        loop {
+            let (row, col) = iter.position();
+            match iter.next() {
+                None => break,
+                Some(cell) => {
+                    if let Some(img) = &cell.image {
+                        term.execute(TerminalCommand::ImageErase(
+                            img.clone(),
+                            Some(Position::new(row, col)),
+                        ))?;
+                    }
+                }
             }
         }
 
