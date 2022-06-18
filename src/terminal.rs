@@ -322,7 +322,7 @@ pub enum DecMode {
 }
 
 /// Current/requested position of terminal
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Position {
     /// Row
     pub row: usize,
@@ -444,14 +444,16 @@ pub struct Size {
 
 impl Size {
     /// Zero size
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self::new(0, 0)
     }
 
-    pub fn new(height: usize, width: usize) -> Self {
+    /// Create new size
+    pub const fn new(height: usize, width: usize) -> Self {
         Self { height, width }
     }
 
+    /// Check if size is zero in any dimension
     pub fn is_empty(&self) -> bool {
         self.height == 0 || self.width == 0
     }
