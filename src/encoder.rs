@@ -65,15 +65,15 @@ impl Encoder for TTYEncoder {
             }
             CursorTo(pos) => write!(out, "\x1b[{};{}H", pos.row + 1, pos.col + 1)?,
             CursorMove { row, col } => {
-                if col > 0 {
-                    write!(out, "\x1b[{}C", col)?;
-                } else if col < 0 {
-                    write!(out, "\x1b[{}D", -col)?;
+                match col.cmp(&0) {
+                    Ordering::Greater => write!(out, "\x1b[{}C", col)?,
+                    Ordering::Less => write!(out, "\x1b[{}D", -col)?,
+                    _ => {}
                 }
-                if row > 0 {
-                    write!(out, "\x1b[{}B", row)?;
-                } else if row < 0 {
-                    write!(out, "\x1b[{}A", -row)?;
+                match row.cmp(&0) {
+                    Ordering::Greater => write!(out, "\x1b[{}B", row)?,
+                    Ordering::Less => write!(out, "\x1b[{}A", -row)?,
+                    _ => {}
                 }
             }
             CursorGet => out.write_all(b"\x1b[6n")?,

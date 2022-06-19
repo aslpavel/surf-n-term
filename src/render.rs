@@ -572,7 +572,7 @@ impl<'a> TerminalSurfaceDebug<'a> {
 
         // render single frame
         for _ in 0..size.height {
-            write!(term, "\n")?;
+            writeln!(term)?;
         }
         term.execute(TerminalCommand::CursorMove {
             row: -(size.height as i32),
@@ -595,7 +595,7 @@ impl<'a> TerminalSurfaceDebug<'a> {
     /// Write rendered surface to a file
     pub fn dump(&self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
         let mut file = BufWriter::new(std::fs::File::create(path)?);
-        file.write(self.as_bytes()?.as_slice())?;
+        file.write_all(self.as_bytes()?.as_slice())?;
         writeln!(file)?;
         Ok(())
     }
@@ -605,11 +605,11 @@ impl<'a> Debug for TerminalSurfaceDebug<'a> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut cur = std::io::Cursor::new(self.as_bytes().map_err(|_| std::fmt::Error)?);
         let mut decoder = crate::decoder::Utf8Decoder::new();
-        write!(fmt, "\n")?;
+        writeln!(fmt)?;
         while let Some(chr) = decoder.decode(&mut cur).map_err(|_| std::fmt::Error)? {
             write!(fmt, "{}", chr)?;
         }
-        write!(fmt, "\n")?;
+        writeln!(fmt)?;
         Ok(())
     }
 }
