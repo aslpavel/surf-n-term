@@ -580,10 +580,15 @@ impl<'a> TerminalSurfaceDebug<'a> {
         })?;
         term.execute(TerminalCommand::CursorSave)?;
         let mut renderer = TerminalRenderer::new(&mut term, true)?;
-        renderer.view().draw_box(None);
-        renderer
-            .view()
-            .view_mut(1..-1, 1..-1)
+        let mut view = renderer.view();
+        view.draw_box(None);
+        write!(
+            view.view_mut(0, 2..-1).writer(),
+            "{}x{}",
+            size.height - 2,
+            size.width - 2,
+        )?;
+        view.view_mut(1..-1, 1..-1)
             .iter_mut()
             .zip(self.surf.iter())
             .for_each(|(dst, src)| *dst = src.clone());

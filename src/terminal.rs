@@ -333,8 +333,12 @@ pub struct Position {
 }
 
 impl Position {
-    pub fn new(row: usize, col: usize) -> Self {
+    pub const fn new(row: usize, col: usize) -> Self {
         Self { row, col }
+    }
+
+    pub const fn origin() -> Self {
+        Self { row: 0, col: 0 }
     }
 }
 

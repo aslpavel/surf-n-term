@@ -15,6 +15,10 @@ pub trait Encoder {
 }
 
 /// TTY encoder
+///
+/// References:
+/// - [XTerm Control Sequences](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html)
+/// - [ANSI Escape Code](https://en.wikipedia.org/wiki/ANSI_escape_code)
 #[derive(Debug)]
 pub struct TTYEncoder {
     caps: TerminalCaps,
