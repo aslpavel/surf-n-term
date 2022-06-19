@@ -11,6 +11,8 @@ use std::{
     sync::Arc,
 };
 
+use crate::Size;
+
 /// Shape object describing layout of data in the surface object
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Shape {
@@ -81,6 +83,14 @@ pub trait Surface {
     /// Width of the surface
     fn width(&self) -> usize {
         self.shape().width
+    }
+
+    /// Size of the surface
+    fn size(&self) -> Size {
+        Size {
+            width: self.width(),
+            height: self.height(),
+        }
     }
 
     fn hash(&self) -> u64
