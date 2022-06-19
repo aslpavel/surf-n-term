@@ -1,10 +1,19 @@
 //! Terminal rendering logic
 use crate::{
-    decoder::Decoder, error::Error, Face, FaceAttrs, Glyph, Image, Position, Size, Surface,
-    SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, Terminal, TerminalCommand,
-    TerminalSize, RGBA,
+    decoder::Decoder,
+    encoder::{Encoder, TTYEncoder},
+    error::Error,
+    Face, FaceAttrs, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface,
+    SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps,
+    TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker, RGBA,
 };
-use std::{cmp::max, collections::HashMap, num::NonZeroUsize};
+use std::{
+    cmp::max,
+    collections::HashMap,
+    fmt::Debug,
+    io::{BufWriter, Write},
+    num::NonZeroUsize,
+};
 
 /// Terminal cell kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -318,14 +327,22 @@ impl TerminalRenderer {
 pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Draw box
     fn draw_box(&mut self, face: Option<Face>);
+
     /// Draw image encoded as ascii blocks
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
+
     /// Draw image
     fn draw_image(&mut self, img: Image);
+
     /// Erase surface with face
     fn erase(&mut self, face: Face);
+
     /// Write object that can be used to add text to the surface
     fn writer(&mut self) -> TerminalWriter<'_>;
+
+    /// Wrapper around terminal surface that implements [std::fmt::Debug]
+    /// which renders a surface to the terminal.
+    fn debug(&self) -> TerminalSurfaceDebug<'_>;
 }
 
 impl<S> TerminalSurfaceExt for S
@@ -375,6 +392,12 @@ where
 
     fn writer(&mut self) -> TerminalWriter<'_> {
         TerminalWriter::new(self)
+    }
+
+    fn debug(&self) -> TerminalSurfaceDebug<'_> {
+        TerminalSurfaceDebug {
+            surf: self.view(.., ..),
+        }
     }
 }
 
@@ -512,6 +535,161 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
     }
 }
 
+pub struct TerminalSurfaceDebug<'a> {
+    surf: SurfaceView<'a, Cell>,
+}
+
+impl<'a> TerminalSurfaceDebug<'a> {
+    fn as_bytes(&self) -> Result<Vec<u8>, Error> {
+        // expect true color and kitty image support
+        let capabilities = TerminalCaps {
+            depth: crate::encoder::ColorDepth::TrueColor,
+            glyphs: true,
+            kitty_keyboard: false,
+        };
+        // space for a box around the provided surface
+        let size = Size {
+            width: self.surf.width() + 2,
+            height: self.surf.height() + 2,
+        };
+
+        // debug terminal
+        let mut term = DebugTerminal {
+            size: TerminalSize {
+                cells: size,
+                // TOOD: allow to specify cell size?
+                pixels: Size {
+                    height: 39 * size.height,
+                    width: 16 * size.width,
+                },
+            },
+            encoder: TTYEncoder::new(capabilities.clone()),
+            image_handler: KittyImageHandler::new().quiet(),
+            output: Vec::new(),
+            capabilities,
+            face: Default::default(),
+        };
+
+        // render single frame
+        for _ in 0..size.height {
+            write!(term, "\n")?;
+        }
+        term.execute(TerminalCommand::CursorMove {
+            row: -(size.height as i32),
+            col: 0,
+        })?;
+        term.execute(TerminalCommand::CursorSave)?;
+        let mut renderer = TerminalRenderer::new(&mut term, true)?;
+        renderer.view().draw_box(None);
+        renderer
+            .view()
+            .view_mut(1..-1, 1..-1)
+            .iter_mut()
+            .zip(self.surf.iter())
+            .for_each(|(dst, src)| *dst = src.clone());
+        renderer.frame(&mut term)?;
+
+        Ok(term.output)
+    }
+
+    /// Write rendered surface to a file
+    pub fn dump(&self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
+        let mut file = BufWriter::new(std::fs::File::create(path)?);
+        file.write(self.as_bytes()?.as_slice())?;
+        writeln!(file)?;
+        Ok(())
+    }
+}
+
+impl<'a> Debug for TerminalSurfaceDebug<'a> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut cur = std::io::Cursor::new(self.as_bytes().map_err(|_| std::fmt::Error)?);
+        let mut decoder = crate::decoder::Utf8Decoder::new();
+        write!(fmt, "\n")?;
+        while let Some(chr) = decoder.decode(&mut cur).map_err(|_| std::fmt::Error)? {
+            write!(fmt, "{}", chr)?;
+        }
+        write!(fmt, "\n")?;
+        Ok(())
+    }
+}
+
+struct DebugTerminal {
+    size: TerminalSize,
+    encoder: TTYEncoder,
+    image_handler: KittyImageHandler,
+    capabilities: TerminalCaps,
+    output: Vec<u8>,
+    face: Face,
+}
+
+impl Terminal for DebugTerminal {
+    fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
+        use TerminalCommand::*;
+        match cmd {
+            Image(img, pos) => self.image_handler.draw(&mut self.output, &img, pos)?,
+            ImageErase(img, pos) => self.image_handler.erase(&mut self.output, &img, pos)?,
+            Face(face) => {
+                self.face = face;
+                self.encoder.encode(&mut self.output, cmd)?;
+            }
+            CursorTo(pos) => {
+                // convert absolute position move to relative moves
+                self.encoder.encode(&mut self.output, CursorRestore)?;
+                self.encoder.encode(&mut self.output, Face(self.face))?;
+                self.encoder.encode(
+                    &mut self.output,
+                    CursorMove {
+                        row: pos.row as i32,
+                        col: pos.col as i32,
+                    },
+                )?
+            }
+            cmd => self.encoder.encode(&mut self.output, cmd)?,
+        }
+        Ok(())
+    }
+
+    fn poll(
+        &mut self,
+        _timeout: Option<std::time::Duration>,
+    ) -> Result<Option<TerminalEvent>, Error> {
+        Ok(None)
+    }
+
+    fn size(&self) -> Result<TerminalSize, Error> {
+        Ok(self.size)
+    }
+
+    fn waker(&self) -> TerminalWaker {
+        TerminalWaker::new(|| Ok(()))
+    }
+
+    fn frames_pending(&self) -> usize {
+        0
+    }
+
+    fn frames_drop(&mut self) {}
+
+    fn dyn_ref(&mut self) -> &mut dyn Terminal {
+        self
+    }
+
+    fn capabilities(&self) -> &TerminalCaps {
+        &self.capabilities
+    }
+}
+
+impl Write for DebugTerminal {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.output.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -640,6 +818,7 @@ mod tests {
         let mut writer = view.writer().skip(4).face(purple);
         write!(writer, "TEST")?;
         println!("writer with offset: {}", debug(render.view())?);
+        print!("-> {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -662,6 +841,8 @@ mod tests {
             .view_owned(1..2, 1..-1)
             .fill(Cell::new(red, None));
         println!("erase:{}", debug(render.view())?);
+        print!("-> {:?}", render.view().debug());
+        render.view().debug().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,

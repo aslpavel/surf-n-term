@@ -64,9 +64,21 @@ impl Encoder for TTYEncoder {
                 write!(out, "\x1b[?{}$p", mode as usize)?;
             }
             CursorTo(pos) => write!(out, "\x1b[{};{}H", pos.row + 1, pos.col + 1)?,
+            CursorMove { row, col } => {
+                if col > 0 {
+                    write!(out, "\x1b[{}C", col)?;
+                } else if col < 0 {
+                    write!(out, "\x1b[{}D", -col)?;
+                }
+                if row > 0 {
+                    write!(out, "\x1b[{}B", row)?;
+                } else if row < 0 {
+                    write!(out, "\x1b[{}A", -row)?;
+                }
+            }
             CursorGet => out.write_all(b"\x1b[6n")?,
-            CursorSave => out.write_all(b"\x1b[s")?,
-            CursorRestore => out.write_all(b"\x1b[u")?,
+            CursorSave => out.write_all(b"\x1b7")?,
+            CursorRestore => out.write_all(b"\x1b8")?,
             EraseLineRight => out.write_all(b"\x1b[K")?,
             EraseLineLeft => out.write_all(b"\x1b[1K")?,
             EraseLine => out.write_all(b"\x1b[2K")?,

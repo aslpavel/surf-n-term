@@ -12,22 +12,40 @@ pub struct BoxConstraint {
 }
 
 impl BoxConstraint {
+    /// Create new constraint
     pub fn new(min: Size, max: Size) -> Self {
         Self { min, max }
     }
+
+    /// Constraint min and max equal to size
+    pub fn tight(size: Size) -> Self {
+        Self {
+            min: size,
+            max: size,
+        }
+    }
+
+    /// Minimal size
     pub fn min(&self) -> Size {
         self.min
     }
 
+    /// Maximum size
     pub fn max(&self) -> Size {
         self.max
     }
 
+    /// Remove minimal size constraint
     pub fn loosen(&self) -> Self {
         Self {
             min: Size::empty(),
             max: self.max,
         }
+    }
+
+    /// Clamp size with constraint
+    pub fn clamp(&self, size: Size) -> Size {
+        size.clamp(self.min, self.max)
     }
 }
 
@@ -194,7 +212,7 @@ impl Axis {
     pub fn cross(self) -> Self {
         match self {
             Self::Horizontal => Self::Vertical,
-            Self::Vertical => Self::Vertical,
+            Self::Vertical => Self::Horizontal,
         }
     }
 
@@ -206,6 +224,20 @@ impl Axis {
     /// Get minor axis value
     pub fn minor<T: AlongAxis>(&self, target: T) -> T::Value {
         target.minor(*self)
+    }
+
+    /// Create [Size] given the value for major and minor axis
+    pub fn size(&self, major: usize, minor: usize) -> Size {
+        match self {
+            Self::Horizontal => Size {
+                width: major,
+                height: minor,
+            },
+            Self::Vertical => Size {
+                width: minor,
+                height: major,
+            },
+        }
     }
 
     /// Change constraint along axis
@@ -354,6 +386,46 @@ impl Widget for Flex {
             offset += child_layout.size.major(self.direction);
         }
 
-        todo!()
+        // create layout tree
+        Tree::new(
+            Layout {
+                pos: Default::default(),
+                size: ct.clamp(self.direction.size(offset, minor)),
+            },
+            children_layout,
+        )
     }
 }
+
+/*
+pub struct ContainerOpts {
+    width:
+}
+
+pub struct Container<W> {
+    size: Size,
+    widget: W,
+}
+
+impl<W: Widget> Fixed<W> {
+    pub fn new(size: Size, widget: W) -> Self {
+        Self { size, widget }
+    }
+}
+
+impl<W: Widget> Widget for Fixed<W> {
+    fn render(&self, surf: &mut TerminalSurface<'_>, layout: &Tree<Layout>) -> Result<(), Error> {
+
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flex() {
+        //let flex = Flex::row().add_child(child);
+    }
+}
+*/

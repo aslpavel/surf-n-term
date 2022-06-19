@@ -366,12 +366,22 @@ impl ImageHandler for ItermImageHandler {
 /// Reference: [Kitty Graphic Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
 pub struct KittyImageHandler {
     imgs: HashMap<u64, usize>, // hash -> size in bytes
+    quiet: bool,               // suppress OK response from the terminal
 }
 
 impl KittyImageHandler {
     pub fn new() -> Self {
         Self {
             imgs: Default::default(),
+            quiet: false,
+        }
+    }
+
+    /// Enable suppression of OK responses from the terminal
+    pub fn quiet(self) -> Self {
+        Self {
+            quiet: true,
+            ..self
         }
     }
 }
@@ -411,6 +421,9 @@ impl ImageHandler for KittyImageHandler {
         tracing::trace!(image_handler = "kitty", ?pos, ?img, "draw image");
         let img_id = kitty_image_id(img);
 
+        // q   - suppress response from the terminal 1 - OK only, 2 - All.
+        let suppress = if self.quiet { ",q=1" } else { "" };
+
         // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
             let _ =
@@ -442,15 +455,16 @@ impl ImageHandler for KittyImageHandler {
                     // m    - whether more chunks will follow or not
                     write!(
                         out,
-                        "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={};",
+                        "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={}{};",
                         img_id,
                         img.height(),
                         img.width(),
-                        more
+                        more,
+                        suppress
                     )?;
                 } else {
                     // only first chunk requires all attributes
-                    write!(out, "\x1b_Gm={};", more)?;
+                    write!(out, "\x1b_Gm={}{};", more, suppress)?;
                 }
                 // data
                 out.write_all(chunk)?;
@@ -466,8 +480,11 @@ impl ImageHandler for KittyImageHandler {
         let placement_id = kitty_placement_id(pos);
         // a=p - action is put image
         // i   - image data identifier
-        // p   - placement identifier
-        write!(out, "\x1b_Ga=p,i={},p={};\x1b\\", img_id, placement_id)?;
+        write!(
+            out,
+            "\x1b_Ga=p,i={},p={}{};\x1b\\",
+            img_id, placement_id, suppress
+        )?;
         Ok(())
     }
 

@@ -255,6 +255,8 @@ pub enum TerminalCommand {
     CursorGet,
     /// Move cursor to specified row and column
     CursorTo(Position),
+    /// Move cursor to relative row and column to the current position
+    CursorMove { row: i32, col: i32 },
     /// Save current cursor position
     CursorSave,
     /// Restore previously saved cursor position
@@ -456,6 +458,14 @@ impl Size {
     /// Check if size is zero in any dimension
     pub fn is_empty(&self) -> bool {
         self.height == 0 || self.width == 0
+    }
+
+    /// Expand/Contract size to bigger than `min` and smaller than `max` size
+    pub fn clamp(&self, min: Self, max: Self) -> Self {
+        Size {
+            height: self.height.clamp(min.height, max.height),
+            width: self.width.clamp(min.width, max.width),
+        }
     }
 }
 
