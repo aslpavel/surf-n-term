@@ -241,7 +241,7 @@ pub trait ImageHandler: Send + Sync {
     fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
-impl<'a> ImageHandler for Box<dyn ImageHandler> {
+impl ImageHandler for Box<dyn ImageHandler> {
     fn kind(&self) -> ImageHandlerKind {
         (**self).kind()
     }
@@ -823,7 +823,7 @@ impl OcTreeNode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OcTreeInfo {
     // total number of leafs in the subtree
     pub leaf_count: usize,
