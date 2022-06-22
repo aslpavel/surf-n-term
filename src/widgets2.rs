@@ -62,10 +62,21 @@ impl BoxConstraint {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct Layout {
     pub pos: Position,
     pub size: Size,
+}
+
+impl Debug for Layout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Layout")
+            .field("row", &self.pos.row)
+            .field("col", &self.pos.col)
+            .field("height", &self.size.height)
+            .field("row", &self.size.width)
+            .finish()
+    }
 }
 
 impl Layout {
@@ -83,7 +94,7 @@ impl Layout {
     }
      */
 
-    pub fn view<'a>(&self, surf: &'a mut TerminalSurface<'a>) -> TerminalSurface<'a> {
+    pub fn view<'a, 'b>(&self, surf: &'a mut TerminalSurface<'b>) -> TerminalSurface<'a> {
         surf.view_mut(
             self.pos.row..self.pos.row + self.size.height,
             self.pos.col..self.pos.col + self.size.width,
@@ -355,7 +366,7 @@ enum Child<'a> {
 }
 
 impl<'a> Child<'a> {
-    fn _widget(&self) -> &dyn Widget {
+    fn widget(&self) -> &dyn Widget {
         match self {
             Self::Fixed { widget, .. } => &*widget,
             Self::Flex { widget, .. } => &*widget,
@@ -414,18 +425,15 @@ where
 {
     fn render<'b>(
         &self,
-        _surf: &'b mut TerminalSurface<'b>,
-        _layout: &Tree<Layout>,
+        surf: &'b mut TerminalSurface<'b>,
+        layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        /*
         for (index, child) in self.children.iter().enumerate() {
             let child_layout = layout.get(index).ok_or(Error::InvalidLayout)?;
-            {
-                let surf = child_layout.view(surf);
-                child.widget().render(&mut surf, layout)?;
-            }
+            child
+                .widget()
+                .render(&mut child_layout.view(surf), layout)?;
         }
-        */
         Ok(())
     }
 
@@ -807,11 +815,15 @@ mod tests {
     }
 
     #[test]
-    fn test_flex() {
-        /*
+    fn test_flex() -> Result<(), Error> {
         let text = "some text".to_string();
-        let flex = Flex::row().add_child(&text);
-        println!("{:?}", flex.debug(Size::new(5, 2)));
-        */
+        let flex = Flex::row()
+            .add_flex_child(2.0, Text::new(&text).with_face("fg=#ff0000".parse()?))
+            .add_flex_child(1.0, "other text");
+
+        let size = Size::new(5, 12);
+        println!("{:#?}", flex.layout(BoxConstraint::loose(size)));
+        println!("{:?}", flex.debug(size));
+        Ok(())
     }
 }
