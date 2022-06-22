@@ -81,20 +81,10 @@ impl Debug for Layout {
 
 impl Layout {
     /// Constrain surface by the layout
-    /*
-
-    pub fn view<'surf, S>(&self, mut surf: S) -> TerminalSurface<'surf>
+    pub fn view<'a, S>(&self, surf: &'a mut S) -> TerminalSurface<'a>
     where
-        S: SurfaceMut<Item = Cell> + 'surf,
+        S: SurfaceMut<Item = Cell>,
     {
-        surf.view_mut(
-            self.pos.row..self.pos.row + self.size.height,
-            self.pos.col..self.pos.col + self.size.width,
-        )
-    }
-     */
-
-    pub fn view<'a, 'b>(&self, surf: &'a mut TerminalSurface<'b>) -> TerminalSurface<'a> {
         surf.view_mut(
             self.pos.row..self.pos.row + self.size.height,
             self.pos.col..self.pos.col + self.size.width,
@@ -817,7 +807,7 @@ mod tests {
     #[test]
     fn test_flex() -> Result<(), Error> {
         let text = "some text".to_string();
-        let flex = Flex::row()
+        let flex = Flex::column()
             .add_flex_child(2.0, Text::new(&text).with_face("fg=#ff0000".parse()?))
             .add_flex_child(1.0, "other text");
 
