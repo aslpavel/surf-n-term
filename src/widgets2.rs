@@ -70,24 +70,25 @@ pub struct Layout {
 
 impl Layout {
     /// Constrain surface by the layout
-    pub fn view<S>(&self, surf: S) -> impl SurfaceMut<Item = Cell>
+    /*
+
+    pub fn view<'surf, S>(&self, mut surf: S) -> TerminalSurface<'surf>
     where
-        S: SurfaceMut<Item = Cell>,
+        S: SurfaceMut<Item = Cell> + 'surf,
     {
-        surf.view_owned(
+        surf.view_mut(
             self.pos.row..self.pos.row + self.size.height,
             self.pos.col..self.pos.col + self.size.width,
         )
     }
+     */
 
-    /*
     pub fn view<'a>(&self, surf: &'a mut TerminalSurface<'a>) -> TerminalSurface<'a> {
         surf.view_mut(
             self.pos.row..self.pos.row + self.size.height,
             self.pos.col..self.pos.col + self.size.width,
         )
     }
-    */
 }
 
 pub trait Widget: Debug {
@@ -141,10 +142,10 @@ impl<'a, T: Widget + ?Sized> Widget for &'a T {
     }
 }
 
-impl Widget for Box<dyn Widget> {
-    fn render<'a>(
+impl<'a> Widget for Box<dyn Widget + 'a> {
+    fn render<'b>(
         &self,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         (**self).render(surf, layout)
@@ -168,6 +169,10 @@ impl<T> Tree<T> {
 
     pub fn push(&mut self, child: Tree<T>) {
         self.children.push(child)
+    }
+
+    pub fn get(&self, index: usize) -> Option<&Tree<T>> {
+        self.children.get(index)
     }
 }
 
@@ -339,18 +344,32 @@ impl Axis {
 }
 
 #[derive(Debug)]
-enum Child {
-    Fixed { widget: Box<dyn Widget> },
-    Flex { widget: Box<dyn Widget>, flex: f64 },
+enum Child<'a> {
+    Fixed {
+        widget: Box<dyn Widget + 'a>,
+    },
+    Flex {
+        widget: Box<dyn Widget + 'a>,
+        flex: f64,
+    },
+}
+
+impl<'a> Child<'a> {
+    fn _widget(&self) -> &dyn Widget {
+        match self {
+            Self::Fixed { widget, .. } => &*widget,
+            Self::Flex { widget, .. } => &*widget,
+        }
+    }
 }
 
 #[derive(Debug)]
-pub struct Flex {
+pub struct Flex<'a> {
     direction: Axis,
-    children: Vec<Child>,
+    children: Vec<Child<'a>>,
 }
 
-impl Flex {
+impl<'a> Flex<'a> {
     /// Create new flex widget aligned along direction [Axis]
     pub fn new(direction: Axis) -> Self {
         Self {
@@ -368,7 +387,7 @@ impl Flex {
     }
 
     /// Add new fixed size child
-    pub fn add_child(&mut self, child: impl Widget + 'static) -> &mut Self {
+    pub fn add_child(mut self, child: impl Widget + 'a) -> Self {
         self.children.push(Child::Fixed {
             widget: Box::new(child),
         });
@@ -376,7 +395,7 @@ impl Flex {
     }
 
     /// Add new flex size child
-    pub fn add_flex_child(&mut self, flex: f64, child: impl Widget + 'static) -> &mut Self {
+    pub fn add_flex_child(mut self, flex: f64, child: impl Widget + 'a) -> Self {
         if flex > 0.0 {
             self.children.push(Child::Flex {
                 widget: Box::new(child),
@@ -389,9 +408,25 @@ impl Flex {
     }
 }
 
-impl Widget for Flex {
-    fn render(&self, _surf: &mut TerminalSurface<'_>, _layout: &Tree<Layout>) -> Result<(), Error> {
-        todo!()
+impl<'a> Widget for Flex<'a>
+where
+    Self: 'a,
+{
+    fn render<'b>(
+        &self,
+        _surf: &'b mut TerminalSurface<'b>,
+        _layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        /*
+        for (index, child) in self.children.iter().enumerate() {
+            let child_layout = layout.get(index).ok_or(Error::InvalidLayout)?;
+            {
+                let surf = child_layout.view(surf);
+                child.widget().render(&mut surf, layout)?;
+            }
+        }
+        */
+        Ok(())
     }
 
     fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
@@ -447,7 +482,7 @@ impl Widget for Flex {
         }
 
         // extra space to be filled
-        let _extra = self.direction.major(ct.min()) - (major_non_flex + major_flex);
+        let _extra = self.direction.major(ct.max()) - (major_non_flex + major_flex);
 
         // calculate offsets
         let mut offset = 0;
@@ -507,7 +542,11 @@ impl<W: Widget> Container<W> {
 }
 
 impl<W: Widget> Widget for Container<W> {
-    fn render(&self, _surf: &mut TerminalSurface<'_>, _layout: &Tree<Layout>) -> Result<(), Error> {
+    fn render<'a>(
+        &self,
+        _surf: &'a mut TerminalSurface<'a>,
+        _layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
         todo!()
     }
 
@@ -593,7 +632,17 @@ impl<'a> Text<'a> {
         }
     }
 
-    pub fn face(self, face: Face) -> Self {
+    pub fn len(&self) -> usize {
+        self.children
+            .iter()
+            .fold(self.text.len(), |len, child| len + child.len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn with_face(self, face: Face) -> Self {
         Self { face, ..self }
     }
 
@@ -735,13 +784,15 @@ mod tests {
     fn test_text() -> Result<(), Error> {
         let two = "two".to_string();
         let text = Text::new("one ")
-            .face("fg=#3c3836,bg=#ebdbb2".parse()?)
-            .add_text(Text::new(two.as_str()).face("fg=#af3a03,bold".parse()?))
+            .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
+            .add_text(Text::new(two.as_str()).with_face("fg=#af3a03,bold".parse()?))
             .add_text(" three".to_string())
-            .add_text("\nfour");
+            .add_text("\nfour")
+            .add_text("");
 
         let size = Size::new(5, 10);
         println!("{:?}", text.debug(size));
+
         let layout = text.layout(BoxConstraint::loose(size));
         assert_eq!(layout.size, Size::new(3, 10));
 
@@ -757,6 +808,10 @@ mod tests {
 
     #[test]
     fn test_flex() {
-        //let flex = Flex::row().add_child(child);
+        /*
+        let text = "some text".to_string();
+        let flex = Flex::row().add_child(&text);
+        println!("{:?}", flex.debug(Size::new(5, 2)));
+        */
     }
 }

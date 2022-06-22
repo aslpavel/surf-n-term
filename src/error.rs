@@ -10,6 +10,7 @@ pub enum Error {
     ParseError(&'static str, String),
     FeatureNotSupported,
     Other(Cow<'static, str>),
+    InvalidLayout,
 }
 
 impl fmt::Display for Error {
@@ -29,6 +30,7 @@ impl std::error::Error for Error {
             ParseError(..) => None,
             FeatureNotSupported => None,
             Other(..) => None,
+            InvalidLayout => None,
         }
     }
 }
