@@ -49,8 +49,8 @@ pub mod render;
 pub mod surface;
 pub mod terminal;
 mod unix;
+pub mod view;
 pub mod widgets;
-pub mod widgets2;
 
 pub use color::{Blend, Color, ColorLinear, RGBA};
 pub use error::Error;
