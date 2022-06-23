@@ -210,12 +210,13 @@ pub enum Align {
     Start,
     Center,
     End,
+    Fill,
 }
 
 impl Align {
     pub fn align(&self, leftover: usize) -> usize {
         match self {
-            Self::Start => 0,
+            Self::Start | Self::Fill => 0,
             Self::Center => leftover / 2,
             Self::End => leftover,
         }
@@ -418,8 +419,12 @@ where
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
+        let surf = &mut layout.view(surf);
         for (index, child) in self.children.iter().enumerate() {
             let child_layout = layout.get(index).ok_or(Error::InvalidLayout)?;
+            if child_layout.size.is_empty() {
+                continue;
+            }
             child
                 .widget()
                 .render(&mut child_layout.view(surf), layout)?;
@@ -493,7 +498,7 @@ where
         // create layout tree
         Tree::new(
             Layout {
-                pos: Default::default(),
+                pos: Position::origin(),
                 size: ct.clamp(self.direction.size(offset, minor)),
             },
             children_layout,
@@ -504,9 +509,9 @@ where
 #[derive(Debug)]
 pub struct Container<W> {
     widget: W,
-    _color: Option<RGBA>,
-    _align_vertical: Align,
-    _align_horizontal: Align,
+    color: Option<RGBA>,
+    align_vertical: Align,
+    align_horizontal: Align,
     size: Size,
 }
 
@@ -514,9 +519,9 @@ impl<W: Widget> Container<W> {
     pub fn new(widget: W) -> Self {
         Self {
             size: Size::empty(),
-            _color: None,
-            _align_vertical: Align::default(),
-            _align_horizontal: Align::default(),
+            color: None,
+            align_vertical: Align::default(),
+            align_horizontal: Align::default(),
             widget,
         }
     }
@@ -537,31 +542,98 @@ impl<W: Widget> Container<W> {
             ..self
         }
     }
+
+    pub fn horizontal(self, align: Align) -> Self {
+        Self {
+            align_horizontal: align,
+            ..self
+        }
+    }
+
+    pub fn vertical(self, align: Align) -> Self {
+        Self {
+            align_vertical: align,
+            ..self
+        }
+    }
+
+    pub fn color(self, color: RGBA) -> Self {
+        Self {
+            color: Some(color),
+            ..self
+        }
+    }
 }
 
 impl<W: Widget> Widget for Container<W> {
     fn render<'a>(
         &self,
-        _surf: &'a mut TerminalSurface<'a>,
-        _layout: &Tree<Layout>,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        todo!()
+        let surf = &mut layout.view(surf);
+        if self.color.is_some() {
+            surf.erase(Face::new(None, self.color, FaceAttrs::EMPTY));
+        }
+        let widget_layout = layout.get(0).ok_or(Error::InvalidLayout)?;
+        self.widget
+            .render(&mut widget_layout.view(surf), widget_layout)?;
+        Ok(())
     }
 
     fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
-        let width_max = if self.size.width == 0 {
-            ct.max().width
-        } else {
-            self.size.width.clamp(ct.min().width, ct.max().width)
+        // constraint max size if it is specified
+        let size_max = Size {
+            height: if self.size.height == 0 {
+                ct.max().height
+            } else {
+                self.size.height.clamp(ct.min().height, ct.max().height)
+            },
+            width: if self.size.width == 0 {
+                ct.max().width
+            } else {
+                self.size.width.clamp(ct.min().width, ct.max().width)
+            },
         };
-        let height_max = if self.size.height == 0 {
-            ct.max().height
-        } else {
-            self.size.height.clamp(ct.min().height, ct.max().height)
+        // make it tight along `Align::Fill` axis
+        let size_min = Size {
+            height: if self.align_vertical == Align::Fill {
+                size_max.height
+            } else {
+                0
+            },
+            width: if self.align_horizontal == Align::Fill {
+                size_max.height
+            } else {
+                0
+            },
         };
-        let widget_ct = BoxConstraint::new(Size::empty(), Size::new(height_max, width_max));
-        let _widget_layout = self.widget.layout(widget_ct);
-        todo!()
+        let widget_layout = self.widget.layout(BoxConstraint::new(size_min, size_max));
+        // resulting widget size, equal to child widget size if not specified
+        let size = Size {
+            width: if self.size.width == 0 {
+                widget_layout.size.width
+            } else {
+                self.size.width
+            },
+            height: if self.size.height == 0 {
+                widget_layout.size.height
+            } else {
+                self.size.height
+            },
+        };
+        let pos = Position {
+            row: self
+                .align_vertical
+                .align(size.height.abs_diff(widget_layout.size.height)),
+            col: self
+                .align_horizontal
+                .align(size.width.abs_diff(widget_layout.size.width)),
+        };
+        Tree {
+            value: Layout { size, pos },
+            children: vec![widget_layout],
+        }
     }
 }
 
