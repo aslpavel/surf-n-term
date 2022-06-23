@@ -18,12 +18,14 @@ impl<'a> Text<'a> {
         }
     }
 
+    /// Length of the text
     pub fn len(&self) -> usize {
         self.children
             .iter()
             .fold(self.text.len(), |len, child| len + child.len())
     }
 
+    /// Check if text is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

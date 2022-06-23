@@ -2,30 +2,7 @@ use super::{BoxConstraint, Layout, Tree, View};
 use crate::{Error, Position, Size, TerminalSurface};
 use std::cmp::{max, min};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Align {
-    Start,
-    Center,
-    End,
-    Fill,
-}
-
-impl Align {
-    pub fn align(&self, leftover: usize) -> usize {
-        match self {
-            Self::Start | Self::Fill => 0,
-            Self::Center => leftover / 2,
-            Self::End => leftover,
-        }
-    }
-}
-
-impl Default for Align {
-    fn default() -> Self {
-        Self::Center
-    }
-}
-
+/// Major axis of the [Flex] view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
     Horizontal,

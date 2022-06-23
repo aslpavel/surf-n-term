@@ -1,6 +1,31 @@
 //! [Container] view can specify the size and alignment for its child view
-use super::{Align, BoxConstraint, Layout, Tree, View};
+use super::{BoxConstraint, Layout, Tree, View};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
+
+/// Alignment of a child view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Align {
+    Start,
+    Center,
+    End,
+    Fill,
+}
+
+impl Align {
+    pub fn align(&self, leftover: usize) -> usize {
+        match self {
+            Self::Start | Self::Fill => 0,
+            Self::Center => leftover / 2,
+            Self::End => leftover,
+        }
+    }
+}
+
+impl Default for Align {
+    fn default() -> Self {
+        Self::Center
+    }
+}
 
 #[derive(Debug)]
 pub struct Container<V> {

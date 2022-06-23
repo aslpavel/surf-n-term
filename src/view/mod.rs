@@ -1,8 +1,10 @@
+//! Defines [View] that represents anything that can be rendered into a terminal.
+//! As well as some useful implementations such as [Text], [Flex], [Container], ...
 mod container;
 mod flex;
 mod text;
-pub use container::Container;
-pub use flex::{Align, Flex};
+pub use container::{Align, Container};
+pub use flex::{Axis, Flex};
 pub use text::Text;
 
 use crate::{
@@ -14,6 +16,8 @@ use std::{
     ops::{Deref, DerefMut, Index, IndexMut},
 };
 
+/// Constraint that specify size of the view that it can take. Any view when layout
+/// should that the size between `min` and `max` sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BoxConstraint {
     min: Size,
@@ -66,6 +70,7 @@ impl BoxConstraint {
     }
 }
 
+/// Layout of the [View] determines its position and size
 #[derive(Clone, Copy, Default)]
 pub struct Layout {
     pub pos: Position,
@@ -84,7 +89,8 @@ impl Debug for Layout {
 }
 
 impl Layout {
-    /// Constrain surface by the layout
+    /// Constrain surface by the layout, that is create sub-subsurface view
+    /// with offset `pos` and size of `size`.
     pub fn view<'a, S>(&self, surf: &'a mut S) -> TerminalSurface<'a>
     where
         S: SurfaceMut<Item = Cell>,
@@ -96,7 +102,7 @@ impl Layout {
     }
 }
 
-/// View is anything that can be aligned and rendered to the terminal
+/// View is anything that can be layed out and rendered to the terminal
 pub trait View: Debug {
     /// Render view into a given surface with the provided layout
     fn render<'a>(
