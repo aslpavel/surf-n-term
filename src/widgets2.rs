@@ -92,44 +92,44 @@ impl Layout {
     }
 }
 
-pub trait Widget: Debug {
-    /// Render widget into a given surface with the provided layout
+pub trait View: Debug {
+    /// Render view into a given surface with the provided layout
     fn render<'a>(
         &self,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error>;
 
-    /// Compute layout of the widget based on the constraints
+    /// Compute layout of the view based on the constraints
     fn layout(&self, ct: BoxConstraint) -> Tree<Layout>;
 
-    /// Wrapper around widget that implements [std::fmt::Debug] which renders
-    /// widget. Only supposed to be used for debugging.
-    fn debug(&self, size: Size) -> WidgetPreview<&'_ Self>
+    /// Wrapper around view that implements [std::fmt::Debug] which renders
+    /// view. Only supposed to be used for debugging.
+    fn debug(&self, size: Size) -> Preview<&'_ Self>
     where
         Self: Sized,
     {
-        WidgetPreview { widget: self, size }
+        Preview { view: self, size }
     }
 }
 
-pub struct WidgetPreview<W> {
-    widget: W,
+pub struct Preview<V> {
+    view: V,
     size: Size,
 }
 
-impl<W: Widget> std::fmt::Debug for WidgetPreview<W> {
+impl<V: View> std::fmt::Debug for Preview<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
-        let layout = self.widget.layout(BoxConstraint::loose(self.size));
-        self.widget
+        let layout = self.view.layout(BoxConstraint::loose(self.size));
+        self.view
             .render(&mut surf.view_mut(.., ..), &layout)
             .map_err(|_| std::fmt::Error)?;
         surf.debug().fmt(f)
     }
 }
 
-impl<'a, T: Widget + ?Sized> Widget for &'a T {
+impl<'a, V: View + ?Sized> View for &'a V {
     fn render<'b>(
         &self,
         surf: &'b mut TerminalSurface<'b>,
@@ -143,7 +143,7 @@ impl<'a, T: Widget + ?Sized> Widget for &'a T {
     }
 }
 
-impl<'a> Widget for Box<dyn Widget + 'a> {
+impl<'a> View for Box<dyn View + 'a> {
     fn render<'b>(
         &self,
         surf: &'b mut TerminalSurface<'b>,
@@ -347,20 +347,15 @@ impl Axis {
 
 #[derive(Debug)]
 enum Child<'a> {
-    Fixed {
-        widget: Box<dyn Widget + 'a>,
-    },
-    Flex {
-        widget: Box<dyn Widget + 'a>,
-        flex: f64,
-    },
+    Fixed { view: Box<dyn View + 'a> },
+    Flex { view: Box<dyn View + 'a>, flex: f64 },
 }
 
 impl<'a> Child<'a> {
-    fn widget(&self) -> &dyn Widget {
+    fn view(&self) -> &dyn View {
         match self {
-            Self::Fixed { widget, .. } => &*widget,
-            Self::Flex { widget, .. } => &*widget,
+            Self::Fixed { view, .. } => &*view,
+            Self::Flex { view, .. } => &*view,
         }
     }
 }
@@ -372,7 +367,7 @@ pub struct Flex<'a> {
 }
 
 impl<'a> Flex<'a> {
-    /// Create new flex widget aligned along direction [Axis]
+    /// Create new flex view aligned along direction [Axis]
     pub fn new(direction: Axis) -> Self {
         Self {
             direction,
@@ -389,18 +384,18 @@ impl<'a> Flex<'a> {
     }
 
     /// Add new fixed size child
-    pub fn add_child(mut self, child: impl Widget + 'a) -> Self {
+    pub fn add_child(mut self, child: impl View + 'a) -> Self {
         self.children.push(Child::Fixed {
-            widget: Box::new(child),
+            view: Box::new(child),
         });
         self
     }
 
     /// Add new flex size child
-    pub fn add_flex_child(mut self, flex: f64, child: impl Widget + 'a) -> Self {
+    pub fn add_flex_child(mut self, flex: f64, child: impl View + 'a) -> Self {
         if flex > 0.0 {
             self.children.push(Child::Flex {
-                widget: Box::new(child),
+                view: Box::new(child),
                 flex,
             });
             self
@@ -410,7 +405,7 @@ impl<'a> Flex<'a> {
     }
 }
 
-impl<'a> Widget for Flex<'a>
+impl<'a> View for Flex<'a>
 where
     Self: 'a,
 {
@@ -425,9 +420,7 @@ where
             if child_layout.size.is_empty() {
                 continue;
             }
-            child
-                .widget()
-                .render(&mut child_layout.view(surf), layout)?;
+            child.view().render(&mut child_layout.view(surf), layout)?;
         }
         Ok(())
     }
@@ -444,8 +437,8 @@ where
         // layout non-flex
         for (index, child) in self.children.iter().enumerate() {
             match child {
-                Child::Fixed { widget } => {
-                    let child_layout = widget.layout(ct_loosen);
+                Child::Fixed { view } => {
+                    let child_layout = view.layout(ct_loosen);
                     major_non_flex += self.direction.major(child_layout.size);
                     minor = max(minor, self.direction.minor(child_layout.size));
                     children_layout[index] = child_layout;
@@ -456,7 +449,7 @@ where
             }
         }
 
-        // calculate available space for flex widgets
+        // calculate available space for flex views
         let major_total = self.direction.major(ct.max());
         major_non_flex = min(major_total, major_non_flex);
         let major_remain = major_total - major_non_flex;
@@ -467,13 +460,13 @@ where
             let per_flex = (major_remain as f64) / flex_total;
             for (index, child) in self.children.iter().enumerate() {
                 match child {
-                    Child::Flex { widget, flex } => {
+                    Child::Flex { view, flex } => {
                         let child_major = (flex * per_flex).round() as usize;
                         if child_major == 0 {
                             continue;
                         }
                         let child_ct = self.direction.constraint(ct_loosen, 0, child_major);
-                        let child_layout = widget.layout(child_ct);
+                        let child_layout = view.layout(child_ct);
 
                         major_flex += self.direction.major(child_layout.size);
                         minor = max(minor, self.direction.minor(child_layout.size));
@@ -507,22 +500,22 @@ where
 }
 
 #[derive(Debug)]
-pub struct Container<W> {
-    widget: W,
+pub struct Container<V> {
+    view: V,
     color: Option<RGBA>,
     align_vertical: Align,
     align_horizontal: Align,
     size: Size,
 }
 
-impl<W: Widget> Container<W> {
-    pub fn new(widget: W) -> Self {
+impl<V: View> Container<V> {
+    pub fn new(view: V) -> Self {
         Self {
             size: Size::empty(),
             color: None,
             align_vertical: Align::default(),
             align_horizontal: Align::default(),
-            widget,
+            view,
         }
     }
 
@@ -565,7 +558,7 @@ impl<W: Widget> Container<W> {
     }
 }
 
-impl<W: Widget> Widget for Container<W> {
+impl<V: View> View for Container<V> {
     fn render<'a>(
         &self,
         surf: &'a mut TerminalSurface<'a>,
@@ -575,9 +568,8 @@ impl<W: Widget> Widget for Container<W> {
         if self.color.is_some() {
             surf.erase(Face::new(None, self.color, FaceAttrs::EMPTY));
         }
-        let widget_layout = layout.get(0).ok_or(Error::InvalidLayout)?;
-        self.widget
-            .render(&mut widget_layout.view(surf), widget_layout)?;
+        let view_layout = layout.get(0).ok_or(Error::InvalidLayout)?;
+        self.view.render(&mut view_layout.view(surf), view_layout)?;
         Ok(())
     }
 
@@ -608,16 +600,16 @@ impl<W: Widget> Widget for Container<W> {
                 0
             },
         };
-        let widget_layout = self.widget.layout(BoxConstraint::new(size_min, size_max));
-        // resulting widget size, equal to child widget size if not specified
+        let view_layout = self.view.layout(BoxConstraint::new(size_min, size_max));
+        // resulting view size, equal to child view size if not specified
         let size = Size {
             width: if self.size.width == 0 {
-                widget_layout.size.width
+                view_layout.size.width
             } else {
                 self.size.width
             },
             height: if self.size.height == 0 {
-                widget_layout.size.height
+                view_layout.size.height
             } else {
                 self.size.height
             },
@@ -625,46 +617,46 @@ impl<W: Widget> Widget for Container<W> {
         let pos = Position {
             row: self
                 .align_vertical
-                .align(size.height.abs_diff(widget_layout.size.height)),
+                .align(size.height.abs_diff(view_layout.size.height)),
             col: self
                 .align_horizontal
-                .align(size.width.abs_diff(widget_layout.size.width)),
+                .align(size.width.abs_diff(view_layout.size.width)),
         };
         Tree {
             value: Layout { size, pos },
-            children: vec![widget_layout],
+            children: vec![view_layout],
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Fixed<W> {
-    widget: W,
+pub struct Fixed<V> {
+    view: V,
     size: Size,
 }
 
-impl<W> Fixed<W> {
-    pub fn new(size: Size, widget: W) -> Self {
-        Self { widget, size }
+impl<V> Fixed<V> {
+    pub fn new(size: Size, view: V) -> Self {
+        Self { view, size }
     }
 }
 
-impl<W: Widget> Widget for Fixed<W> {
+impl<V: View> View for Fixed<V> {
     fn render<'a>(
         &self,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        self.widget.render(surf, layout)
+        self.view.render(surf, layout)
     }
 
     fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
         let size = ct.clamp(self.size);
-        self.widget.layout(BoxConstraint::tight(size))
+        self.view.layout(BoxConstraint::tight(size))
     }
 }
 
-impl Widget for RGBA {
+impl View for RGBA {
     fn render<'a>(
         &self,
         surf: &'a mut TerminalSurface<'a>,
@@ -722,7 +714,7 @@ impl<'a> Text<'a> {
     }
 }
 
-impl<'a> Widget for Text<'a> {
+impl<'a> View for Text<'a> {
     fn render<'b>(
         &self,
         surf: &'b mut TerminalSurface<'b>,
@@ -805,7 +797,7 @@ pub fn layout_chars(ct: BoxConstraint, chrs: impl IntoIterator<Item = char>) -> 
     }
 }
 
-impl<'a> Widget for &'a str {
+impl<'a> View for &'a str {
     fn render<'b>(
         &self,
         surf: &'b mut TerminalSurface<'b>,
@@ -819,7 +811,7 @@ impl<'a> Widget for &'a str {
     }
 }
 
-impl Widget for String {
+impl View for String {
     fn render<'a>(
         &self,
         surf: &'a mut TerminalSurface<'a>,
@@ -839,13 +831,13 @@ mod tests {
 
     #[test]
     fn test_references() -> Result<(), Error> {
-        fn witness(_: impl Widget) {}
+        fn witness(_: impl View) {}
         let color = "#ff0000".parse::<RGBA>()?;
 
         witness(color);
         witness(&color);
-        witness(&color as &dyn Widget);
-        witness(Box::new(color) as Box<dyn Widget>);
+        witness(&color as &dyn View);
+        witness(Box::new(color) as Box<dyn View>);
 
         Ok(())
     }
