@@ -2,9 +2,11 @@
 //! As well as some useful implementations such as [Text], [Flex], [Container], ...
 mod container;
 mod flex;
+mod scrollbar;
 mod text;
 pub use container::{Align, Container};
-pub use flex::{Axis, Flex};
+pub use flex::Flex;
+pub use scrollbar::ScrollBar;
 pub use text::Text;
 
 use crate::{
@@ -71,7 +73,7 @@ impl BoxConstraint {
 }
 
 /// Layout of the [View] determines its position and size
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Layout {
     pub pos: Position,
     pub size: Size,
@@ -168,7 +170,7 @@ impl<'a> View for Box<dyn View + 'a> {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug, PartialEq, Eq, Hash, Default)]
 pub struct Tree<T> {
     pub value: T,
     pub children: Vec<Tree<T>>,
@@ -213,6 +215,146 @@ impl<T> Index<usize> for Tree<T> {
 impl<T> IndexMut<usize> for Tree<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.children[index]
+    }
+}
+
+/// Major axis of the [Flex] view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+/// Helper to get values along [Axis]
+pub trait AlongAxis {
+    /// Axis value
+    type Value;
+
+    /// Get value along major axis
+    fn major(&self, axis: Axis) -> Self::Value;
+
+    /// Get mutable reference along major axis
+    fn major_mut(&mut self, axis: Axis) -> &mut Self::Value;
+
+    /// Get value along minor axis
+    fn minor(&self, axis: Axis) -> Self::Value {
+        self.major(axis.cross())
+    }
+
+    /// Get mutable reference along minor axis
+    fn minor_mut(&mut self, axis: Axis) -> &mut Self::Value {
+        self.major_mut(axis.cross())
+    }
+
+    /// Construct new value given [Axis] and values along major and minor axes
+    fn from_axes(axis: Axis, major: Self::Value, minor: Self::Value) -> Self;
+}
+
+impl AlongAxis for Size {
+    type Value = usize;
+
+    fn major(&self, axis: Axis) -> Self::Value {
+        match axis {
+            Axis::Horizontal => self.width,
+            Axis::Vertical => self.height,
+        }
+    }
+
+    fn major_mut(&mut self, axis: Axis) -> &mut Self::Value {
+        match axis {
+            Axis::Horizontal => &mut self.width,
+            Axis::Vertical => &mut self.height,
+        }
+    }
+
+    fn from_axes(axis: Axis, major: Self::Value, minor: Self::Value) -> Self {
+        match axis {
+            Axis::Horizontal => Size {
+                width: major,
+                height: minor,
+            },
+            Axis::Vertical => Size {
+                width: minor,
+                height: major,
+            },
+        }
+    }
+}
+
+impl AlongAxis for Position {
+    type Value = usize;
+
+    fn major(&self, axis: Axis) -> Self::Value {
+        match axis {
+            Axis::Horizontal => self.col,
+            Axis::Vertical => self.row,
+        }
+    }
+
+    fn major_mut(&mut self, axis: Axis) -> &mut Self::Value {
+        match axis {
+            Axis::Horizontal => &mut self.col,
+            Axis::Vertical => &mut self.row,
+        }
+    }
+
+    fn from_axes(axis: Axis, major: Self::Value, minor: Self::Value) -> Self {
+        match axis {
+            Axis::Horizontal => Position {
+                col: major,
+                row: minor,
+            },
+            Axis::Vertical => Position {
+                col: minor,
+                row: major,
+            },
+        }
+    }
+}
+
+impl Axis {
+    /// Flip axis
+    pub fn cross(self) -> Self {
+        match self {
+            Self::Horizontal => Self::Vertical,
+            Self::Vertical => Self::Horizontal,
+        }
+    }
+
+    /// Get major axis value
+    pub fn major<T: AlongAxis>(&self, target: T) -> T::Value {
+        target.major(*self)
+    }
+
+    /// Get minor axis value
+    pub fn minor<T: AlongAxis>(&self, target: T) -> T::Value {
+        target.minor(*self)
+    }
+
+    /// Change constraint along axis
+    pub fn constraint(&self, ct: BoxConstraint, min: usize, max: usize) -> BoxConstraint {
+        match self {
+            Self::Horizontal => BoxConstraint::new(
+                Size {
+                    height: ct.min().height,
+                    width: min,
+                },
+                Size {
+                    height: ct.max().height,
+                    width: max,
+                },
+            ),
+            Self::Vertical => BoxConstraint::new(
+                Size {
+                    height: min,
+                    width: ct.min().width,
+                },
+                Size {
+                    height: max,
+                    width: ct.max().width,
+                },
+            ),
+        }
     }
 }
 
@@ -269,6 +411,13 @@ impl View for RGBA {
 mod tests {
     use super::*;
 
+    pub(crate) fn render(view: &dyn View, size: Size) -> Result<SurfaceOwned<Cell>, Error> {
+        let layout = view.layout(BoxConstraint::loose(size));
+        let mut surf = SurfaceOwned::new(size.height, size.width);
+        view.render(&mut surf.view_mut(.., ..), &layout)?;
+        Ok(surf)
+    }
+
     #[test]
     fn test_references() -> Result<(), Error> {
         fn witness(_: impl View) {}
@@ -284,8 +433,9 @@ mod tests {
 
     #[test]
     fn test_fixed() -> Result<(), Error> {
-        let fixed = Fixed::new(Size::new(3, 5), "#ff0000".parse::<RGBA>()?);
-        println!("{:?}", fixed.debug(Size::new(5, 10)));
+        let size = Size::new(3, 5);
+        let fixed = Fixed::new(size, "#ff0000".parse::<RGBA>()?);
+        println!("{:?}", fixed.debug(size));
         Ok(())
     }
 }

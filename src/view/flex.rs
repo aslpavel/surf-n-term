@@ -1,123 +1,6 @@
-use super::{BoxConstraint, Layout, Tree, View};
+use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View};
 use crate::{Error, Position, Size, TerminalSurface};
 use std::cmp::{max, min};
-
-/// Major axis of the [Flex] view
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Axis {
-    Horizontal,
-    Vertical,
-}
-
-pub trait AlongAxis {
-    type Value;
-
-    fn major(&self, axis: Axis) -> Self::Value;
-    fn major_mut(&mut self, axis: Axis) -> &mut Self::Value;
-
-    fn minor(&self, axis: Axis) -> Self::Value {
-        self.major(axis.cross())
-    }
-    fn minor_mut(&mut self, axis: Axis) -> &mut Self::Value {
-        self.major_mut(axis.cross())
-    }
-}
-
-impl AlongAxis for Size {
-    type Value = usize;
-
-    fn major(&self, axis: Axis) -> Self::Value {
-        match axis {
-            Axis::Horizontal => self.width,
-            Axis::Vertical => self.height,
-        }
-    }
-
-    fn major_mut(&mut self, axis: Axis) -> &mut Self::Value {
-        match axis {
-            Axis::Horizontal => &mut self.width,
-            Axis::Vertical => &mut self.height,
-        }
-    }
-}
-
-impl AlongAxis for Position {
-    type Value = usize;
-
-    fn major(&self, axis: Axis) -> Self::Value {
-        match axis {
-            Axis::Horizontal => self.col,
-            Axis::Vertical => self.row,
-        }
-    }
-
-    fn major_mut(&mut self, axis: Axis) -> &mut Self::Value {
-        match axis {
-            Axis::Horizontal => &mut self.col,
-            Axis::Vertical => &mut self.row,
-        }
-    }
-}
-
-impl Axis {
-    /// Flip axis
-    pub fn cross(self) -> Self {
-        match self {
-            Self::Horizontal => Self::Vertical,
-            Self::Vertical => Self::Horizontal,
-        }
-    }
-
-    /// Get major axis value
-    pub fn major<T: AlongAxis>(&self, target: T) -> T::Value {
-        target.major(*self)
-    }
-
-    /// Get minor axis value
-    pub fn minor<T: AlongAxis>(&self, target: T) -> T::Value {
-        target.minor(*self)
-    }
-
-    /// Create [Size] given the value for major and minor axis
-    pub fn size(&self, major: usize, minor: usize) -> Size {
-        match self {
-            Self::Horizontal => Size {
-                width: major,
-                height: minor,
-            },
-            Self::Vertical => Size {
-                width: minor,
-                height: major,
-            },
-        }
-    }
-
-    /// Change constraint along axis
-    pub fn constraint(&self, ct: BoxConstraint, min: usize, max: usize) -> BoxConstraint {
-        match self {
-            Self::Horizontal => BoxConstraint::new(
-                Size {
-                    height: ct.min().height,
-                    width: min,
-                },
-                Size {
-                    height: ct.max().height,
-                    width: max,
-                },
-            ),
-            Self::Vertical => BoxConstraint::new(
-                Size {
-                    height: min,
-                    width: ct.min().width,
-                },
-                Size {
-                    height: max,
-                    width: ct.max().width,
-                },
-            ),
-        }
-    }
-}
 
 #[derive(Debug)]
 enum Child<'a> {
@@ -200,6 +83,7 @@ where
     }
 
     fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+        // allocate children layout
         let mut children_layout = Vec::new();
         children_layout.resize_with(self.children.len(), Tree::<Layout>::default);
 
@@ -233,20 +117,17 @@ where
         if major_remain > 0 {
             let per_flex = (major_remain as f64) / flex_total;
             for (index, child) in self.children.iter().enumerate() {
-                match child {
-                    Child::Flex { view, flex } => {
-                        let child_major = (flex * per_flex).round() as usize;
-                        if child_major == 0 {
-                            continue;
-                        }
-                        let child_ct = self.direction.constraint(ct_loosen, 0, child_major);
-                        let child_layout = view.layout(child_ct);
-
-                        major_flex += self.direction.major(child_layout.size);
-                        minor = max(minor, self.direction.minor(child_layout.size));
-                        children_layout[index] = child_layout;
+                if let Child::Flex { view, flex } = child {
+                    let child_major = (flex * per_flex).round() as usize;
+                    if child_major == 0 {
+                        continue;
                     }
-                    _ => {}
+                    let child_ct = self.direction.constraint(ct_loosen, 0, child_major);
+                    let child_layout = view.layout(child_ct);
+
+                    major_flex += self.direction.major(child_layout.size);
+                    minor = max(minor, self.direction.minor(child_layout.size));
+                    children_layout[index] = child_layout;
                 }
             }
         }
@@ -266,7 +147,7 @@ where
         Tree::new(
             Layout {
                 pos: Position::origin(),
-                size: ct.clamp(self.direction.size(offset, minor)),
+                size: ct.clamp(Size::from_axes(self.direction, offset, minor)),
             },
             children_layout,
         )
@@ -281,13 +162,36 @@ mod tests {
     #[test]
     fn test_flex() -> Result<(), Error> {
         let text = "some text".to_string();
-        let flex = Flex::column()
+        let flex = Flex::row()
             .add_flex_child(2.0, Text::new(&text).with_face("fg=#ff0000".parse()?))
             .add_flex_child(1.0, "other text");
 
         let size = Size::new(5, 12);
-        println!("{:#?}", flex.layout(BoxConstraint::loose(size)));
         println!("{:?}", flex.debug(size));
+        let reference = Tree::new(
+            Layout {
+                pos: Position::origin(),
+                size: Size::new(3, 12),
+            },
+            vec![
+                Tree::new(
+                    Layout {
+                        pos: Position::origin(),
+                        size: Size::new(2, 8),
+                    },
+                    Vec::new(),
+                ),
+                Tree::new(
+                    Layout {
+                        pos: Position::new(0, 8),
+                        size: Size::new(3, 4),
+                    },
+                    Vec::new(),
+                ),
+            ],
+        );
+        assert_eq!(reference, flex.layout(BoxConstraint::loose(size)));
+
         Ok(())
     }
 }

@@ -79,6 +79,11 @@ impl Cell {
         NonZeroUsize::new(width).expect("zero cell width")
     }
 
+    /// Cell face
+    pub fn face(&self) -> Face {
+        self.face
+    }
+
     /// Create damaged cell
     fn new_damaged() -> Self {
         Self {
