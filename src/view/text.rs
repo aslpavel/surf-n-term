@@ -259,11 +259,11 @@ mod tests {
             .add_text(" three".to_string())
             .add_text("\nfour")
             .add_text(" ");
-        write!(text, "{}", "and more")?;
+        write!(text, "and more")?;
         assert_eq!(text.len(), 27);
 
         let size = Size::new(5, 10);
-        println!("{:?}", text.debug(size));
+        print!("{:?}", text.debug(size));
 
         let layout = text.layout(BoxConstraint::loose(size));
         assert_eq!(layout.size, Size::new(4, 10));

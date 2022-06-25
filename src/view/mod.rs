@@ -435,7 +435,7 @@ mod tests {
     fn test_fixed() -> Result<(), Error> {
         let size = Size::new(3, 5);
         let fixed = Fixed::new(size, "#ff0000".parse::<RGBA>()?);
-        println!("{:?}", fixed.debug(size));
+        print!("{:?}", fixed.debug(size));
         Ok(())
     }
 }

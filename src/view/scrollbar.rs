@@ -102,7 +102,7 @@ mod tests {
                 Vec::new()
             )
         );
-        println!("{:?}", bar.debug(size));
+        print!("{:?}", bar.debug(size));
 
         let surf = render(&bar, size)?;
         surf.view(0u32, 0..3u32)

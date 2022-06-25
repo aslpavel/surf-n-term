@@ -11,8 +11,8 @@ enum Child<'a> {
 impl<'a> Child<'a> {
     fn view(&self) -> &dyn View {
         match self {
-            Self::Fixed { view, .. } => &*view,
-            Self::Flex { view, .. } => &*view,
+            Self::Fixed { view, .. } => view,
+            Self::Flex { view, .. } => view,
         }
     }
 }
@@ -137,8 +137,7 @@ where
 
         // calculate offsets
         let mut offset = 0;
-        for index in 0..self.children.len() {
-            let child_layout = &mut children_layout[index];
+        for child_layout in children_layout.iter_mut() {
             *child_layout.pos.major_mut(self.direction) = offset;
             offset += child_layout.size.major(self.direction);
         }
@@ -167,7 +166,7 @@ mod tests {
             .add_flex_child(1.0, "other text");
 
         let size = Size::new(5, 12);
-        println!("{:?}", flex.debug(size));
+        print!("{:?}", flex.debug(size));
         let reference = Tree::new(
             Layout {
                 pos: Position::origin(),
