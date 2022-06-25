@@ -465,7 +465,7 @@ impl<'a> TerminalWriter<'a> {
     }
 
     /// Get current position inside allocated view
-    pub fn position(&self) -> (usize, usize) {
+    pub fn position(&self) -> Position {
         self.iter.position()
     }
 
@@ -478,11 +478,27 @@ impl<'a> TerminalWriter<'a> {
         }
     }
 
+    pub fn put_newline(&mut self) {
+        let index = self.iter.index();
+        let shape = self.iter.shape();
+        let pos = self.position();
+        if pos.col != 0 {
+            let offset = shape.index(pos.row, shape.width - 1) - index;
+            self.iter.nth(offset);
+        }
+    }
+
     /// Put cell
     pub fn put(&mut self, mut cell: Cell) -> bool {
-        let blank = cell.width().get() - 1;
         // compose cell face with the current face
         let face = self.face.overlay(&cell.face);
+        let blank = cell.width().get() - 1;
+        // create newline if cell is too wide, but only once
+        let width = self.iter.shape().width;
+        if self.position().col + cell.width().get() > width {
+            self.put_newline()
+        }
+        // put cell
         let result = match self.iter.next() {
             Some(cell_ref) => {
                 cell.face = cell_ref.face.overlay(&face);
@@ -503,13 +519,7 @@ impl<'a> TerminalWriter<'a> {
         match c {
             '\r' => true,
             '\n' => {
-                let index = self.iter.index();
-                let shape = self.iter.shape();
-                let (row, col) = self.position();
-                if col != 0 {
-                    let offset = shape.index(row, shape.width - 1) - index;
-                    self.iter.nth(offset);
-                }
+                self.put_newline();
                 true
             }
             chr => match self.iter.next() {

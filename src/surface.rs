@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::Size;
+use crate::{Position, Size};
 
 /// Shape object describing layout of data in the surface object
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -373,8 +373,9 @@ pub struct SurfaceMutIter<'a, T> {
 }
 
 impl<'a, T> SurfaceMutIter<'a, T> {
-    pub fn position(&self) -> (usize, usize) {
-        self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
+    pub fn position(&self) -> Position {
+        let (row, col) = self.shape.nth(self.index).unwrap_or((self.shape.height, 0));
+        Position { row, col }
     }
 
     pub fn index(&self) -> usize {
@@ -881,17 +882,17 @@ mod tests {
         // 4 5 | 6 7 8 9 | 1
         let mut view = surf.view_mut(.., 2..-1);
         let mut iter = view.iter_mut();
-        assert_eq!(iter.position(), (0, 0));
+        assert_eq!(iter.position(), Position::new(0, 0));
         assert_eq!(iter.next().cloned(), Some(2));
-        assert_eq!(iter.position(), (0, 1));
+        assert_eq!(iter.position(), Position::new(0, 1));
         assert_eq!(iter.nth(1).cloned(), Some(4));
-        assert_eq!(iter.position(), (0, 3));
+        assert_eq!(iter.position(), Position::new(0, 3));
         assert_eq!(iter.nth(6).cloned(), Some(7));
-        assert_eq!(iter.position(), (2, 2));
+        assert_eq!(iter.position(), Position::new(2, 2));
         assert_eq!(iter.nth(1).cloned(), Some(9));
-        assert_eq!(iter.position(), (3, 0));
+        assert_eq!(iter.position(), Position::new(3, 0));
         assert_eq!(iter.next(), None);
-        assert_eq!(iter.position(), (3, 0));
+        assert_eq!(iter.position(), Position::new(3, 0));
 
         let view = surf.view(1..2, 2..4);
         let mut iter = view.iter();
