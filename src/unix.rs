@@ -13,7 +13,7 @@ use crate::{
     },
     DecMode, ImageHandler,
 };
-use crate::{TerminalCaps, RGBA};
+use crate::{Position, TerminalCaps, RGBA};
 use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
@@ -521,6 +521,26 @@ impl Terminal for UnixTerminal {
             Some(size) => Ok(size),
             None => self.size_ioctl(),
         }
+    }
+
+    fn position(&mut self) -> Result<crate::Position, Error> {
+        let mut queue = Vec::new();
+        self.execute(TerminalCommand::CursorGet)?;
+        write!(self, "\x1b[c")?; // DA1 - as sync event
+        let mut pos = Position::origin();
+        while let Some(event) = self.poll(None)? {
+            match event {
+                TerminalEvent::DeviceAttrs(..) => {
+                    self.events_queue.extend(queue);
+                    return Ok(pos);
+                }
+                TerminalEvent::CursorPosition(term_pos) => {
+                    pos = term_pos;
+                }
+                event => queue.push(event),
+            }
+        }
+        Ok(pos)
     }
 
     fn waker(&self) -> TerminalWaker {

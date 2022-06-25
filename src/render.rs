@@ -3,6 +3,7 @@ use crate::{
     decoder::Decoder,
     encoder::{Encoder, TTYEncoder},
     error::Error,
+    view::{BoxConstraint, View},
     Face, FaceAttrs, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface,
     SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps,
     TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker, RGBA,
@@ -339,6 +340,9 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Draw image
     fn draw_image(&mut self, img: Image);
 
+    /// Draw view on the surface
+    fn draw_view(&mut self, view: impl View) -> Result<(), Error>;
+
     /// Erase surface with face
     fn erase(&mut self, face: Face);
 
@@ -389,6 +393,13 @@ where
         if let Some(cell) = self.get_mut(0, 0) {
             *cell = Cell::new_image(img);
         }
+    }
+
+    /// Draw view on the surface
+    fn draw_view(&mut self, view: impl View) -> Result<(), Error> {
+        let layout = view.layout(BoxConstraint::loose(self.size()));
+        view.render(&mut self.view_mut(.., ..), &layout)?;
+        Ok(())
     }
 
     fn erase(&mut self, face: Face) {
@@ -681,6 +692,10 @@ impl Terminal for DebugTerminal {
         Ok(self.size)
     }
 
+    fn position(&mut self) -> Result<Position, Error> {
+        Ok(Position::new(0, 0))
+    }
+
     fn waker(&self) -> TerminalWaker {
         TerminalWaker::new(|| Ok(()))
     }
@@ -803,6 +818,10 @@ mod tests {
 
         fn size(&self) -> Result<TerminalSize, Error> {
             Ok(self.size)
+        }
+
+        fn position(&mut self) -> Result<Position, Error> {
+            Ok(Position::new(0, 0))
         }
 
         fn waker(&self) -> TerminalWaker {

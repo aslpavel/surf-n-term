@@ -48,6 +48,9 @@ pub trait Terminal: Write + Send {
     /// Get terminal size
     fn size(&self) -> Result<TerminalSize, Error>;
 
+    /// Get cursor position
+    fn position(&mut self) -> Result<Position, Error>;
+
     /// Run terminal with event handler
     fn run<H, R, E>(&mut self, mut timeout: Option<Duration>, mut handler: H) -> Result<R, E>
     where
@@ -163,6 +166,10 @@ impl<'a, T: Terminal + ?Sized> Terminal for &'a mut T {
 
     fn size(&self) -> Result<TerminalSize, Error> {
         (**self).size()
+    }
+
+    fn position(&mut self) -> Result<Position, Error> {
+        (**self).position()
     }
 
     fn frames_pending(&self) -> usize {
@@ -409,7 +416,7 @@ pub enum TerminalEvent {
     /// Mouse event
     Mouse(Mouse),
     /// Current cursor position
-    CursorPosition { row: usize, col: usize },
+    CursorPosition(Position),
     /// Terminal was resized
     Resize(TerminalSize),
     /// Current terminal size

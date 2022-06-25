@@ -134,10 +134,7 @@ pub struct Preview<V> {
 impl<V: View> std::fmt::Debug for Preview<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
-        let layout = self.view.layout(BoxConstraint::loose(self.size));
-        self.view
-            .render(&mut surf.view_mut(.., ..), &layout)
-            .map_err(|_| std::fmt::Error)?;
+        surf.draw_view(&self.view).map_err(|_| std::fmt::Error)?;
         surf.debug().fmt(f)
     }
 }

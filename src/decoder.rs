@@ -3,7 +3,7 @@ use crate::{
     automata::{DFAState, DFA, NFA},
     error::Error,
     terminal::{DecModeStatus, Mouse, Size, TerminalColor, TerminalEvent, TerminalSize},
-    Face, FaceAttrs, Key, KeyMod, KeyName, TerminalCommand, RGBA,
+    Face, FaceAttrs, Key, KeyMod, KeyName, Position, TerminalCommand, RGBA,
 };
 use lazy_static::lazy_static;
 use std::{collections::BTreeMap, convert::TryInto, fmt, io::BufRead};
@@ -715,10 +715,10 @@ impl TTYMatcher for CursorPositionMatcher {
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
         // "\x1b[{row};{col}R"
         let mut nums = numbers_decode(&data[2..data.len() - 1], b';');
-        Some(TerminalEvent::CursorPosition {
+        Some(TerminalEvent::CursorPosition(Position {
             row: nums.next()? - 1,
             col: nums.next()? - 1,
-        })
+        }))
     }
 }
 
@@ -1126,7 +1126,7 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::CursorPosition { row: 96, col: 14 }),
+            Some(TerminalEvent::CursorPosition(Position { row: 96, col: 14 })),
         );
 
         Ok(())
