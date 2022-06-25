@@ -18,7 +18,7 @@ pub struct Text<'a> {
 }
 
 impl<'a> Text<'a> {
-    pub fn new(text: impl Into<Cow<'a, str>>) -> Self {
+    pub fn text(text: impl Into<Cow<'a, str>>) -> Self {
         Self {
             text: text.into(),
             glyph: None,
@@ -182,7 +182,7 @@ impl<'a> Write for Text<'a> {
         let out = if self.children.is_empty() {
             self.text.to_mut()
         } else {
-            self.children.push(Text::new(String::new()));
+            self.children.push(Text::text(String::new()));
             self.children.last_mut().unwrap().text.to_mut()
         };
         let mut decoder = Utf8Decoder::new();
@@ -200,13 +200,13 @@ impl<'a> Write for Text<'a> {
 
 impl<'a, 'b: 'a> From<&'b str> for Text<'a> {
     fn from(string: &'b str) -> Self {
-        Text::new(string)
+        Text::text(string)
     }
 }
 
 impl<'a> From<String> for Text<'a> {
     fn from(string: String) -> Self {
-        Text::new(string)
+        Text::text(string)
     }
 }
 
@@ -222,11 +222,11 @@ impl<'a> View for &'a str {
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        Text::new(*self).render(surf, layout)
+        Text::text(*self).render(surf, layout)
     }
 
     fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
-        Text::new(*self).layout(ct)
+        Text::text(*self).layout(ct)
     }
 }
 
@@ -253,9 +253,9 @@ mod tests {
     #[test]
     fn test_text() -> Result<(), Error> {
         let two = "two".to_string();
-        let mut text = Text::new("one ")
+        let mut text = Text::text("one ")
             .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
-            .add_text(Text::new(two.as_str()).with_face("fg=#af3a03,bold".parse()?))
+            .add_text(Text::text(two.as_str()).with_face("fg=#af3a03,bold".parse()?))
             .add_text(" three".to_string())
             .add_text("\nfour")
             .add_text(" ");
@@ -293,7 +293,7 @@ mod tests {
             Size::new(1, 2),
         );
 
-        let text = Text::new("before ->")
+        let text = Text::text("before ->")
             .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
             .add_text(Text::glyph(glyph).with_face("fg=#79740e".parse()?))
             .add_text("<- after ");

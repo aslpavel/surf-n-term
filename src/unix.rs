@@ -29,7 +29,7 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -69,7 +69,16 @@ pub struct UnixTerminal {
 impl UnixTerminal {
     /// Create new terminal by opening `/dev/tty` device.
     pub fn new() -> Result<Self, Error> {
-        Self::open("/dev/tty")
+        let tty_fd = match nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty()) {
+            Ok(tty_fd) => tty_fd,
+            Err(error) => {
+                // LLDB is not creating /dev/tty for child processes
+                error!("failed to open terminal at /dev/tty with error {error:?}");
+                error!("trying to fallback back to /dev/stdin");
+                nix::open("/dev/stdin", nix::OFlag::O_RDWR, nix::Mode::empty())?
+            }
+        };
+        Self::new_from_fd(tty_fd)
     }
 
     /// Open terminal by a given device path
@@ -78,7 +87,7 @@ impl UnixTerminal {
         Self::new_from_fd(tty_fd)
     }
 
-    /// Create new terminal from raw file descriptor pointing to /dev/tty.
+    /// Create new terminal from raw file descriptor pointing to a tty.
     pub fn new_from_fd(tty_fd: RawFd) -> Result<Self, Error> {
         let tty_handle = IOHandle::new(tty_fd);
         tty_handle.set_blocking(false)?;
@@ -615,7 +624,7 @@ impl AsRawFd for IOHandle {
 
 impl Write for IOHandle {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        nix::write(self.fd, buf).map_err(|_| std::io::Error::last_os_error())
+        nix::write(self.fd, buf).map_err(|err| std::io::Error::from_raw_os_error(err as i32))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -625,6 +634,6 @@ impl Write for IOHandle {
 
 impl Read for IOHandle {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        nix::read(self.fd, buf).map_err(|_| std::io::Error::last_os_error())
+        nix::read(self.fd, buf).map_err(|err| std::io::Error::from_raw_os_error(err as i32))
     }
 }

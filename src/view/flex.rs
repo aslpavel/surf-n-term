@@ -162,7 +162,7 @@ mod tests {
     fn test_flex() -> Result<(), Error> {
         let text = "some text".to_string();
         let flex = Flex::row()
-            .add_flex_child(2.0, Text::new(&text).with_face("fg=#ff0000".parse()?))
+            .add_flex_child(2.0, Text::text(&text).with_face("fg=#ff0000".parse()?))
             .add_flex_child(1.0, "other text");
 
         let size = Size::new(5, 12);
