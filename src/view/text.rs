@@ -1,6 +1,13 @@
 use super::{BoxConstraint, Layout, Tree, View};
-use crate::{Error, Face, Position, Size, TerminalSurface, TerminalSurfaceExt, TerminalWriter};
-use std::{borrow::Cow, cmp::max, io::Write};
+use crate::{
+    decoder::{Decoder, Utf8Decoder},
+    Error, Face, Position, Size, TerminalSurface, TerminalSurfaceExt, TerminalWriter,
+};
+use std::{
+    borrow::Cow,
+    cmp::max,
+    io::{Cursor, Write},
+};
 
 #[derive(Debug)]
 pub struct Text<'a> {
@@ -35,6 +42,11 @@ impl<'a> Text<'a> {
     }
 
     pub fn add_text(mut self, text: impl Into<Text<'a>>) -> Self {
+        self.push(text);
+        self
+    }
+
+    pub fn push(&mut self, text: impl Into<Text<'a>>) -> &mut Self {
         self.children.push(text.into());
         self
     }
@@ -75,6 +87,35 @@ impl<'a> View for Text<'a> {
             Box::new(iter)
         }
         Tree::new(layout_chars(ct, chars(self)), Vec::new())
+    }
+}
+
+impl<'a, T: Into<Text<'a>>> Extend<T> for Text<'a> {
+    fn extend<TS: IntoIterator<Item = T>>(&mut self, iter: TS) {
+        for item in iter {
+            self.push(item);
+        }
+    }
+}
+
+impl<'a> Write for Text<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let out = if self.children.is_empty() {
+            self.text.to_mut()
+        } else {
+            self.children.push(Text::new(String::new()));
+            self.children.last_mut().unwrap().text.to_mut()
+        };
+        let mut decoder = Utf8Decoder::new();
+        let mut cursor = Cursor::new(buf);
+        while let Some(chr) = decoder.decode(&mut cursor)? {
+            out.push(chr);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -158,18 +199,19 @@ mod tests {
     #[test]
     fn test_text() -> Result<(), Error> {
         let two = "two".to_string();
-        let text = Text::new("one ")
+        let mut text = Text::new("one ")
             .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
             .add_text(Text::new(two.as_str()).with_face("fg=#af3a03,bold".parse()?))
             .add_text(" three".to_string())
             .add_text("\nfour")
-            .add_text("");
+            .add_text(" ");
+        write!(text, "{}", "and more")?;
 
         let size = Size::new(5, 10);
         println!("{:?}", text.debug(size));
 
         let layout = text.layout(BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(3, 10));
+        assert_eq!(layout.size, Size::new(4, 10));
 
         Ok(())
     }
