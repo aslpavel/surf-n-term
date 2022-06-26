@@ -472,7 +472,8 @@ impl Size {
     }
 
     /// Expand/Contract size to bigger than `min` and smaller than `max` size
-    pub fn clamp(&self, min: Self, max: Self) -> Self {
+    pub fn clamp(self, min: Self, max: Self) -> Self {
+        // NOTE: `self` is needed as reference will have lower precedence then Ord::clamp
         Size {
             height: self.height.clamp(min.height, max.height),
             width: self.width.clamp(min.width, max.width),

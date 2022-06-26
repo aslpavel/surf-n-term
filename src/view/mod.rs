@@ -435,4 +435,12 @@ mod tests {
         print!("{:?}", fixed.debug(size));
         Ok(())
     }
+
+    #[test]
+    fn test_box_constraint() -> Result<(), Error> {
+        let ct = BoxConstraint::new(Size::new(10, 0), Size::new(10, 100));
+        let size = Size::new(1, 4);
+        assert_eq!(ct.clamp(size), Size::new(10, 4));
+        Ok(())
+    }
 }

@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Position, Size};
+use crate::{common::clamp, Position, Size};
 
 /// Shape object describing layout of data in the surface object
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -769,19 +769,6 @@ where
             start: 0,
             end: 0,
         },
-    }
-}
-
-fn clamp<T>(val: T, min: T, max: T) -> T
-where
-    T: PartialOrd,
-{
-    if val < min {
-        min
-    } else if val > max {
-        max
-    } else {
-        val
     }
 }
 

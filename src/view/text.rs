@@ -162,7 +162,7 @@ impl<'a> View for Text<'a> {
         Tree::new(
             Layout {
                 pos: Position::origin(),
-                size,
+                size: ct.clamp(size),
             },
             Vec::new(),
         )
@@ -323,6 +323,19 @@ mod tests {
             text.layout(BoxConstraint::loose(size))
         );
         print!("{:?}", text.debug(size));
+
+        // check tight constraint
+        let size = Size::new(10, 12);
+        assert_eq!(
+            Tree::new(
+                Layout {
+                    pos: Position::origin(),
+                    size,
+                },
+                Vec::new(),
+            ),
+            text.layout(BoxConstraint::tight(size))
+        );
 
         Ok(())
     }
