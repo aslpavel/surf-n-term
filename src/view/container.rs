@@ -68,7 +68,7 @@ impl<V: View> Container<V> {
     }
 
     /// set horizontal alignment
-    pub fn horizontal(self, align: Align) -> Self {
+    pub fn with_horizontal(self, align: Align) -> Self {
         Self {
             align_horizontal: align,
             ..self
@@ -76,14 +76,14 @@ impl<V: View> Container<V> {
     }
 
     /// set vertical alignment
-    pub fn vertical(self, align: Align) -> Self {
+    pub fn with_vertical(self, align: Align) -> Self {
         Self {
             align_vertical: align,
             ..self
         }
     }
 
-    pub fn color(self, color: RGBA) -> Self {
+    pub fn with_color(self, color: RGBA) -> Self {
         Self {
             color: Some(color),
             ..self
@@ -128,7 +128,7 @@ impl<V: View> View for Container<V> {
                 0
             },
             width: if self.align_horizontal == Align::Fill {
-                size_max.height
+                size_max.width
             } else {
                 0
             },

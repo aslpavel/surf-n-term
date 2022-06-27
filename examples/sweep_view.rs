@@ -2,21 +2,39 @@ use std::io::Write;
 use surf_n_term::{
     render::TerminalRenderer,
     view::{Align, Container, Flex, Text, View},
-    Error, Position, SurfaceMut, SystemTerminal, Terminal, TerminalCommand, TerminalSurfaceExt,
+    Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal, TerminalCommand,
+    TerminalSurfaceExt, RGBA,
 };
 
 const HIGHT: usize = 10;
 
 fn sweep_view() -> Result<impl View, Error> {
+    let fg: RGBA = "#3c3836".parse()?;
+    let bg: RGBA = "#fbf1c7".parse()?;
+    let accent: RGBA = "#8f3f71".parse()?;
     /*
     let input = Flex::row(
         Text::default().face("")
     )
     */
-    let list = Flex::row().add_child(Text::text(" test "));
+
+    let prompt_face = Face::new(Some(bg), Some(accent), FaceAttrs::EMPTY);
+    let default = Face::new(Some(fg), Some(bg), FaceAttrs::EMPTY);
+    let list = Flex::row()
+        .add_child(
+            Text::text(" Input ")
+                .with_face(prompt_face)
+                .add_text(Text::text(" ").with_face(prompt_face.invert().with_bg(Some(bg)))),
+        )
+        .add_flex_child(
+            1.0,
+            Container::new(Text::text("query").with_face(default))
+                .with_horizontal(Align::End)
+                .with_color(bg),
+        );
     Ok(Container::new(list)
-        .color("#00f000".parse()?)
-        .vertical(Align::Fill))
+        .with_color("#00f000".parse()?)
+        .with_horizontal(Align::Fill))
 }
 
 fn main() -> Result<(), Error> {
