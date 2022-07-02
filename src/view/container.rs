@@ -49,7 +49,7 @@ impl<V: View> Container<V> {
     }
 
     /// set size for the container
-    pub fn width(self, width: usize) -> Self {
+    pub fn with_width(self, width: usize) -> Self {
         Self {
             size: Size { width, ..self.size },
             ..self
@@ -57,7 +57,7 @@ impl<V: View> Container<V> {
     }
 
     /// set hight for the container
-    pub fn height(self, height: usize) -> Self {
+    pub fn with_height(self, height: usize) -> Self {
         Self {
             size: Size {
                 height,
