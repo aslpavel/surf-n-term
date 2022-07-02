@@ -1,7 +1,6 @@
 //! [Container] view can specify the size and alignment for its child view
 use super::{BoxConstraint, Layout, Tree, View};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
-use std::cmp::max;
 
 /// Alignment of a child view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,8 +105,8 @@ impl<V: View> View for Container<V> {
         if self.color.is_some() {
             surf.erase(Face::new(None, self.color, FaceAttrs::EMPTY));
         }
-        let view_layout = layout.get(0).ok_or(Error::InvalidLayout)?;
-        self.view.render(&mut view_layout.view(surf), view_layout)?;
+        self.view
+            .render(surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
         Ok(())
     }
 
@@ -138,18 +137,21 @@ impl<V: View> View for Container<V> {
                 0
             },
         };
-        let view_layout = self.view.layout(BoxConstraint::new(size_min, size_max));
+        let mut view_layout = self.view.layout(BoxConstraint::new(size_min, size_max));
         let size = Size {
-            width: view_layout
-                .size
-                .width
-                .clamp(max(self.size.width, ct.min().width), size_max.width),
-            height: view_layout
-                .size
-                .height
-                .clamp(max(self.size.height, ct.min().height), size_max.height),
+            width: if self.size.width == 0 {
+                view_layout.size.width
+            } else {
+                self.size.width
+            },
+            height: if self.size.height == 0 {
+                view_layout.size.height
+            } else {
+                self.size.height
+            },
         };
-        let pos = Position {
+        let size = ct.clamp(size);
+        view_layout.pos = Position {
             row: self
                 .align_vertical
                 .align(size.height.abs_diff(view_layout.size.height)),
@@ -158,7 +160,10 @@ impl<V: View> View for Container<V> {
                 .align(size.width.abs_diff(view_layout.size.width)),
         };
         Tree {
-            value: Layout { size, pos },
+            value: Layout {
+                size,
+                pos: Position::origin(),
+            },
             children: vec![view_layout],
         }
     }
@@ -176,9 +181,55 @@ mod tests {
         let size = Size::new(5, 10);
         let cont = Container::new(&view)
             .with_size(size)
+            .with_color("#00ff00".parse()?)
             .with_horizontal(Align::End);
 
         println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout {
+                    pos: Position::origin(),
+                    size,
+                },
+                vec![Tree::leaf(Layout {
+                    pos: Position::new(2, 6),
+                    size: Size::new(1, 4),
+                })]
+            ),
+            cont.layout(BoxConstraint::loose(size))
+        );
+
+        let cont = cont.with_horizontal(Align::Start);
+        println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout {
+                    pos: Position::origin(),
+                    size,
+                },
+                vec![Tree::leaf(Layout {
+                    pos: Position::new(2, 0),
+                    size: Size::new(1, 4),
+                })]
+            ),
+            cont.layout(BoxConstraint::loose(size))
+        );
+
+        let cont = cont.with_horizontal(Align::Center);
+        println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout {
+                    pos: Position::origin(),
+                    size,
+                },
+                vec![Tree::leaf(Layout {
+                    pos: Position::new(2, 3),
+                    size: Size::new(1, 4),
+                })]
+            ),
+            cont.layout(BoxConstraint::loose(size))
+        );
 
         Ok(())
     }

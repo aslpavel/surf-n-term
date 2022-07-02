@@ -178,6 +178,13 @@ impl<T> Tree<T> {
         Self { value, children }
     }
 
+    pub fn leaf(value: T) -> Self {
+        Self {
+            value,
+            children: Vec::new(),
+        }
+    }
+
     pub fn push(&mut self, child: Tree<T>) {
         self.children.push(child)
     }

@@ -1,5 +1,5 @@
 use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View};
-use crate::{Error, Position, Size, TerminalSurface};
+use crate::{Error, Position, Size, SurfaceMut, TerminalSurface};
 use std::cmp::{max, min};
 
 #[derive(Debug)]
@@ -71,13 +71,13 @@ where
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        let surf = &mut layout.view(surf);
+        let mut surf = layout.view(surf);
         for (index, child) in self.children.iter().enumerate() {
             let child_layout = layout.get(index).ok_or(Error::InvalidLayout)?;
             if child_layout.size.is_empty() {
                 continue;
             }
-            child.view().render(&mut child_layout.view(surf), layout)?;
+            child.view().render(&mut surf.as_mut(), child_layout)?;
         }
         Ok(())
     }
