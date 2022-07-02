@@ -101,7 +101,7 @@ impl<V: View> View for Container<V> {
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        let surf = &mut layout.view(surf);
+        let surf = &mut layout.apply_to(surf);
         if self.color.is_some() {
             surf.erase(Face::new(None, self.color, FaceAttrs::EMPTY));
         }

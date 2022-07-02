@@ -104,7 +104,7 @@ impl<'a> View for Text<'a> {
             Ok(())
         }
 
-        let mut surf = layout.view(surf);
+        let mut surf = layout.apply_to(surf);
         surf.erase(self.face);
         render_rec(&mut surf.writer(), &Face::default(), self)
     }

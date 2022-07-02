@@ -71,7 +71,7 @@ where
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        let mut surf = layout.view(surf);
+        let mut surf = layout.apply_to(surf);
         for (index, child) in self.children.iter().enumerate() {
             let child_layout = layout.get(index).ok_or(Error::InvalidLayout)?;
             if child_layout.size.is_empty() {

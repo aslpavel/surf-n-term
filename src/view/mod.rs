@@ -93,7 +93,7 @@ impl Debug for Layout {
 impl Layout {
     /// Constrain surface by the layout, that is create sub-subsurface view
     /// with offset `pos` and size of `size`.
-    pub fn view<'a, S>(&self, surf: &'a mut S) -> TerminalSurface<'a>
+    pub fn apply_to<'a, S>(&self, surf: &'a mut S) -> TerminalSurface<'a>
     where
         S: SurfaceMut<Item = Cell>,
     {
@@ -396,7 +396,7 @@ impl View for RGBA {
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let cell = Cell::new(Face::new(None, Some(*self), FaceAttrs::default()), None);
-        layout.view(surf).fill(cell);
+        layout.apply_to(surf).fill(cell);
         Ok(())
     }
 

@@ -48,7 +48,7 @@ impl View for ScrollBar {
             (major, 0)
         };
 
-        let mut surf = layout.view(surf);
+        let mut surf = layout.apply_to(surf);
         let mut writer = surf.writer();
         let fg = Face::new(None, self.face.fg, FaceAttrs::EMPTY);
         let bg = Face::new(None, self.face.bg, FaceAttrs::EMPTY);
