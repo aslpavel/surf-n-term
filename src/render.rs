@@ -403,7 +403,7 @@ where
     }
 
     fn erase(&mut self, face: Face) {
-        self.fill_with(|_, _, _| Cell::new(face, None));
+        self.fill_with(|_row, _col, cell| Cell::new(cell.face.overlay(&face), None));
     }
 
     fn writer(&mut self) -> TerminalWriter<'_> {
