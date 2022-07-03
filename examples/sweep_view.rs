@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, time::Duration};
 use surf_n_term::{
     render::TerminalRenderer,
     view::{Align, Axis, Container, Flex, ScrollBar, Text, View},
@@ -139,6 +139,7 @@ fn main() -> Result<(), Error> {
         row: pos.row + HIGHT,
         col: 0,
     }))?;
+    term.poll(Some(Duration::from_millis(100)))?;
 
     Ok(())
 }
