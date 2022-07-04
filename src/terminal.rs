@@ -511,7 +511,7 @@ pub struct TerminalSize {
 
 impl TerminalSize {
     /// Size of the cell in pixels
-    pub fn cell_size(&self) -> Size {
+    pub fn pixels_per_cell(&self) -> Size {
         Size {
             height: self.pixels.height / self.cells.height,
             width: self.pixels.width / self.cells.width,
@@ -520,7 +520,7 @@ impl TerminalSize {
 
     /// Convert cell size into pixels
     pub fn cells_in_pixels(&self, cells: Size) -> Size {
-        let cell_size = self.cell_size();
+        let cell_size = self.pixels_per_cell();
         Size {
             height: cells.height * cell_size.height,
             width: cells.width * cell_size.width,

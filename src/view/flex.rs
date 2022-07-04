@@ -1,4 +1,4 @@
-use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View};
+use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{Error, Position, Size, SurfaceMut, TerminalSurface};
 use std::cmp::{max, min};
 
@@ -68,6 +68,7 @@ where
 {
     fn render<'b>(
         &self,
+        ctx: &ViewContext,
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
@@ -77,12 +78,12 @@ where
             if child_layout.size.is_empty() {
                 continue;
             }
-            child.view().render(&mut surf.as_mut(), child_layout)?;
+            child.view().render(ctx, &mut surf.as_mut(), child_layout)?;
         }
         Ok(())
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         // allocate children layout
         let mut children_layout = Vec::new();
         children_layout.resize_with(self.children.len(), Tree::<Layout>::default);
@@ -96,7 +97,7 @@ where
         for (index, child) in self.children.iter().enumerate() {
             match child {
                 Child::Fixed { view } => {
-                    let child_layout = view.layout(ct_loosen);
+                    let child_layout = view.layout(ctx, ct_loosen);
                     major_non_flex += self.direction.major(child_layout.size);
                     minor = max(minor, self.direction.minor(child_layout.size));
                     children_layout[index] = child_layout;
@@ -123,7 +124,7 @@ where
                         continue;
                     }
                     let child_ct = self.direction.constraint(ct_loosen, 0, child_major);
-                    let child_layout = view.layout(child_ct);
+                    let child_layout = view.layout(ctx, child_ct);
 
                     major_flex += self.direction.major(child_layout.size);
                     minor = max(minor, self.direction.minor(child_layout.size));
@@ -161,6 +162,7 @@ mod tests {
     #[test]
     fn test_flex() -> Result<(), Error> {
         let text = "some text".to_string();
+        let ctx = ViewContext::dummy();
         let flex = Flex::row()
             .add_flex_child(2.0, Text::new(&text).with_face("fg=#ff0000".parse()?))
             .add_flex_child(1.0, "other text");
@@ -189,7 +191,7 @@ mod tests {
                 ),
             ],
         );
-        assert_eq!(reference, flex.layout(BoxConstraint::loose(size)));
+        assert_eq!(reference, flex.layout(&ctx, BoxConstraint::loose(size)));
 
         Ok(())
     }

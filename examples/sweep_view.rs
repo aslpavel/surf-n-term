@@ -1,7 +1,7 @@
 use std::{io::Write, time::Duration};
 use surf_n_term::{
     render::TerminalRenderer,
-    view::{Align, Axis, Container, Flex, ScrollBar, Text, View},
+    view::{Align, Axis, Container, Flex, ScrollBar, Text, View, ViewContext},
     BBox, Blend, Color, Error, Face, FaceAttrs, FillRule, Glyph, Path, Position, Size, SurfaceMut,
     SystemTerminal, Terminal, TerminalCommand, TerminalSurfaceExt, RGBA,
 };
@@ -120,17 +120,21 @@ fn main() -> Result<(), Error> {
     let mut surf = render.view();
     {
         // render sub-surface
+        let ctx = ViewContext::new(term.dyn_ref())?;
         let mut surf = surf.view_mut(pos.row..pos.row + HIGHT, ..100);
         surf.erase("bg=#ff0000".parse()?);
-        surf.draw_view(sweep_view([
-            "first item",
-            "multi\n line",
-            "thrid element",
-            "and another",
-            "and plus one",
-            "one more",
-            "some other elements",
-        ])?)?;
+        surf.draw_view(
+            &ctx,
+            sweep_view([
+                "first item",
+                "multi\n line",
+                "thrid element",
+                "and another",
+                "and plus one",
+                "one more",
+                "some other elements",
+            ])?,
+        )?;
     }
     render.frame(&mut term)?;
 

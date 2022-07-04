@@ -55,7 +55,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     write!(&mut term, "Terminal::capabilities(): {:?}\r\n", caps)?;
     let size = term.size()?;
     write!(&mut term, "Terminal::size(): {:?}\r\n", size)?;
-    write!(&mut term, "Terminal cell size: {:?}\r\n", size.cell_size())?;
+    write!(
+        &mut term,
+        "Terminal cell size: {:?}\r\n",
+        size.pixels_per_cell()
+    )?;
     let image_handler = term.image_handler().kind();
     write!(
         &mut term,

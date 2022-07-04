@@ -1,5 +1,5 @@
 //! [Container] view can specify the size and alignment for its child view
-use super::{BoxConstraint, Layout, Tree, View};
+use super::{BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
 
 /// Alignment of a child view
@@ -98,6 +98,7 @@ impl<V: View> Container<V> {
 impl<V: View> View for Container<V> {
     fn render<'a>(
         &self,
+        ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
@@ -106,11 +107,11 @@ impl<V: View> View for Container<V> {
             surf.erase(Face::new(None, self.color, FaceAttrs::EMPTY));
         }
         self.view
-            .render(surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
+            .render(ctx, surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
         Ok(())
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         // constraint max size if it is specified
         let size_max = Size {
             height: if self.size.height == 0 {
@@ -137,7 +138,9 @@ impl<V: View> View for Container<V> {
                 0
             },
         };
-        let mut view_layout = self.view.layout(BoxConstraint::new(size_min, size_max));
+        let mut view_layout = self
+            .view
+            .layout(ctx, BoxConstraint::new(size_min, size_max));
         let size = Size {
             width: if self.size.width == 0 {
                 view_layout.size.width
@@ -177,6 +180,7 @@ mod tests {
     #[test]
     fn test_container() -> Result<(), Error> {
         let view = Fixed::new(Size::new(1, 4), "#ff0000".parse::<RGBA>()?);
+        let ctx = ViewContext::dummy();
 
         let size = Size::new(5, 10);
         let cont = Container::new(&view)
@@ -196,7 +200,7 @@ mod tests {
                     size: Size::new(1, 4),
                 })]
             ),
-            cont.layout(BoxConstraint::loose(size))
+            cont.layout(&ctx, BoxConstraint::loose(size))
         );
 
         let cont = cont.with_horizontal(Align::Start);
@@ -212,7 +216,7 @@ mod tests {
                     size: Size::new(1, 4),
                 })]
             ),
-            cont.layout(BoxConstraint::loose(size))
+            cont.layout(&ctx, BoxConstraint::loose(size))
         );
 
         let cont = cont.with_horizontal(Align::Center);
@@ -228,7 +232,7 @@ mod tests {
                     size: Size::new(1, 4),
                 })]
             ),
-            cont.layout(BoxConstraint::loose(size))
+            cont.layout(&ctx, BoxConstraint::loose(size))
         );
 
         Ok(())

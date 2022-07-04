@@ -1,4 +1,4 @@
-use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View};
+use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt};
 use std::cmp::{max, min};
 
@@ -28,6 +28,7 @@ impl ScrollBar {
 impl View for ScrollBar {
     fn render<'a>(
         &self,
+        _ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
@@ -62,7 +63,7 @@ impl View for ScrollBar {
         Ok(())
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         let major = self.direction.major(ct.max());
         let minor = max(self.direction.minor(ct.min()), 1);
         Tree::new(
@@ -91,9 +92,10 @@ mod tests {
             20,
             30,
         );
+        let ctx = &ViewContext::dummy();
         let size = Size::new(5, 20);
         assert_eq!(
-            bar.layout(BoxConstraint::loose(size)),
+            bar.layout(ctx, BoxConstraint::loose(size)),
             Tree::new(
                 Layout {
                     pos: Position::origin(),
@@ -104,7 +106,7 @@ mod tests {
         );
         print!("{:?}", bar.debug(size));
 
-        let surf = render(&bar, size)?;
+        let surf = render(ctx, &bar, size)?;
         surf.view(0u32, 0..3u32)
             .iter()
             .enumerate()

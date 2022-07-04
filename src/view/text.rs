@@ -1,4 +1,4 @@
-use super::{BoxConstraint, Layout, Tree, View};
+use super::{BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{
     decoder::{Decoder, Utf8Decoder},
     Cell, Error, Face, Glyph, Position, Size, TerminalSurface, TerminalSurfaceExt, TerminalWriter,
@@ -81,6 +81,7 @@ impl<'a> Text<'a> {
 impl<'a> View for Text<'a> {
     fn render<'b>(
         &self,
+        _ctx: &ViewContext,
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
@@ -109,7 +110,7 @@ impl<'a> View for Text<'a> {
         render_rec(&mut surf.writer(), &Face::default(), self)
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         fn size_rec<'a>(
             ct: BoxConstraint,
             text: &'a Text<'a>,
@@ -217,31 +218,33 @@ impl<'a> From<Glyph> for Text<'a> {
     }
 }
 
-impl<'a> View for &'a str {
+impl View for str {
     fn render<'b>(
         &self,
+        ctx: &ViewContext,
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        Text::new(*self).render(surf, layout)
+        Text::new(self).render(ctx, surf, layout)
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
-        Text::new(*self).layout(ct)
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        Text::new(self).layout(ctx, ct)
     }
 }
 
 impl View for String {
     fn render<'a>(
         &self,
+        ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        self.as_str().render(surf, layout)
+        self.as_str().render(ctx, surf, layout)
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
-        self.as_str().layout(ct)
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        self.as_str().layout(ctx, ct)
     }
 }
 
@@ -254,6 +257,7 @@ mod tests {
     #[test]
     fn test_text() -> Result<(), Error> {
         let two = "two".to_string();
+        let ctx = ViewContext::dummy();
         let mut text = Text::new("one ")
             .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
             .add_text(Text::new(two.as_str()).with_face("fg=#af3a03,bold".parse()?))
@@ -266,7 +270,7 @@ mod tests {
         let size = Size::new(5, 10);
         print!("{:?}", text.debug(size));
 
-        let layout = text.layout(BoxConstraint::loose(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
         assert_eq!(layout.size, Size::new(4, 10));
 
         Ok(())
@@ -293,6 +297,7 @@ mod tests {
             Some(BBox::new((1.0, 1.0), (23.0, 23.0))),
             Size::new(1, 2),
         );
+        let ctx = ViewContext::dummy();
 
         let text = Text::new("before ->")
             .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
@@ -308,7 +313,7 @@ mod tests {
                 },
                 Vec::new()
             ),
-            text.layout(BoxConstraint::loose(size))
+            text.layout(&ctx, BoxConstraint::loose(size))
         );
         print!("{:?}", text.debug(size));
 
@@ -321,7 +326,7 @@ mod tests {
                 },
                 Vec::new()
             ),
-            text.layout(BoxConstraint::loose(size))
+            text.layout(&ctx, BoxConstraint::loose(size))
         );
         print!("{:?}", text.debug(size));
 
@@ -335,7 +340,7 @@ mod tests {
                 },
                 Vec::new(),
             ),
-            text.layout(BoxConstraint::tight(size))
+            text.layout(&ctx, BoxConstraint::tight(size))
         );
 
         Ok(())

@@ -8,7 +8,7 @@ use crate::{
     common::{clamp, Rnd},
     encoder::Base64Encoder,
     Blend, Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, TerminalEvent,
-    TerminalSize, RGBA,
+    RGBA,
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
@@ -47,13 +47,12 @@ impl Image {
     }
 
     /// Size in cells
-    pub fn size_cells(&self, term_size: TerminalSize) -> Size {
-        let cell_size = term_size.cell_size();
-        if cell_size.width == 0 || cell_size.height == 0 {
+    pub fn size_cells(&self, pixels_per_cell: Size) -> Size {
+        if pixels_per_cell.width == 0 || pixels_per_cell.height == 0 {
             return Size::new(0, 0);
         }
-        let height = self.height() / cell_size.height;
-        let width = self.width() / cell_size.width;
+        let height = self.height() / pixels_per_cell.height;
+        let width = self.width() / pixels_per_cell.width;
         Size { height, width }
     }
 

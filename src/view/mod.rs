@@ -10,13 +10,108 @@ pub use scrollbar::ScrollBar;
 pub use text::Text;
 
 use crate::{
-    Cell, Error, Face, FaceAttrs, Position, Size, SurfaceMut, SurfaceOwned, TerminalSurface,
-    TerminalSurfaceExt, RGBA,
+    Cell, Error, Face, FaceAttrs, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal,
+    TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
 };
+
+/// View is anything that can be layed out and rendered to the terminal
+pub trait View: Debug {
+    /// Render view into a given surface with the provided layout
+    fn render<'a>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error>;
+
+    /// Compute layout of the view based on the constraints
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout>;
+
+    /// Wrapper around view that implements [std::fmt::Debug] which renders
+    /// view. Only supposed to be used for debugging.
+    fn debug(&self, size: Size) -> Preview<&'_ Self>
+    where
+        Self: Sized,
+    {
+        Preview { view: self, size }
+    }
+}
+
+pub struct Preview<V> {
+    view: V,
+    size: Size,
+}
+
+impl<V: View> std::fmt::Debug for Preview<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ctx = ViewContext::dummy();
+        let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
+        surf.draw_view(&ctx, &self.view)
+            .map_err(|_| std::fmt::Error)?;
+        surf.debug().fmt(f)
+    }
+}
+
+impl<'a, V: View + ?Sized> View for &'a V {
+    fn render<'b>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'b mut TerminalSurface<'b>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        (**self).render(ctx, surf, layout)
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        (**self).layout(ctx, ct)
+    }
+}
+
+impl<'a> View for Box<dyn View + 'a> {
+    fn render<'b>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'b mut TerminalSurface<'b>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        (**self).render(ctx, surf, layout)
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        (**self).layout(ctx, ct)
+    }
+}
+
+pub struct ViewContext {
+    pixels_per_cell: Size,
+}
+
+impl ViewContext {
+    pub fn new(term: &dyn Terminal) -> Result<Self, Error> {
+        Ok(Self {
+            pixels_per_cell: term.size()?.pixels_per_cell(),
+        })
+    }
+
+    /// Dummy view context for debug purposes
+    pub fn dummy() -> Self {
+        Self {
+            pixels_per_cell: Size {
+                height: 37,
+                width: 15,
+            },
+        }
+    }
+
+    /// Number of pixels in the single terminal cell
+    pub fn pixels_per_cell(&self) -> Size {
+        self.pixels_per_cell
+    }
+}
 
 /// Constraint that specify size of the view that it can take. Any view when layout
 /// should that the size between `min` and `max` sizes.
@@ -101,69 +196,6 @@ impl Layout {
             self.pos.row..self.pos.row + self.size.height,
             self.pos.col..self.pos.col + self.size.width,
         )
-    }
-}
-
-/// View is anything that can be layed out and rendered to the terminal
-pub trait View: Debug {
-    /// Render view into a given surface with the provided layout
-    fn render<'a>(
-        &self,
-        surf: &'a mut TerminalSurface<'a>,
-        layout: &Tree<Layout>,
-    ) -> Result<(), Error>;
-
-    /// Compute layout of the view based on the constraints
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout>;
-
-    /// Wrapper around view that implements [std::fmt::Debug] which renders
-    /// view. Only supposed to be used for debugging.
-    fn debug(&self, size: Size) -> Preview<&'_ Self>
-    where
-        Self: Sized,
-    {
-        Preview { view: self, size }
-    }
-}
-
-pub struct Preview<V> {
-    view: V,
-    size: Size,
-}
-
-impl<V: View> std::fmt::Debug for Preview<V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
-        surf.draw_view(&self.view).map_err(|_| std::fmt::Error)?;
-        surf.debug().fmt(f)
-    }
-}
-
-impl<'a, V: View + ?Sized> View for &'a V {
-    fn render<'b>(
-        &self,
-        surf: &'b mut TerminalSurface<'b>,
-        layout: &Tree<Layout>,
-    ) -> Result<(), Error> {
-        (**self).render(surf, layout)
-    }
-
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
-        (**self).layout(ct)
-    }
-}
-
-impl<'a> View for Box<dyn View + 'a> {
-    fn render<'b>(
-        &self,
-        surf: &'b mut TerminalSurface<'b>,
-        layout: &Tree<Layout>,
-    ) -> Result<(), Error> {
-        (**self).render(surf, layout)
-    }
-
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
-        (**self).layout(ct)
     }
 }
 
@@ -377,21 +409,23 @@ impl<V> Fixed<V> {
 impl<V: View> View for Fixed<V> {
     fn render<'a>(
         &self,
+        ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        self.view.render(surf, layout)
+        self.view.render(ctx, surf, layout)
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         let size = ct.clamp(self.size);
-        self.view.layout(BoxConstraint::tight(size))
+        self.view.layout(ctx, BoxConstraint::tight(size))
     }
 }
 
 impl View for RGBA {
     fn render<'a>(
         &self,
+        _ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
@@ -400,7 +434,7 @@ impl View for RGBA {
         Ok(())
     }
 
-    fn layout(&self, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         Tree::new(
             Layout {
                 pos: Position::origin(),
@@ -411,14 +445,39 @@ impl View for RGBA {
     }
 }
 
+impl View for Image {
+    fn render<'a>(
+        &self,
+        _ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        let mut surf = layout.apply_to(surf);
+        surf.draw_image(self.clone());
+        Ok(())
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        let size = ct.clamp(self.size_cells(ctx.pixels_per_cell()));
+        Tree::leaf(Layout {
+            pos: Position::origin(),
+            size,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    pub(crate) fn render(view: &dyn View, size: Size) -> Result<SurfaceOwned<Cell>, Error> {
-        let layout = view.layout(BoxConstraint::loose(size));
+    pub(crate) fn render(
+        ctx: &ViewContext,
+        view: &dyn View,
+        size: Size,
+    ) -> Result<SurfaceOwned<Cell>, Error> {
+        let layout = view.layout(ctx, BoxConstraint::loose(size));
         let mut surf = SurfaceOwned::new(size.height, size.width);
-        view.render(&mut surf.view_mut(.., ..), &layout)?;
+        view.render(ctx, &mut surf.view_mut(.., ..), &layout)?;
         Ok(surf)
     }
 

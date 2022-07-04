@@ -3,7 +3,7 @@ use crate::{
     decoder::Decoder,
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    view::{BoxConstraint, View},
+    view::{BoxConstraint, View, ViewContext},
     Face, FaceAttrs, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface,
     SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps,
     TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker, RGBA,
@@ -205,7 +205,11 @@ impl TerminalRenderer {
                     }
                 }
                 // mark all cells effected by the image as damaged
-                if let Some(size) = front.image.as_ref().map(|img| img.size_cells(self.size)) {
+                if let Some(size) = front
+                    .image
+                    .as_ref()
+                    .map(|img| img.size_cells(self.size.pixels_per_cell()))
+                {
                     let mut view = self
                         .front
                         .view_mut(row..row + size.height, col..col + size.width);
@@ -242,7 +246,7 @@ impl TerminalRenderer {
                 if let Some(image) = front.image.clone() {
                     let image_changed = front.image != back.image;
                     // make sure surface under image is not changed
-                    let size = image.size_cells(self.size);
+                    let size = image.size_cells(self.size.pixels_per_cell());
                     let mut view = self
                         .front
                         .view_mut(row..row + size.height, col..col + size.width);
@@ -341,7 +345,7 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn draw_image(&mut self, img: Image);
 
     /// Draw view on the surface
-    fn draw_view(&mut self, view: impl View) -> Result<(), Error>;
+    fn draw_view(&mut self, ctx: &ViewContext, view: impl View) -> Result<(), Error>;
 
     /// Erase surface with face
     fn erase(&mut self, face: Face);
@@ -396,9 +400,9 @@ where
     }
 
     /// Draw view on the surface
-    fn draw_view(&mut self, view: impl View) -> Result<(), Error> {
-        let layout = view.layout(BoxConstraint::loose(self.size()));
-        view.render(&mut self.view_mut(.., ..), &layout)?;
+    fn draw_view(&mut self, ctx: &ViewContext, view: impl View) -> Result<(), Error> {
+        let layout = view.layout(ctx, BoxConstraint::loose(self.size()));
+        view.render(ctx, &mut self.view_mut(.., ..), &layout)?;
         Ok(())
     }
 
@@ -412,7 +416,7 @@ where
 
     fn debug(&self) -> TerminalSurfaceDebug<'_> {
         TerminalSurfaceDebug {
-            surf: self.view(.., ..),
+            surf: self.as_ref(),
         }
     }
 }
@@ -559,13 +563,14 @@ impl<'a> TerminalSurfaceDebug<'a> {
         };
 
         // debug terminal
+        let pixels_per_cell = ViewContext::dummy().pixels_per_cell();
         let mut term = DebugTerminal {
             size: TerminalSize {
                 cells: size,
                 // TOOD: allow to specify cell size?
                 pixels: Size {
-                    height: 39 * size.height,
-                    width: 16 * size.width,
+                    height: pixels_per_cell.height * size.height,
+                    width: pixels_per_cell.width * size.width,
                 },
             },
             encoder: TTYEncoder::new(capabilities.clone()),
