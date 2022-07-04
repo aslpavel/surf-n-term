@@ -86,6 +86,23 @@ impl<'a> View for Box<dyn View + 'a> {
     }
 }
 
+/// Something that can be converted to a [View]
+pub trait IntoView {
+    /// Result view type
+    type View: View;
+
+    /// Convert into a [View]
+    fn into_view(self) -> Self::View;
+}
+
+impl<V: View> IntoView for V {
+    type View = V;
+
+    fn into_view(self) -> Self::View {
+        self
+    }
+}
+
 pub struct ViewContext {
     pixels_per_cell: Size,
 }

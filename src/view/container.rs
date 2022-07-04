@@ -1,5 +1,5 @@
 //! [Container] view can specify the size and alignment for its child view
-use super::{BoxConstraint, Layout, Tree, View, ViewContext};
+use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
 
 /// Alignment of a child view
@@ -38,13 +38,13 @@ pub struct Container<V> {
 
 impl<V: View> Container<V> {
     /// create new container view
-    pub fn new(view: V) -> Self {
+    pub fn new(child: impl IntoView<View = V>) -> Self {
         Self {
             size: Size::empty(),
             color: None,
             align_vertical: Align::default(),
             align_horizontal: Align::default(),
-            view,
+            view: child.into_view(),
         }
     }
 

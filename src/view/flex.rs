@@ -1,4 +1,4 @@
-use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View, ViewContext};
+use super::{AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
 use crate::{Error, Position, Size, SurfaceMut, TerminalSurface};
 use std::cmp::{max, min};
 
@@ -41,18 +41,18 @@ impl<'a> Flex<'a> {
     }
 
     /// Add new fixed size child
-    pub fn add_child(mut self, child: impl View + 'a) -> Self {
+    pub fn add_child(mut self, child: impl IntoView + 'a) -> Self {
         self.children.push(Child::Fixed {
-            view: Box::new(child),
+            view: Box::new(child.into_view()),
         });
         self
     }
 
     /// Add new flex size child
-    pub fn add_flex_child(mut self, flex: f64, child: impl View + 'a) -> Self {
+    pub fn add_flex_child(mut self, flex: f64, child: impl IntoView + 'a) -> Self {
         if flex > 0.0 {
             self.children.push(Child::Flex {
-                view: Box::new(child),
+                view: Box::new(child.into_view()),
                 flex,
             });
             self
