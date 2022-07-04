@@ -31,6 +31,14 @@ pub trait View {
     /// Compute layout of the view based on the constraints
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout>;
 
+    /// Convert into boxed view
+    fn boxed<'a>(self) -> Box<dyn View + 'a>
+    where
+        Self: Sized + 'a,
+    {
+        Box::new(self)
+    }
+
     /// Wrapper around view that implements [std::fmt::Debug] which renders
     /// view. Only supposed to be used for debugging.
     fn debug(&self, size: Size) -> Preview<&'_ Self>
@@ -83,6 +91,13 @@ impl<'a> View for Box<dyn View + 'a> {
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         (**self).layout(ctx, ct)
+    }
+
+    fn boxed<'b>(self) -> Box<dyn View + 'b>
+    where
+        Self: Sized + 'b,
+    {
+        self
     }
 }
 

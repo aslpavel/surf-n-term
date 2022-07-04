@@ -54,7 +54,7 @@ impl<'a> Flex<'a> {
     /// Add new fixed size child
     pub fn add_child(mut self, child: impl IntoView + 'a) -> Self {
         self.children.push(Child::Fixed {
-            view: Box::new(child.into_view()),
+            view: child.into_view().boxed(),
         });
         self
     }
@@ -63,7 +63,7 @@ impl<'a> Flex<'a> {
     pub fn add_flex_child(mut self, flex: f64, child: impl IntoView + 'a) -> Self {
         if flex > 0.0 {
             self.children.push(Child::Flex {
-                view: Box::new(child.into_view()),
+                view: child.into_view().boxed(),
                 flex,
             });
             self
