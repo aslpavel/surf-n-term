@@ -1,11 +1,22 @@
 use super::{AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
 use crate::{Error, Position, Size, SurfaceMut, TerminalSurface};
-use std::cmp::{max, min};
+use std::{
+    cmp::{max, min},
+    fmt,
+};
 
-#[derive(Debug)]
 enum Child<'a> {
     Fixed { view: Box<dyn View + 'a> },
     Flex { view: Box<dyn View + 'a>, flex: f64 },
+}
+
+impl<'a> fmt::Debug for Child<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Fixed { .. } => write!(f, "Fixed"),
+            Self::Flex { flex, .. } => write!(f, "Flex({flex})"),
+        }
+    }
 }
 
 impl<'a> Child<'a> {

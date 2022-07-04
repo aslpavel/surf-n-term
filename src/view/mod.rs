@@ -19,7 +19,7 @@ use std::{
 };
 
 /// View is anything that can be layed out and rendered to the terminal
-pub trait View: Debug {
+pub trait View {
     /// Render view into a given surface with the provided layout
     fn render<'a>(
         &self,
