@@ -48,22 +48,22 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     // prompt | input | status
     let input_view = Flex::row()
         .add_child(
-            Text::text("")
+            Text::new("")
                 .with_face(prompt_face)
                 .add_text(Text::glyph(icon))
                 .add_text("Input ")
-                .add_text(Text::text(" ").with_face(prompt_face.invert().with_bg(Some(bg)))),
+                .add_text(Text::new(" ").with_face(prompt_face.invert().with_bg(Some(bg)))),
         )
         .add_flex_child(
             1.0,
-            Container::new(Text::text("query").with_face(input_face))
+            Container::new(Text::new("query").with_face(input_face))
                 .with_horizontal(Align::Fill)
                 .with_color(bg),
         )
         .add_child(
-            Text::text("")
+            Text::new("")
                 .with_face(prompt_face)
-                .add_text(Text::text("").with_face(prompt_face.invert()))
+                .add_text(Text::new("").with_face(prompt_face.invert()))
                 .add_text(" 30/127 1us [fuzzy] "),
         );
 
@@ -72,17 +72,17 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         .enumerate()
         .fold(Flex::column(), |list, (index, item)| {
             let (tag, face) = if index == 1 {
-                let tag = Text::text(" ●  ").with_face(list_selected_face.with_fg(Some(accent)));
+                let tag = Text::new(" ●  ").with_face(list_selected_face.with_fg(Some(accent)));
                 (tag, list_selected_face)
             } else {
-                let tag = Text::text("    ").with_face(list_default_face);
+                let tag = Text::new("    ").with_face(list_default_face);
                 (tag, list_default_face)
             };
             list.add_child(
                 Container::new(
                     Flex::row().add_child(tag).add_flex_child(
                         1.0,
-                        Container::new(Text::text(item).with_face(face))
+                        Container::new(Text::new(item).with_face(face))
                             .with_horizontal(Align::Fill)
                             .with_color(bg),
                     ),

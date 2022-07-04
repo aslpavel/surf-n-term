@@ -417,27 +417,6 @@ where
     }
 }
 
-/// Anything that can be show on the terminal
-pub trait TerminalDisplay {
-    /// Display object by updating terminal surface
-    fn display(&self, surf: &mut TerminalSurface<'_>) -> Result<(), Error>;
-    /// Return the size of the displayed object given the surface size
-    fn size_hint(&self, surf_size: Size) -> Option<Size>;
-}
-
-impl<'a, T> TerminalDisplay for &'a T
-where
-    T: TerminalDisplay + ?Sized,
-{
-    fn display(&self, surf: &mut TerminalSurface<'_>) -> Result<(), Error> {
-        (*self).display(surf)
-    }
-
-    fn size_hint(&self, surf_size: Size) -> Option<Size> {
-        (*self).size_hint(surf_size)
-    }
-}
-
 /// Writable (implements `Write`) object for `TerminalSurface`
 pub struct TerminalWriter<'a> {
     face: Face,
