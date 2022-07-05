@@ -162,13 +162,7 @@ impl<V: View> View for Container<V> {
                 .align_horizontal
                 .align(size.width.abs_diff(view_layout.size.width)),
         };
-        Tree {
-            value: Layout {
-                size,
-                pos: Position::origin(),
-            },
-            children: vec![view_layout],
-        }
+        Tree::new(Layout::new().with_size(size), vec![view_layout])
     }
 }
 
@@ -191,14 +185,12 @@ mod tests {
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size,
-                },
-                vec![Tree::leaf(Layout {
-                    pos: Position::new(2, 6),
-                    size: Size::new(1, 4),
-                })]
+                Layout::new().with_size(size),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(2, 6))
+                        .with_size(Size::new(1, 4))
+                )],
             ),
             cont.layout(&ctx, BoxConstraint::loose(size))
         );
@@ -207,14 +199,12 @@ mod tests {
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size,
-                },
-                vec![Tree::leaf(Layout {
-                    pos: Position::new(2, 0),
-                    size: Size::new(1, 4),
-                })]
+                Layout::new().with_size(size),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(2, 0))
+                        .with_size(Size::new(1, 4))
+                )]
             ),
             cont.layout(&ctx, BoxConstraint::loose(size))
         );
@@ -223,14 +213,12 @@ mod tests {
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size,
-                },
-                vec![Tree::leaf(Layout {
-                    pos: Position::new(2, 3),
-                    size: Size::new(1, 4),
-                })]
+                Layout::new().with_size(size),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(2, 3))
+                        .with_size(Size::new(1, 4))
+                )]
             ),
             cont.layout(&ctx, BoxConstraint::loose(size))
         );

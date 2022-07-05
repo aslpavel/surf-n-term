@@ -161,13 +161,7 @@ impl<'a> View for Text<'a> {
         if size.height != 0 || size.width != 0 {
             size.height += 1;
         }
-        Tree::new(
-            Layout {
-                pos: Position::origin(),
-                size: ct.clamp(size),
-            },
-            Vec::new(),
-        )
+        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
     }
 }
 
@@ -306,26 +300,14 @@ mod tests {
 
         let size = Size::new(5, 11);
         assert_eq!(
-            Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size: Size::new(2, 11)
-                },
-                Vec::new()
-            ),
+            Tree::leaf(Layout::new().with_size(Size::new(2, 11))),
             text.layout(&ctx, BoxConstraint::loose(size))
         );
         print!("{:?}", text.debug(size));
 
         let size = Size::new(5, 10);
         assert_eq!(
-            Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size: Size::new(3, 10)
-                },
-                Vec::new()
-            ),
+            Tree::leaf(Layout::new().with_size(Size::new(3, 10))),
             text.layout(&ctx, BoxConstraint::loose(size))
         );
         print!("{:?}", text.debug(size));
@@ -333,13 +315,7 @@ mod tests {
         // check tight constraint
         let size = Size::new(10, 12);
         assert_eq!(
-            Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size,
-                },
-                Vec::new(),
-            ),
+            Tree::leaf(Layout::new().with_size(size)),
             text.layout(&ctx, BoxConstraint::tight(size))
         );
 

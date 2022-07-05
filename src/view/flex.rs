@@ -1,5 +1,5 @@
 use super::{AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
-use crate::{Error, Position, Size, SurfaceMut, TerminalSurface};
+use crate::{Error, Size, SurfaceMut, TerminalSurface};
 use std::{
     cmp::{max, min},
     fmt,
@@ -156,10 +156,7 @@ where
 
         // create layout tree
         Tree::new(
-            Layout {
-                pos: Position::origin(),
-                size: ct.clamp(Size::from_axes(self.direction, offset, minor)),
-            },
+            Layout::new().with_size(ct.clamp(Size::from_axes(self.direction, offset, minor))),
             children_layout,
         )
     }
@@ -168,7 +165,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::Text;
+    use crate::{view::Text, Position};
 
     #[test]
     fn test_flex() -> Result<(), Error> {
@@ -181,24 +178,13 @@ mod tests {
         let size = Size::new(5, 12);
         print!("{:?}", flex.debug(size));
         let reference = Tree::new(
-            Layout {
-                pos: Position::origin(),
-                size: Size::new(3, 12),
-            },
+            Layout::new().with_size(Size::new(3, 12)),
             vec![
-                Tree::new(
-                    Layout {
-                        pos: Position::origin(),
-                        size: Size::new(2, 8),
-                    },
-                    Vec::new(),
-                ),
-                Tree::new(
-                    Layout {
-                        pos: Position::new(0, 8),
-                        size: Size::new(3, 4),
-                    },
-                    Vec::new(),
+                Tree::leaf(Layout::new().with_size(Size::new(2, 8))),
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(0, 8))
+                        .with_size(Size::new(3, 4)),
                 ),
             ],
         );

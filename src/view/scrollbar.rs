@@ -66,12 +66,10 @@ impl View for ScrollBar {
     fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         let major = self.direction.major(ct.max());
         let minor = max(self.direction.minor(ct.min()), 1);
-        Tree::new(
-            Layout {
-                size: Size::from_axes(self.direction, major, 1),
-                pos: Position::from_axes(self.direction, 0, minor - 1),
-            },
-            Vec::new(),
+        Tree::leaf(
+            Layout::new()
+                .with_size(Size::from_axes(self.direction, major, 1))
+                .with_position(Position::from_axes(self.direction, 0, minor - 1)),
         )
     }
 }
@@ -96,13 +94,7 @@ mod tests {
         let size = Size::new(5, 20);
         assert_eq!(
             bar.layout(ctx, BoxConstraint::loose(size)),
-            Tree::new(
-                Layout {
-                    pos: Position::origin(),
-                    size: Size::new(1, 20)
-                },
-                Vec::new()
-            )
+            Tree::leaf(Layout::new().with_size(Size::new(1, 20)))
         );
         print!("{:?}", bar.debug(size));
 

@@ -200,10 +200,10 @@ impl BoxConstraint {
 }
 
 /// Layout of the [View] determines its position and size
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Layout {
-    pub pos: Position,
-    pub size: Size,
+    pos: Position,
+    size: Size,
 }
 
 impl Debug for Layout {
@@ -218,6 +218,26 @@ impl Debug for Layout {
 }
 
 impl Layout {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_size(self, size: Size) -> Self {
+        Self { size, ..self }
+    }
+
+    pub fn with_position(self, pos: Position) -> Self {
+        Self { pos, ..self }
+    }
+
+    pub fn pos(&self) -> Position {
+        self.pos
+    }
+
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
     /// Constrain surface by the layout, that is create sub-subsurface view
     /// with offset `pos` and size of `size`.
     pub fn apply_to<'a, S>(&self, surf: &'a mut S) -> TerminalSurface<'a>
@@ -467,13 +487,7 @@ impl View for RGBA {
     }
 
     fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        Tree::new(
-            Layout {
-                pos: Position::origin(),
-                size: ct.min(),
-            },
-            Vec::new(),
-        )
+        Tree::leaf(Layout::new().with_size(ct.min()))
     }
 }
 
@@ -491,10 +505,7 @@ impl View for Image {
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         let size = ct.clamp(self.size_cells(ctx.pixels_per_cell()));
-        Tree::leaf(Layout {
-            pos: Position::origin(),
-            size,
-        })
+        Tree::leaf(Layout::new().with_size(size))
     }
 }
 
