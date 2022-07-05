@@ -12,7 +12,7 @@ pub struct Dynamic<B> {
 impl<B, V> Dynamic<B>
 where
     B: Fn(&ViewContext, BoxConstraint) -> V,
-    V: View,
+    V: View + 'static,
 {
     pub fn new(build: B) -> Self {
         Self { build }
