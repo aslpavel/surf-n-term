@@ -1,19 +1,26 @@
 //! Defines [View] that represents anything that can be rendered into a terminal.
 //! As well as some useful implementations such as [Text], [Flex], [Container], ...
 mod container;
-mod flex;
-mod scrollbar;
-mod text;
 pub use container::{Align, Container};
+
+mod flex;
 pub use flex::Flex;
+
+mod scrollbar;
 pub use scrollbar::ScrollBar;
+
+mod text;
 pub use text::Text;
+
+mod dynamic;
+pub use dynamic::Dynamic;
 
 use crate::{
     Cell, Error, Face, FaceAttrs, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal,
     TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use std::{
+    any::Any,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
 };
@@ -200,11 +207,23 @@ impl BoxConstraint {
 }
 
 /// Layout of the [View] determines its position and size
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Default)]
 pub struct Layout {
     pos: Position,
     size: Size,
+    data: Option<Box<dyn Any>>,
 }
+
+impl std::cmp::PartialEq for Layout {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos
+            && self.size == other.size
+            && self.data.is_none()
+            && other.data.is_none()
+    }
+}
+
+impl std::cmp::Eq for Layout {}
 
 impl Debug for Layout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -222,12 +241,17 @@ impl Layout {
         Self::default()
     }
 
+    pub fn with_position(self, pos: Position) -> Self {
+        Self { pos, ..self }
+    }
+
     pub fn with_size(self, size: Size) -> Self {
         Self { size, ..self }
     }
 
-    pub fn with_position(self, pos: Position) -> Self {
-        Self { pos, ..self }
+    pub fn set_data(&mut self, data: impl Any) -> &mut Self {
+        self.data = Some(Box::new(data));
+        self
     }
 
     pub fn pos(&self) -> Position {
@@ -236,6 +260,10 @@ impl Layout {
 
     pub fn size(&self) -> Size {
         self.size
+    }
+
+    pub fn data<T: Any>(&self) -> Option<&T> {
+        self.data.as_ref()?.downcast_ref()
     }
 
     /// Constrain surface by the layout, that is create sub-subsurface view
