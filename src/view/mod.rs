@@ -48,7 +48,7 @@ pub trait View {
 
     /// Wrapper around view that implements [std::fmt::Debug] which renders
     /// view. Only supposed to be used for debugging.
-    fn debug(&self, size: Size) -> Preview<&'_ Self>
+    fn debug(&self, size: Size) -> Preview<'_>
     where
         Self: Sized,
     {
@@ -56,12 +56,12 @@ pub trait View {
     }
 }
 
-pub struct Preview<V> {
-    view: V,
+pub struct Preview<'a> {
+    view: &'a dyn View,
     size: Size,
 }
 
-impl<V: View> std::fmt::Debug for Preview<V> {
+impl<'a> std::fmt::Debug for Preview<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ctx = ViewContext::dummy();
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
@@ -554,13 +554,17 @@ mod tests {
 
     #[test]
     fn test_references() -> Result<(), Error> {
-        fn witness(_: impl View) {}
+        fn witness<V: View>(_: V) {
+            println!("{}", std::any::type_name::<V>());
+        }
         let color = "#ff0000".parse::<RGBA>()?;
+        let color_boxed = color.boxed();
 
         witness(color);
         witness(&color);
         witness(&color as &dyn View);
-        witness(Box::new(color) as Box<dyn View>);
+        witness(&color_boxed);
+        witness(color_boxed);
 
         Ok(())
     }
