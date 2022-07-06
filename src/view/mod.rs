@@ -372,7 +372,7 @@ impl<'a> Iterator for FindPath<'a> {
     }
 }
 
-/// Major axis of the [Flex] view
+/// Major axis of the [Flex] and [ScrollBar] views
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
     Horizontal,
@@ -512,19 +512,23 @@ impl Axis {
     }
 }
 
-#[derive(Debug)]
-pub struct Fixed<V> {
+/// View that does not effect rendering only adds tag as `Layout::data`
+/// for generated layout.
+pub struct Tag<T, V> {
     view: V,
-    size: Size,
+    tag: T,
 }
 
-impl<V> Fixed<V> {
-    pub fn new(size: Size, view: V) -> Self {
-        Self { view, size }
+impl<T: Clone + Any, V: View> Tag<T, V> {
+    pub fn new(tag: T, view: impl IntoView<View = V>) -> Self {
+        Self {
+            view: view.into_view(),
+            tag,
+        }
     }
 }
 
-impl<V: View> View for Fixed<V> {
+impl<T: Clone + Any, V: View> View for Tag<T, V> {
     fn render<'a>(
         &self,
         ctx: &ViewContext,
@@ -535,8 +539,9 @@ impl<V: View> View for Fixed<V> {
     }
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        let size = ct.clamp(self.size);
-        self.view.layout(ctx, BoxConstraint::tight(size))
+        let mut layout = self.view.layout(ctx, ct);
+        layout.set_data(self.tag.clone());
+        layout
     }
 }
 
@@ -553,7 +558,7 @@ impl View for RGBA {
     }
 
     fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        Tree::leaf(Layout::new().with_size(ct.min()))
+        Tree::leaf(Layout::new().with_size(ct.max()))
     }
 }
 
@@ -604,14 +609,6 @@ mod tests {
         witness(&color_boxed);
         witness(color_boxed);
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_fixed() -> Result<(), Error> {
-        let size = Size::new(3, 5);
-        let fixed = Fixed::new(size, "#ff0000".parse::<RGBA>()?);
-        print!("{:?}", fixed.debug(size));
         Ok(())
     }
 

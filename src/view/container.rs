@@ -169,7 +169,35 @@ impl<V: View> View for Container<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{view::Fixed, RGBA};
+    use crate::RGBA;
+
+    #[derive(Debug)]
+    struct Fixed<V> {
+        view: V,
+        size: Size,
+    }
+
+    impl<V> Fixed<V> {
+        fn new(size: Size, view: V) -> Self {
+            Self { view, size }
+        }
+    }
+
+    impl<V: View> View for Fixed<V> {
+        fn render<'a>(
+            &self,
+            ctx: &ViewContext,
+            surf: &'a mut TerminalSurface<'a>,
+            layout: &Tree<Layout>,
+        ) -> Result<(), Error> {
+            self.view.render(ctx, surf, layout)
+        }
+
+        fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+            let size = ct.clamp(self.size);
+            self.view.layout(ctx, BoxConstraint::tight(size))
+        }
+    }
 
     #[test]
     fn test_container() -> Result<(), Error> {
