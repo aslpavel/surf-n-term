@@ -334,6 +334,44 @@ impl<T> IndexMut<usize> for Tree<T> {
     }
 }
 
+impl Tree<Layout> {
+    /// Find path in the layout that leads to the position.
+    pub fn find_path(&self, pos: Position) -> FindPath<'_> {
+        FindPath {
+            tree: Some(self),
+            pos,
+        }
+    }
+}
+
+pub struct FindPath<'a> {
+    tree: Option<&'a Tree<Layout>>,
+    pos: Position,
+}
+
+impl<'a> Iterator for FindPath<'a> {
+    type Item = &'a Layout;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.tree.take()?;
+        for child in result.children.iter() {
+            if child.pos.col <= self.pos.col
+                && self.pos.col < child.pos.col + child.size.width
+                && child.pos.row <= self.pos.row
+                && self.pos.row < child.pos.row + child.size.height
+            {
+                self.pos = Position {
+                    row: self.pos.row - child.pos.row,
+                    col: self.pos.col - child.pos.col,
+                };
+                self.tree.replace(child);
+                break;
+            }
+        }
+        Some(result)
+    }
+}
+
 /// Major axis of the [Flex] view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
@@ -583,5 +621,51 @@ mod tests {
         let size = Size::new(1, 4);
         assert_eq!(ct.clamp(size), Size::new(10, 4));
         Ok(())
+    }
+
+    #[test]
+    fn test_layout_find_path() {
+        let layout = Tree::new(
+            Layout::new().with_size(Size::new(10, 10)),
+            vec![
+                Tree::leaf(Layout::new().with_size(Size::new(6, 6))),
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(6, 0))
+                        .with_size(Size::new(4, 5)),
+                ),
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(6, 5))
+                        .with_size(Size::new(4, 5)),
+                ),
+                Tree::new(
+                    Layout::new()
+                        .with_position(Position::new(0, 6))
+                        .with_size(Size::new(6, 4)),
+                    vec![
+                        Tree::leaf(Layout::new().with_size(Size::new(3, 4))),
+                        Tree::leaf(
+                            Layout::new()
+                                .with_position(Position::new(3, 0))
+                                .with_size(Size::new(3, 4)),
+                        ),
+                    ],
+                ),
+            ],
+        );
+
+        assert_eq!(
+            layout.find_path(Position::new(4, 7)).collect::<Vec<_>>(),
+            vec![
+                &Layout::new().with_size(Size::new(10, 10)),
+                &Layout::new()
+                    .with_position(Position::new(0, 6))
+                    .with_size(Size::new(6, 4)),
+                &Layout::new()
+                    .with_position(Position::new(3, 0))
+                    .with_size(Size::new(3, 4)),
+            ]
+        );
     }
 }
