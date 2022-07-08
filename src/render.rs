@@ -446,8 +446,9 @@ impl<'a> TerminalWriter<'a> {
     }
 
     /// Set current face
-    pub fn face_set(&mut self, face: Face) {
+    pub fn face_set(&mut self, face: Face) -> &mut Self {
         self.face = face;
+        self
     }
 
     /// Skip offset amount of cells (row major order)

@@ -48,7 +48,7 @@ pub trait View {
 
     /// Wrapper around view that implements [std::fmt::Debug] which renders
     /// view. Only supposed to be used for debugging.
-    fn debug(&self, size: Size) -> Preview<'_>
+    fn debug(&self, size: Size) -> Preview<&'_ Self>
     where
         Self: Sized,
     {
@@ -56,12 +56,12 @@ pub trait View {
     }
 }
 
-pub struct Preview<'a> {
-    view: &'a dyn View,
+pub struct Preview<V> {
+    view: V,
     size: Size,
 }
 
-impl<'a> std::fmt::Debug for Preview<'a> {
+impl<V: View> std::fmt::Debug for Preview<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ctx = ViewContext::dummy();
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
@@ -254,25 +254,35 @@ impl Layout {
         Self { pos, ..self }
     }
 
-    pub fn with_size(self, size: Size) -> Self {
-        Self { size, ..self }
+    pub fn pos(&self) -> Position {
+        self.pos
     }
 
-    pub fn set_data(&mut self, data: impl Any) -> &mut Self {
-        self.data = Some(Box::new(data));
+    pub fn set_pos(&mut self, pos: Position) -> &mut Self {
+        self.pos = pos;
         self
     }
 
-    pub fn pos(&self) -> Position {
-        self.pos
+    pub fn with_size(self, size: Size) -> Self {
+        Self { size, ..self }
     }
 
     pub fn size(&self) -> Size {
         self.size
     }
 
+    pub fn set_size(&mut self, size: Size) -> &mut Self {
+        self.size = size;
+        self
+    }
+
     pub fn data<T: Any>(&self) -> Option<&T> {
         self.data.as_ref()?.downcast_ref()
+    }
+
+    pub fn set_data(&mut self, data: impl Any) -> &mut Self {
+        self.data = Some(Box::new(data));
+        self
     }
 
     /// Constrain surface by the layout, that is create sub-subsurface view
