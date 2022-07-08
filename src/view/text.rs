@@ -58,7 +58,7 @@ impl<'a> Text<'a> {
     }
 
     /// Assign glyph to the text. It will replace text content when rendered.
-    /// TODO: if glyphs are not supported, draw text instead
+    /// If glyphs are not supported, draw text instead
     pub fn with_glyph(self, glyph: Glyph) -> Self {
         Self {
             glyph: Some(glyph),
@@ -66,13 +66,22 @@ impl<'a> Text<'a> {
         }
     }
 
-    /// Extend with text consuming self
+    /// Replace text with the provided one, does not change children
+    pub fn with_text(self, text: impl Into<Cow<'a, str>>) -> Self {
+        Self {
+            text: text.into(),
+            ..self
+        }
+    }
+
+    /// Extend with a child text consuming self
     pub fn add_text(mut self, text: impl Into<Text<'a>>) -> Self {
-        self.push(text);
+        self.push_text(text);
         self
     }
 
-    pub fn push(&mut self, text: impl Into<Text<'a>>) -> &mut Self {
+    /// Push a child text
+    pub fn push_text(&mut self, text: impl Into<Text<'a>>) -> &mut Self {
         self.children.push(text.into());
         self
     }
@@ -81,11 +90,12 @@ impl<'a> Text<'a> {
 impl<'a> View for Text<'a> {
     fn render<'b>(
         &self,
-        _ctx: &ViewContext,
+        ctx: &ViewContext,
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         fn render_rec<'a>(
+            ctx: &ViewContext,
             writer: &mut TerminalWriter<'_>,
             face: &Face,
             this: &Text<'a>,
@@ -93,13 +103,13 @@ impl<'a> View for Text<'a> {
             let new_face = face.overlay(&this.face);
             writer.face_set(new_face);
             match &this.glyph {
-                Some(glyph) => {
+                Some(glyph) if ctx.has_glyphs() => {
                     writer.put(Cell::new_glyph(new_face, glyph.clone()));
                 }
-                None => write!(writer, "{}", this.text.as_ref())?,
+                _ => write!(writer, "{}", this.text.as_ref())?,
             };
             for child in this.children.iter() {
-                render_rec(writer, &this.face, child)?;
+                render_rec(ctx, writer, &this.face, child)?;
             }
             writer.face_set(*face);
             Ok(())
@@ -107,18 +117,19 @@ impl<'a> View for Text<'a> {
 
         let mut surf = layout.apply_to(surf);
         surf.erase(self.face);
-        render_rec(&mut surf.writer(), &Face::default(), self)
+        render_rec(ctx, &mut surf.writer(), &Face::default(), self)
     }
 
-    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         fn size_rec<'a>(
+            ctx: &ViewContext,
             ct: BoxConstraint,
             text: &'a Text<'a>,
             size: &mut Size,
             pos: &mut Position,
         ) {
             match &text.glyph {
-                Some(glyph) => {
+                Some(glyph) if ctx.has_glyphs() => {
                     let width = glyph.size().width;
                     if pos.col + width < ct.max().width {
                         pos.col += width;
@@ -128,7 +139,7 @@ impl<'a> View for Text<'a> {
                         pos.col = width;
                     }
                 }
-                None => {
+                _ => {
                     for chr in text.text.chars() {
                         match chr {
                             '\r' => {}
@@ -151,12 +162,12 @@ impl<'a> View for Text<'a> {
                 }
             }
             for child in &text.children {
-                size_rec(ct, child, size, pos)
+                size_rec(ctx, ct, child, size, pos)
             }
         }
         let mut size = Size::empty();
         let mut pos = Position::origin();
-        size_rec(ct, self, &mut size, &mut pos);
+        size_rec(ctx, ct, self, &mut size, &mut pos);
         size.width = max(size.width, pos.col);
         if size.height != 0 || size.width != 0 {
             size.height += 1;
@@ -168,7 +179,7 @@ impl<'a> View for Text<'a> {
 impl<'a, T: Into<Text<'a>>> Extend<T> for Text<'a> {
     fn extend<TS: IntoIterator<Item = T>>(&mut self, iter: TS) {
         for item in iter {
-            self.push(item);
+            self.push_text(item);
         }
     }
 }

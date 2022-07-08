@@ -127,12 +127,15 @@ impl<V: View> IntoView for V {
 
 pub struct ViewContext {
     pixels_per_cell: Size,
+    has_glyphs: bool,
 }
 
 impl ViewContext {
     pub fn new(term: &dyn Terminal) -> Result<Self, Error> {
+        let caps = term.capabilities();
         Ok(Self {
             pixels_per_cell: term.size()?.pixels_per_cell(),
+            has_glyphs: caps.glyphs,
         })
     }
 
@@ -143,12 +146,18 @@ impl ViewContext {
                 height: 37,
                 width: 15,
             },
+            has_glyphs: true,
         }
     }
 
     /// Number of pixels in the single terminal cell
     pub fn pixels_per_cell(&self) -> Size {
         self.pixels_per_cell
+    }
+
+    /// Whether terminal supports glyph rendering
+    pub fn has_glyphs(&self) -> bool {
+        self.has_glyphs
     }
 }
 

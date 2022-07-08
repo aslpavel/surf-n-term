@@ -50,7 +50,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         .add_child(
             Text::new("")
                 .with_face(prompt_face)
-                .add_text(Text::glyph(icon))
+                .add_text(Text::glyph(icon).with_text(" "))
                 .add_text("Input ")
                 .add_text(Text::new(" ").with_face(prompt_face.invert().with_bg(Some(bg)))),
         )
