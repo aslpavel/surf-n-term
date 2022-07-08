@@ -3,7 +3,7 @@ use crate::{
     decoder::Decoder,
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    view::{BoxConstraint, View, ViewContext},
+    view::{BoxConstraint, IntoView, View, ViewContext},
     Face, FaceAttrs, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface,
     SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps,
     TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker, RGBA,
@@ -345,7 +345,7 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn draw_image(&mut self, img: Image);
 
     /// Draw view on the surface
-    fn draw_view(&mut self, ctx: &ViewContext, view: impl View) -> Result<(), Error>;
+    fn draw_view(&mut self, ctx: &ViewContext, view: impl IntoView) -> Result<(), Error>;
 
     /// Erase surface with face
     fn erase(&mut self, face: Face);
@@ -400,7 +400,8 @@ where
     }
 
     /// Draw view on the surface
-    fn draw_view(&mut self, ctx: &ViewContext, view: impl View) -> Result<(), Error> {
+    fn draw_view(&mut self, ctx: &ViewContext, view: impl IntoView) -> Result<(), Error> {
+        let view = view.into_view();
         let layout = view.layout(ctx, BoxConstraint::loose(self.size()));
         view.render(ctx, &mut self.view_mut(.., ..), &layout)?;
         Ok(())

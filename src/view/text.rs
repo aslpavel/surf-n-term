@@ -85,6 +85,19 @@ impl<'a> Text<'a> {
         self.children.push(text.into());
         self
     }
+
+    pub fn writer(&mut self) -> impl Write + '_ {
+        let text = if self.children.is_empty() {
+            self.text.to_mut()
+        } else {
+            self.children.push(Text::new(String::new()));
+            self.children.last_mut().unwrap().text.to_mut()
+        };
+        TextWriter {
+            text,
+            decoder: Utf8Decoder::new(),
+        }
+    }
 }
 
 impl<'a> View for Text<'a> {
@@ -184,18 +197,16 @@ impl<'a, T: Into<Text<'a>>> Extend<T> for Text<'a> {
     }
 }
 
-impl<'a> Write for Text<'a> {
+struct TextWriter<'a> {
+    text: &'a mut String,
+    decoder: Utf8Decoder,
+}
+
+impl<'a> Write for TextWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let out = if self.children.is_empty() {
-            self.text.to_mut()
-        } else {
-            self.children.push(Text::new(String::new()));
-            self.children.last_mut().unwrap().text.to_mut()
-        };
-        let mut decoder = Utf8Decoder::new();
         let mut cursor = Cursor::new(buf);
-        while let Some(chr) = decoder.decode(&mut cursor)? {
-            out.push(chr);
+        while let Some(chr) = self.decoder.decode(&mut cursor)? {
+            self.text.push(chr);
         }
         Ok(buf.len())
     }
@@ -269,7 +280,7 @@ mod tests {
             .add_text(" three".to_string())
             .add_text("\nfour")
             .add_text(" ");
-        write!(text, "and more")?;
+        write!(text.writer(), "and more")?;
         assert_eq!(text.len(), 27);
 
         let size = Size::new(5, 10);
