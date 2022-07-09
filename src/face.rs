@@ -177,7 +177,12 @@ impl Face {
             (bg, None) => bg,
             (None, bg) => bg,
         };
-        Face { fg, bg, ..*other }
+        let attrs = if other.attrs == FaceAttrs::EMPTY {
+            self.attrs
+        } else {
+            other.attrs
+        };
+        Face { fg, bg, attrs }
     }
 }
 
