@@ -85,7 +85,7 @@ impl ColorMap {
         let fract = offset.fract();
         let start = self.colors[index];
         let end = self.colors[min(index + 1, self.colors.len() - 1)];
-        start.lerp(end, fract)
+        start.lerp(end, fract as f32)
     }
 }
 

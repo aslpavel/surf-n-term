@@ -27,7 +27,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
         if a == 255 {
             [r, g, b]
         } else {
-            let alpha = a as f64 / 255.0;
+            let alpha = a as f32 / 255.0;
             let [r, g, b, _] = ColorLinear([0.0, 0.0, 0.0, 1.0])
                 .lerp(self, alpha)
                 .rgba_u8();
@@ -55,7 +55,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     }
 
     /// Linear interpolation between self and other colors.
-    fn lerp(self, other: impl Color, t: f64) -> Self {
+    fn lerp(self, other: impl Color, t: f32) -> Self {
         let start = self.into();
         let end = other.into();
         let color = start * (1.0 - t) + end * t;
@@ -63,9 +63,9 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
     }
 
     /// Calculate LUMA of the color.
-    fn luma(self) -> f64 {
+    fn luma(self) -> f32 {
         let [r, g, b] = self.rgb_u8();
-        0.2126 * (r as f64 / 255.0) + 0.7152 * (g as f64 / 255.0) + 0.0722 * (b as f64 / 255.0)
+        0.2126 * (r as f32 / 255.0) + 0.7152 * (g as f32 / 255.0) + 0.0722 * (b as f32 / 255.0)
     }
 
     /// Pick color that produces the best contrast with self
@@ -87,7 +87,7 @@ pub trait Color: From<ColorLinear> + Into<ColorLinear> + Copy {
 /// is slow because of the conditional jump. Lookup table is not working
 /// here as well it should be at least 4K in size an not cache friendly.
 #[inline]
-pub fn linear_to_srgb(x0: f64) -> f64 {
+pub fn linear_to_srgb(x0: f32) -> f32 {
     if x0 <= 0.0031308 {
         x0 * 12.92
     } else {
@@ -103,13 +103,13 @@ pub fn linear_to_srgb(x0: f64) -> f64 {
 
 /// Color in linear RGB color space with premultiplied alpha
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct ColorLinear(pub [f64; 4]);
+pub struct ColorLinear(pub [f32; 4]);
 
-impl Mul<f64> for ColorLinear {
+impl Mul<f32> for ColorLinear {
     type Output = Self;
 
     #[inline]
-    fn mul(self, val: f64) -> Self::Output {
+    fn mul(self, val: f32) -> Self::Output {
         let Self([r, g, b, a]) = self;
         Self([r * val, g * val, b * val, a * val])
     }
@@ -127,11 +127,11 @@ impl Add<Self> for ColorLinear {
 }
 
 impl ColorLinear {
-    pub const fn new(r: f64, g: f64, b: f64, a: f64) -> Self {
+    pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self([r, g, b, a])
     }
 
-    pub fn distance(&self, other: &Self) -> f64 {
+    pub fn distance(&self, other: &Self) -> f32 {
         let Self([r0, g0, b0, _]) = *self;
         let Self([r1, g1, b1, _]) = *other;
         ((r0 - r1).powi(2) + (g0 - g1).powi(2) + (b0 - b1).powi(2)).sqrt()
@@ -141,6 +141,25 @@ impl ColorLinear {
 impl Color for ColorLinear {
     fn rgba_u8(self) -> [u8; 4] {
         RGBA::from(self).rgba_u8()
+    }
+}
+
+impl From<rasterize::LinColor> for ColorLinear {
+    fn from(color: rasterize::LinColor) -> Self {
+        Self([color.red(), color.green(), color.blue(), color.alpha()])
+    }
+}
+
+impl From<ColorLinear> for rasterize::LinColor {
+    fn from(color: ColorLinear) -> Self {
+        let ColorLinear([r, g, b, a]) = color;
+        rasterize::LinColor::new(r, g, b, a)
+    }
+}
+
+impl Color for rasterize::LinColor {
+    fn rgba_u8(self) -> [u8; 4] {
+        ColorLinear::from(self).rgba_u8()
     }
 }
 
@@ -220,7 +239,7 @@ impl Color for RGBA {
 impl From<RGBA> for ColorLinear {
     fn from(color: RGBA) -> Self {
         let [r, g, b, a] = color.rgba_u8();
-        let a = (a as f64) / 255.0;
+        let a = (a as f32) / 255.0;
         unsafe {
             let r = SRGB_TO_LIN.get_unchecked(r as usize) * a;
             let g = SRGB_TO_LIN.get_unchecked(g as usize) * a;
@@ -233,7 +252,7 @@ impl From<RGBA> for ColorLinear {
 impl From<ColorLinear> for RGBA {
     fn from(color: ColorLinear) -> Self {
         let ColorLinear([r, g, b, a]) = color;
-        if a < std::f64::EPSILON {
+        if a < std::f32::EPSILON {
             Self([0, 0, 0, 0])
         } else {
             let a = clamp(a, 0.0, 1.0);
@@ -302,7 +321,7 @@ impl fmt::Debug for RGBA {
 // }
 // ```
 // Lookup in this table is fast as it is small enough to fit in the cache
-const SRGB_TO_LIN: [f64; 256] = [
+const SRGB_TO_LIN: [f32; 256] = [
     0.0, 0.00030353, 0.00060705, 0.00091058, 0.00121411, 0.00151763, 0.00182116, 0.00212469,
     0.00242822, 0.00273174, 0.00303527, 0.00334654, 0.00367651, 0.00402472, 0.00439144, 0.00477695,
     0.00518152, 0.00560539, 0.00604883, 0.00651209, 0.00699541, 0.00749903, 0.00802319, 0.00856813,
