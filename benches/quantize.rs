@@ -74,7 +74,7 @@ fn palette_benchmark(c: &mut Criterion) {
 }
 
 fn srgb_to_linear(color: RGBA) -> ColorLinear {
-    fn s2l(x: f64) -> f64 {
+    fn s2l(x: f32) -> f32 {
         if x <= 0.04045 {
             x / 12.92
         } else {
@@ -83,15 +83,15 @@ fn srgb_to_linear(color: RGBA) -> ColorLinear {
     }
 
     let [r, g, b, a] = color.rgba_u8();
-    let a = (a as f64) / 255.0;
-    let r = s2l((r as f64) / 255.0) * a;
-    let g = s2l((g as f64) / 255.0) * a;
-    let b = s2l((b as f64) / 255.0) * a;
+    let a = (a as f32) / 255.0;
+    let r = s2l((r as f32) / 255.0) * a;
+    let g = s2l((g as f32) / 255.0) * a;
+    let b = s2l((b as f32) / 255.0) * a;
     ColorLinear([r, g, b, a])
 }
 
 fn linear_to_srgb(color: ColorLinear) -> RGBA {
-    fn l2s(x: f64) -> f64 {
+    fn l2s(x: f32) -> f32 {
         if x <= 0.0031308 {
             x * 12.92
         } else {
@@ -100,7 +100,7 @@ fn linear_to_srgb(color: ColorLinear) -> RGBA {
     }
 
     let ColorLinear([r, g, b, a]) = color;
-    if a < std::f64::EPSILON {
+    if a < std::f32::EPSILON {
         RGBA([0, 0, 0, 0])
     } else {
         let a = clamp(a, 0.0, 1.0);
