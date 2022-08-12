@@ -52,7 +52,7 @@ impl Shape {
         }
         let row = n / self.width;
         let col = n - row * self.width;
-        (row < self.height).then(move || (row, col))
+        (row < self.height).then_some((row, col))
     }
 }
 

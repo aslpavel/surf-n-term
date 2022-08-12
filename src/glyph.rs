@@ -62,7 +62,7 @@ impl Hash for GlyphScene {
 }
 
 /// Glyph defined as an SVG path
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub struct Glyph {
     /// Scene to by rasterized
     scene: GlyphScene,
@@ -144,12 +144,6 @@ impl Glyph {
     /// Size of the glyph in cells
     pub fn size(&self) -> Size {
         self.size
-    }
-}
-
-impl PartialEq for Glyph {
-    fn eq(&self, other: &Self) -> bool {
-        self.scene == other.scene && self.view_box == other.view_box && self.size == other.size
     }
 }
 

@@ -33,6 +33,7 @@
 //! ```
 #![allow(clippy::type_complexity)]
 #![allow(clippy::reversed_empty_ranges)]
+#![allow(clippy::excessive_precision)]
 #![deny(warnings)]
 
 pub mod automata;
