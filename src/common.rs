@@ -1,4 +1,5 @@
 //! Common utility functions used across different modules
+use crate::RGBA;
 use std::{
     collections::{HashMap, VecDeque},
     io::{BufRead, Read, Write},
@@ -205,6 +206,27 @@ impl Rnd {
     /// Generate random u64 value
     pub fn next_u64(&mut self) -> u64 {
         ((self.next_u32() as u64) << 32) | (self.next_u32() as u64)
+    }
+}
+
+pub trait Random: Sized {
+    fn random(rnd: &mut Rnd) -> Self;
+
+    fn random_iter() -> Box<dyn Iterator<Item = Self>> {
+        let mut rnd = Rnd::new();
+        Box::new(std::iter::from_fn(move || Some(Self::random(&mut rnd))))
+    }
+}
+
+impl Random for RGBA {
+    fn random(rnd: &mut Rnd) -> Self {
+        let value = rnd.next_u32();
+        RGBA::new(
+            (value & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            ((value >> 16) & 0xff) as u8,
+            255,
+        )
     }
 }
 

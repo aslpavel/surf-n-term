@@ -1,5 +1,5 @@
 use crate::{
-    Color, ColorLinear, Face, Image, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
+    Color, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
 };
 use rasterize::{ActiveEdgeRasterizer, Align, Image as _, Rasterizer, Scalar, Scene, Transform};
 pub use rasterize::{BBox, FillRule, Path};
@@ -100,8 +100,8 @@ impl Glyph {
         let tr = Transform::fit_size(self.view_box, size, Align::Mid);
 
         let bg_rgba = face.bg.unwrap_or_else(|| RGBA::new(0, 0, 0, 0));
-        let bg: ColorLinear = bg_rgba.into();
-        let fg: ColorLinear = face
+        let bg: LinColor = bg_rgba.into();
+        let fg: LinColor = face
             .fg
             .unwrap_or_else(|| RGBA::new(255, 255, 255, 255))
             .into();

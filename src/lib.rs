@@ -37,7 +37,6 @@
 #![deny(warnings)]
 
 pub mod automata;
-pub mod color;
 pub mod common;
 pub mod decoder;
 pub mod encoder;
@@ -52,12 +51,12 @@ pub mod terminal;
 mod unix;
 pub mod view;
 
-pub use color::{Blend, Color, ColorLinear, RGBA};
 pub use error::Error;
 pub use face::{Face, FaceAttrs};
 pub use glyph::{BBox, FillRule, Glyph, Path};
 pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImageHandler};
 pub use keys::{Key, KeyMap, KeyMod, KeyName};
+pub use rasterize::{Color, LinColor, RGBA};
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt, TerminalWriter};
 pub use surface::{
     Shape, Surface, SurfaceIter, SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned,

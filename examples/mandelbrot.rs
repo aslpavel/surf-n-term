@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 use surf_n_term::{
-    Color, ColorLinear, DecMode, Error, Image, Size, Surface, SurfaceOwned, SystemTerminal,
-    Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    Color, DecMode, Error, Image, LinColor, Size, Surface, SurfaceOwned, SystemTerminal, Terminal,
+    TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
 #[derive(Copy, Clone, Default)]
@@ -55,31 +55,36 @@ fn mandelbrot_at(c: Complex, max_iter: usize) -> usize {
         .unwrap_or(max_iter)
 }
 
-const MAGMA: &'static [ColorLinear] = &[
-    ColorLinear([0.001462, 0.000466, 0.013866, 1.0]),
-    ColorLinear([0.039608, 0.03109, 0.133515, 1.0]),
-    ColorLinear([0.113094, 0.065492, 0.276784, 1.0]),
-    ColorLinear([0.211718, 0.061992, 0.418647, 1.0]),
-    ColorLinear([0.316654, 0.07169, 0.48538, 1.0]),
-    ColorLinear([0.414709, 0.110431, 0.504662, 1.0]),
-    ColorLinear([0.512831, 0.148179, 0.507648, 1.0]),
-    ColorLinear([0.613617, 0.181811, 0.498536, 1.0]),
-    ColorLinear([0.716387, 0.214982, 0.47529, 1.0]),
-    ColorLinear([0.816914, 0.255895, 0.436461, 1.0]),
-    ColorLinear([0.904281, 0.31961, 0.388137, 1.0]),
-    ColorLinear([0.960949, 0.418323, 0.35963, 1.0]),
-    ColorLinear([0.9867, 0.535582, 0.38221, 1.0]),
-    ColorLinear([0.996096, 0.653659, 0.446213, 1.0]),
-    ColorLinear([0.996898, 0.769591, 0.534892, 1.0]),
-    ColorLinear([0.99244, 0.88433, 0.640099, 1.0]),
-];
+impl Default for ColorMap {
+    fn default() -> Self {
+        let colors = vec![
+            LinColor::new(0.001462, 0.000466, 0.013866, 1.0),
+            LinColor::new(0.039608, 0.03109, 0.133515, 1.0),
+            LinColor::new(0.113094, 0.065492, 0.276784, 1.0),
+            LinColor::new(0.211718, 0.061992, 0.418647, 1.0),
+            LinColor::new(0.316654, 0.07169, 0.48538, 1.0),
+            LinColor::new(0.414709, 0.110431, 0.504662, 1.0),
+            LinColor::new(0.512831, 0.148179, 0.507648, 1.0),
+            LinColor::new(0.613617, 0.181811, 0.498536, 1.0),
+            LinColor::new(0.716387, 0.214982, 0.47529, 1.0),
+            LinColor::new(0.816914, 0.255895, 0.436461, 1.0),
+            LinColor::new(0.904281, 0.31961, 0.388137, 1.0),
+            LinColor::new(0.960949, 0.418323, 0.35963, 1.0),
+            LinColor::new(0.9867, 0.535582, 0.38221, 1.0),
+            LinColor::new(0.996096, 0.653659, 0.446213, 1.0),
+            LinColor::new(0.996898, 0.769591, 0.534892, 1.0),
+            LinColor::new(0.99244, 0.88433, 0.640099, 1.0),
+        ];
+        Self { colors }
+    }
+}
 
 struct ColorMap {
-    colors: &'static [ColorLinear],
+    colors: Vec<LinColor>,
 }
 
 impl ColorMap {
-    fn lookup(&self, value: f64) -> ColorLinear {
+    fn lookup(&self, value: f64) -> LinColor {
         let offset = value.clamp(0.0, 1.0) * (self.colors.len() - 1) as f64;
         let index = offset.floor() as usize;
         let fract = offset.fract();
@@ -140,7 +145,7 @@ fn main() -> Result<(), Error> {
     let mut imgs = Vec::new();
     let xs = -2.5..1.0;
     let ys = -1.0..1.0;
-    let colormap = ColorMap { colors: MAGMA };
+    let colormap = ColorMap::default();
     let mut size = Size {
         height: 58,
         width: 100,

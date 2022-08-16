@@ -2,7 +2,7 @@ use std::{io::Write, time::Duration};
 use surf_n_term::{
     render::TerminalRenderer,
     view::{Align, Axis, Container, Flex, ScrollBar, Text, View, ViewContext},
-    BBox, Blend, Color, Error, Face, FaceAttrs, FillRule, Glyph, Path, Position, Size, SurfaceMut,
+    BBox, Color, Error, Face, FaceAttrs, FillRule, Glyph, Path, Position, Size, SurfaceMut,
     SystemTerminal, Terminal, TerminalCommand, TerminalSurfaceExt, RGBA,
 };
 
@@ -29,13 +29,13 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
 
     let input_face = Face::new(Some(fg), Some(bg), FaceAttrs::EMPTY);
     let list_default_face = Face::new(
-        Some(bg.blend(fg.with_alpha(0.9), Blend::Over)),
+        Some(bg.blend_over(fg.with_alpha(0.9))),
         Some(bg),
         FaceAttrs::EMPTY,
     );
     let list_selected_face = Face::new(
-        Some(bg.blend(fg, Blend::Over)),
-        Some(bg.blend(fg.with_alpha(0.1), Blend::Over)),
+        Some(bg.blend_over(fg)),
+        Some(bg.blend_over(fg.with_alpha(0.1))),
         FaceAttrs::EMPTY,
     );
     let scrollbar_face = Face::new(

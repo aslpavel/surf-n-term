@@ -1,5 +1,5 @@
 //! Error type
-use rasterize::SvgParserError;
+use rasterize::{ColorError, SvgParserError};
 use std::{borrow::Cow, fmt};
 
 #[derive(Debug)]
@@ -12,6 +12,7 @@ pub enum Error {
     FeatureNotSupported,
     Other(Cow<'static, str>),
     SvgParseError(SvgParserError),
+    ColorError(ColorError),
     InvalidLayout,
 }
 
@@ -29,6 +30,7 @@ impl std::error::Error for Error {
             IOError(ref error) => Some(error),
             NixError(ref error) => Some(error),
             SvgParseError(ref error) => Some(error),
+            ColorError(ref error) => Some(error),
             NotATTY => None,
             ParseError(..) => None,
             FeatureNotSupported => None,
@@ -53,6 +55,12 @@ impl From<nix::Error> for Error {
 impl From<SvgParserError> for Error {
     fn from(error: SvgParserError) -> Self {
         Self::SvgParseError(error)
+    }
+}
+
+impl From<ColorError> for Error {
+    fn from(error: ColorError) -> Self {
+        Self::ColorError(error)
     }
 }
 

@@ -7,8 +7,8 @@ use std::{
     path::Path,
 };
 use surf_n_term::{
-    color::{Color, ColorLinear},
-    common::clamp,
+    common::{clamp, Random},
+    Color, LinColor,
 };
 use surf_n_term::{ColorPalette, Image, Surface, SurfaceOwned, RGBA};
 
@@ -73,7 +73,7 @@ fn palette_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-fn srgb_to_linear(color: RGBA) -> ColorLinear {
+fn srgb_to_linear(color: RGBA) -> LinColor {
     fn s2l(x: f32) -> f32 {
         if x <= 0.04045 {
             x / 12.92
@@ -82,15 +82,15 @@ fn srgb_to_linear(color: RGBA) -> ColorLinear {
         }
     }
 
-    let [r, g, b, a] = color.rgba_u8();
+    let [r, g, b, a] = color.to_rgba();
     let a = (a as f32) / 255.0;
     let r = s2l((r as f32) / 255.0) * a;
     let g = s2l((g as f32) / 255.0) * a;
     let b = s2l((b as f32) / 255.0) * a;
-    ColorLinear([r, g, b, a])
+    LinColor::new(r, g, b, a)
 }
 
-fn linear_to_srgb(color: ColorLinear) -> RGBA {
+fn linear_to_srgb(color: LinColor) -> RGBA {
     fn l2s(x: f32) -> f32 {
         if x <= 0.0031308 {
             x * 12.92
@@ -99,21 +99,21 @@ fn linear_to_srgb(color: ColorLinear) -> RGBA {
         }
     }
 
-    let ColorLinear([r, g, b, a]) = color;
+    let [r, g, b, a]: [f32; 4] = color.into();
     if a < std::f32::EPSILON {
-        RGBA([0, 0, 0, 0])
+        RGBA::new(0, 0, 0, 0)
     } else {
         let a = clamp(a, 0.0, 1.0);
         let r = (l2s(r / a) * 255.0).round() as u8;
         let g = (l2s(g / a) * 255.0).round() as u8;
         let b = (l2s(b / a) * 255.0).round() as u8;
         let a = (a * 255.0) as u8;
-        RGBA([r, g, b, a])
+        RGBA::new(r, g, b, a)
     }
 }
 
 fn srgb_and_linear_benchmark(c: &mut Criterion) {
-    let colors: Vec<_> = RGBA::random().take(1024).collect();
+    let colors: Vec<_> = RGBA::random_iter().take(1024).collect();
 
     for color in colors.iter() {
         assert_eq!(*color, linear_to_srgb(srgb_to_linear(*color)));
@@ -132,7 +132,7 @@ fn srgb_and_linear_benchmark(c: &mut Criterion) {
     group.bench_function("fast", |b| {
         b.iter(|| {
             for color in colors.iter() {
-                black_box(RGBA::from(black_box(ColorLinear::from(*color))));
+                black_box(RGBA::from(black_box(LinColor::from(*color))));
             }
         })
     });

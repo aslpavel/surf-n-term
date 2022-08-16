@@ -1,7 +1,7 @@
 //! Type describing foreground/background/style-attrs of the terminal cell
 use serde::{Deserialize, Serialize};
 
-use crate::{Blend, Color, Error, RGBA};
+use crate::{Color, Error, RGBA};
 use std::{
     borrow::Cow,
     fmt,
@@ -168,12 +168,12 @@ impl Face {
     /// Overlay `other` face on top of `self`
     pub fn overlay(&self, other: &Self) -> Self {
         let fg = match (self.fg, other.fg) {
-            (Some(dst), Some(src)) => Some(dst.blend(src, Blend::Over)),
+            (Some(dst), Some(src)) => Some(dst.blend_over(src)),
             (fg, None) => fg,
             (None, fg) => fg,
         };
         let bg = match (self.bg, other.bg) {
-            (Some(dst), Some(src)) => Some(dst.blend(src, Blend::Over)),
+            (Some(dst), Some(src)) => Some(dst.blend_over(src)),
             (bg, None) => bg,
             (None, bg) => bg,
         };

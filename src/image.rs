@@ -7,8 +7,7 @@
 use crate::{
     common::{clamp, Rnd},
     encoder::Base64Encoder,
-    Blend, Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, TerminalEvent,
-    RGBA,
+    Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, TerminalEvent, RGBA,
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
@@ -87,8 +86,8 @@ impl Image {
             // quantize and spread the error
             for col in 0..self.width() {
                 let mut color = *self.get(row, col)?;
-                if color.rgba_u8()[3] < 255 {
-                    color = bg.blend(color, Blend::Over);
+                if color.to_rgba()[3] < 255 {
+                    color = bg.blend_over(color);
                 }
                 if dither {
                     color = errors[col + 1].add(color); // account for error
@@ -118,7 +117,7 @@ impl Image {
         let mut writer = encoder.write_header()?;
         let mut stream_writer = writer.stream_writer()?;
         for color in self.iter() {
-            stream_writer.write_all(&color.rgba_u8())?;
+            stream_writer.write_all(&color.to_rgba())?;
         }
         stream_writer.flush()?;
         Ok(())
@@ -431,7 +430,7 @@ impl ImageHandler for KittyImageHandler {
             let mut payload_write =
                 ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
             for color in img.iter() {
-                payload_write.write_all(&color.rgba_u8())?;
+                payload_write.write_all(&color.to_rgba())?;
             }
             let payload = payload_write.finish()?.finish()?;
 
@@ -564,7 +563,7 @@ impl ImageHandler for SixelImageHandler {
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
         // quantization, it will produce smaller or/and better palette for this color depth
         let dimg = Image::new(img.map(|_, _, color| {
-            let [red, green, blue, alpha] = color.rgba_u8();
+            let [red, green, blue, alpha] = color.to_rgba();
             let red = ((red as f32 / 2.55).round() * 2.55) as u8;
             let green = ((green as f32 / 2.55).round() * 2.55) as u8;
             let blue = ((blue as f32 / 2.55).round() * 2.55) as u8;
@@ -581,7 +580,7 @@ impl ImageHandler for SixelImageHandler {
         write!(sixel_image, "\"1;1;{};{}", qimg.width(), qimg.height())?;
         // palette
         for (index, color) in palette.colors().iter().enumerate() {
-            let [red, green, blue] = color.rgb_u8();
+            let [red, green, blue] = color.to_rgb();
             let red = (red as f32 / 2.55).round() as u8;
             let green = (green as f32 / 2.55).round() as u8;
             let blue = (blue as f32 / 2.55).round() as u8;
@@ -702,8 +701,8 @@ impl ColorError {
 
     /// Error between two colors
     fn between(c0: RGBA, c1: RGBA) -> Self {
-        let [r0, g0, b0] = c0.rgb_u8();
-        let [r1, g1, b1] = c1.rgb_u8();
+        let [r0, g0, b0] = c0.to_rgb();
+        let [r1, g1, b1] = c1.to_rgb();
         Self([
             r0 as f32 - r1 as f32,
             g0 as f32 - g1 as f32,
@@ -713,7 +712,7 @@ impl ColorError {
 
     /// Add error to the color
     fn add(self, color: RGBA) -> RGBA {
-        let [r, g, b] = color.rgb_u8();
+        let [r, g, b] = color.to_rgb();
         let Self([re, ge, be]) = self;
         RGBA::new(
             clamp(r as f32 + re, 0.0, 255.0) as u8,
@@ -772,7 +771,7 @@ impl OcTreeLeaf {
     }
 
     fn from_rgba(rgba: RGBA) -> Self {
-        let [r, g, b] = rgba.rgb_u8();
+        let [r, g, b] = rgba.to_rgb();
         Self {
             red_acc: r as usize,
             green_acc: g as usize,
@@ -792,7 +791,7 @@ impl OcTreeLeaf {
 
 impl AddAssign<RGBA> for OcTreeLeaf {
     fn add_assign(&mut self, rhs: RGBA) {
-        let [r, g, b] = rhs.rgb_u8();
+        let [r, g, b] = rhs.to_rgb();
         self.red_acc += r as usize;
         self.green_acc += g as usize;
         self.blue_acc += b as usize;
@@ -1170,7 +1169,7 @@ struct OcTreePath {
 
 impl OcTreePath {
     pub fn new(rgba: RGBA) -> Self {
-        let [r, g, b] = rgba.rgb_u8();
+        let [r, g, b] = rgba.to_rgb();
         // pack RGB components into u32 value
         let state = ((r as u32) << 16) | ((g as u32) << 8) | b as u32;
         Self {
@@ -1263,7 +1262,7 @@ impl KDTree {
         }
 
         let mut nodes = Vec::new();
-        let mut colors: Vec<_> = colors.iter().map(|c| c.rgb_u8()).enumerate().collect();
+        let mut colors: Vec<_> = colors.iter().map(|c| c.to_rgb()).enumerate().collect();
         build_rec(0, &mut nodes, &mut colors);
         Self { nodes }
     }
@@ -1315,7 +1314,7 @@ impl KDTree {
             }
         }
 
-        let node = find_rec(&self.nodes, self.nodes.len() - 1, color.rgb_u8()).0;
+        let node = find_rec(&self.nodes, self.nodes.len() - 1, color.to_rgb()).0;
         let [r, g, b] = node.color;
         (node.color_index, RGBA::new(r, g, b, 255))
     }
@@ -1385,8 +1384,8 @@ impl ColorPalette {
         bg: RGBA,
     ) -> Option<Self> {
         fn blend(bg: RGBA, color: RGBA) -> RGBA {
-            if color.rgba_u8()[3] < 255 {
-                bg.blend(color, Blend::Over)
+            if color.to_rgba()[3] < 255 {
+                bg.blend_over(color)
             } else {
                 color
             }
@@ -1439,8 +1438,8 @@ impl ColorPalette {
     /// find correctness and speed.
     pub fn find_naive(&self, color: RGBA) -> (usize, RGBA) {
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
-            let [r0, g0, b0] = c0.rgb_u8();
-            let [r1, g1, b1] = c1.rgb_u8();
+            let [r0, g0, b0] = c0.to_rgb();
+            let [r1, g1, b1] = c1.to_rgb();
             (r0 as i32 - r1 as i32).pow(2)
                 + (g0 as i32 - g1 as i32).pow(2)
                 + (b0 as i32 - b1 as i32).pow(2)
@@ -1461,6 +1460,8 @@ impl ColorPalette {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::Random;
+
     use super::*;
 
     /// Convert path generated by OcTreePath back to RGBA color
@@ -1565,14 +1566,14 @@ mod tests {
     pub fn test_palette() {
         // make sure that k-d tree can actually find nearest neighbor
         fn dist(c0: RGBA, c1: RGBA) -> i32 {
-            let [r0, g0, b0] = c0.rgb_u8();
-            let [r1, g1, b1] = c1.rgb_u8();
+            let [r0, g0, b0] = c0.to_rgb();
+            let [r1, g1, b1] = c1.to_rgb();
             (r0 as i32 - r1 as i32).pow(2)
                 + (g0 as i32 - g1 as i32).pow(2)
                 + (b0 as i32 - b1 as i32).pow(2)
         }
 
-        let mut gen = RGBA::random();
+        let mut gen = RGBA::random_iter();
         let palette = ColorPalette::new((&mut gen).take(256).collect()).unwrap();
         let mut colors: Vec<_> = gen.take(65_536).collect();
         colors.extend(palette.colors().iter().copied());

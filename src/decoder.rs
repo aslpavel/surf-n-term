@@ -492,9 +492,38 @@ impl TTYMatcher for OSControlMatcher {
             4 => TerminalColor::Palette(number_decode(args.next()?)?),
             _ => return None,
         };
-        let color = std::str::from_utf8(args.next()?).ok()?.parse().ok()?;
+        let color = parse_color(std::str::from_utf8(args.next()?).ok()?)?;
         Some(TerminalEvent::Color { name, color })
     }
+}
+
+fn parse_color(color_str: &str) -> Option<RGBA> {
+    if let Ok(color) = color_str.parse() {
+        return Some(color);
+    }
+
+    // rgb:r{1-4}/g{1-4}/b{1-4}
+    // This format is used when querying colors with OCS,
+    // reference [`xparsecolor`](https://linux.die.net/man/3/xparsecolor)
+    fn parse_component(string: &str) -> Option<u8> {
+        let value = usize::from_str_radix(string, 16).ok()?;
+        let value = match string.len() {
+            4 => value / 256,
+            3 => value / 16,
+            2 => value,
+            1 => value * 17,
+            _ => return None,
+        };
+        Some(value.clamp(0, 255) as u8)
+    }
+    let rgb = color_str.strip_prefix("rgb:")?;
+    let mut iter = rgb.split('/');
+    Some(RGBA::new(
+        parse_component(iter.next()?)?,
+        parse_component(iter.next()?)?,
+        parse_component(iter.next()?)?,
+        255,
+    ))
 }
 
 /// DECRPSS - Report Selection or Setting

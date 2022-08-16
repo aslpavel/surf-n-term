@@ -1,6 +1,6 @@
 //! Encoders
 use crate::{
-    decoder::KEYBOARD_LEVEL, error::Error, Color, ColorLinear, DecMode, FaceAttrs, TerminalCaps,
+    decoder::KEYBOARD_LEVEL, error::Error, Color, DecMode, FaceAttrs, LinColor, TerminalCaps,
     TerminalColor, TerminalCommand,
 };
 use std::{cmp::Ordering, io::Write, str::FromStr};
@@ -300,10 +300,13 @@ pub fn color_sgr_encode<C: Color, W: Write>(
     color: C,
     depth: ColorDepth,
     foreground: bool,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    LinColor: From<C>,
+{
     match depth {
         ColorDepth::TrueColor => {
-            let [r, g, b] = color.rgb_u8();
+            let [r, g, b] = color.to_rgb();
             if foreground {
                 out.write_all(b";38")?;
             } else {
@@ -312,21 +315,21 @@ pub fn color_sgr_encode<C: Color, W: Write>(
             write!(out, ";2;{};{};{}", r, g, b)?;
         }
         ColorDepth::EightBit => {
-            let color: ColorLinear = color.into();
-            let ColorLinear([r, g, b, _]) = color;
+            let color = LinColor::from(color);
+            let [r, g, b, _]: [f32; 4] = color.into();
 
             // color in the color cube
             let c_red = nearest(r, CUBE);
             let c_green = nearest(g, CUBE);
             let c_blue = nearest(b, CUBE);
-            let c_color = ColorLinear::new(CUBE[c_red], CUBE[c_green], CUBE[c_blue], 1.0);
+            let c_color = LinColor::new(CUBE[c_red], CUBE[c_green], CUBE[c_blue], 1.0);
 
             // nearest grey color
             let g_index = nearest((r + g + b) / 3.0, GREYS);
-            let g_color = ColorLinear::new(GREYS[g_index], GREYS[g_index], GREYS[g_index], 1.0);
+            let g_color = LinColor::new(GREYS[g_index], GREYS[g_index], GREYS[g_index], 1.0);
 
             // pick grey or cube based on the distance
-            let index = if color.distance(&g_color) < color.distance(&c_color) {
+            let index = if color.distance(g_color) < color.distance(c_color) {
                 232 + g_index
             } else {
                 16 + 36 * c_red + 6 * c_green + c_blue
