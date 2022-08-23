@@ -220,18 +220,23 @@ impl UnixTerminal {
                 mode: DecMode::AutoWrap,
             },
             TerminalCommand::KeyboardLevel(0),
+            // This one must be the last command as we use it as sync event,
+            // which is supported by all terminals, and indicates that we handled
+            // all pending events such as status report from kitty image protocol
+            TerminalCommand::DeviceAttrs,
         ];
         epilogue
-            .iter()
-            .try_fold((), |_, cmd| self.execute(cmd.clone()))
-            .and_then(|_| {
-                while !self.write_queue.is_empty() {
-                    self.poll(Some(Duration::new(0, 0)))?;
-                }
-                Ok(())
-            })
+            .into_iter()
+            .try_for_each(|cmd| self.execute(cmd))
             .unwrap_or(()); // ignore write errors
-        self.drain().count(); // drain pending events
+
+        // wait for device attributes report or error
+        loop {
+            match self.poll(Some(Duration::from_secs(1))) {
+                Err(_) | Ok(Some(TerminalEvent::DeviceAttrs(_)) | None) => break,
+                _ => {}
+            }
+        }
 
         // disable signal handler
         self.signal_delivery.handle().close();
@@ -294,7 +299,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // Device Attribute command is used as "sync" event, it is supported
     // by most terminals, at least in its basic form, so we expect to
     // receive a response to it. Which means it should go LAST
-    write!(term, "\x1b[c")?;
+    term.execute(TerminalCommand::DeviceAttrs)?;
 
     let mut image_handlers = HashSet::new();
     let mut bg: Option<RGBA> = None;
