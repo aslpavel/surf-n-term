@@ -315,9 +315,14 @@ impl TTYMatcher for KittyImageMatcher {
     fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
         let mut iter = data[3..data.len() - 2].splitn(2, |b| *b == b';');
         let mut id = 0; // id can not be zero according to the spec
+        let mut placement = None;
         for (key, value) in key_value_decode(b',', iter.next()?) {
-            if key == b"i" {
-                id = number_decode(value)? as u64;
+            match key {
+                b"i" => id = number_decode(value)? as u64,
+                b"p" => {
+                    placement.replace(number_decode(value)? as u64);
+                }
+                _ => {}
             }
         }
         let msg = iter.next()?;
@@ -326,7 +331,11 @@ impl TTYMatcher for KittyImageMatcher {
         } else {
             Some(String::from_utf8_lossy(msg).to_string())
         };
-        Some(TerminalEvent::KittyImage { id, error })
+        Some(TerminalEvent::KittyImage {
+            id,
+            placement,
+            error,
+        })
     }
 }
 
@@ -1330,7 +1339,7 @@ mod tests {
         write!(cursor.get_mut(), "\x1b_Gi=127;OK\x1b\\")?;
         write!(
             cursor.get_mut(),
-            "\x1b_Gi=31,ignored=attr;error message\x1b\\"
+            "\x1b_Gi=31,p=11,ignored=attr;error message\x1b\\"
         )?;
 
         let mut result = Vec::new();
@@ -1340,10 +1349,12 @@ mod tests {
             vec![
                 TerminalEvent::KittyImage {
                     id: 127,
+                    placement: None,
                     error: None
                 },
                 TerminalEvent::KittyImage {
                     id: 31,
+                    placement: Some(11),
                     error: Some("error message".to_string())
                 },
             ]

@@ -427,7 +427,11 @@ pub enum TerminalEvent {
         status: DecModeStatus,
     },
     /// Kitty image result
-    KittyImage { id: u64, error: Option<String> },
+    KittyImage {
+        id: u64,
+        placement: Option<u64>,
+        error: Option<String>,
+    },
     /// Kitty keyboard level
     KeyboardLevel(usize),
     /// Terminal have been woken by waker object

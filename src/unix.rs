@@ -500,7 +500,7 @@ impl Terminal for UnixTerminal {
                             self.events_queue.push_back(TerminalEvent::Resize(size));
                         }
                     }
-                    if !self.image_handler.handle(&event)? {
+                    if !self.image_handler.handle(&mut self.write_queue, &event)? {
                         self.events_queue.push_back(event)
                     }
                 }

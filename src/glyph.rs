@@ -10,7 +10,7 @@ use std::{
 };
 use tracing::debug_span;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 enum GlyphScene {
     Symbol {
         path: Arc<Path>,

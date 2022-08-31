@@ -6,8 +6,9 @@
 //!  - Quantization and dithering
 use crate::{
     common::{clamp, Rnd},
-    encoder::Base64Encoder,
-    Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, TerminalEvent, RGBA,
+    encoder::{Base64Encoder, Encoder, TTYEncoder},
+    Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, TerminalCommand,
+    TerminalEvent, RGBA,
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
@@ -236,7 +237,7 @@ pub trait ImageHandler: Send + Sync {
     /// Handle events from the terminal
     ///
     /// True means event has been handled and should not be propagated to a user
-    fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error>;
+    fn handle(&mut self, out: &mut dyn Write, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
 impl ImageHandler for Box<dyn ImageHandler> {
@@ -257,8 +258,8 @@ impl ImageHandler for Box<dyn ImageHandler> {
         (**self).erase(out, img, pos)
     }
 
-    fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
-        (**self).handle(event)
+    fn handle(&mut self, out: &mut dyn Write, event: &TerminalEvent) -> Result<bool, Error> {
+        (**self).handle(out, event)
     }
 }
 
@@ -283,7 +284,7 @@ impl ImageHandler for DummyImageHandler {
         Ok(())
     }
 
-    fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
+    fn handle(&mut self, _out: &mut dyn Write, _event: &TerminalEvent) -> Result<bool, Error> {
         Ok(false)
     }
 }
@@ -354,7 +355,7 @@ impl ImageHandler for ItermImageHandler {
         Ok(())
     }
 
-    fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
+    fn handle(&mut self, _out: &mut dyn Write, _event: &TerminalEvent) -> Result<bool, Error> {
         Ok(false)
     }
 }
@@ -363,22 +364,22 @@ impl ImageHandler for ItermImageHandler {
 ///
 /// Reference: [Kitty Graphic Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
 pub struct KittyImageHandler {
-    imgs: HashMap<u64, usize>, // hash -> size in bytes
-    quiet: bool,               // suppress OK response from the terminal
+    imgs: HashMap<u64, Image>, // hash -> image
+    suppress: Option<u8>,      // 1 - suppress OK, 2 - suppress all
 }
 
 impl KittyImageHandler {
     pub fn new() -> Self {
         Self {
             imgs: Default::default(),
-            quiet: false,
+            suppress: None,
         }
     }
 
     /// Enable suppression of OK responses from the terminal
     pub fn quiet(self) -> Self {
         Self {
-            quiet: true,
+            suppress: None,
             ..self
         }
     }
@@ -410,6 +411,13 @@ fn kitty_placement_id(pos: Position) -> u64 {
     (pos.row as u64 % KITTY_MAX_DIM) + (pos.col as u64 % KITTY_MAX_DIM) * KITTY_MAX_DIM
 }
 
+fn kitty_placement_to_pos(placement_id: u64) -> Position {
+    Position {
+        col: (placement_id / KITTY_MAX_DIM) as usize,
+        row: (placement_id % KITTY_MAX_DIM) as usize,
+    }
+}
+
 impl ImageHandler for KittyImageHandler {
     fn kind(&self) -> ImageHandlerKind {
         ImageHandlerKind::Kitty
@@ -420,7 +428,9 @@ impl ImageHandler for KittyImageHandler {
         let img_id = kitty_image_id(img);
 
         // q   - suppress response from the terminal 1 - OK only, 2 - All.
-        let suppress = if self.quiet { ",q=1" } else { "" };
+        let suppress = self
+            .suppress
+            .map_or_else(String::new, |val| format!(",q={val}"));
 
         // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
@@ -471,7 +481,7 @@ impl ImageHandler for KittyImageHandler {
             }
 
             // remember that image data has been send
-            entry.insert(img.size());
+            entry.insert(img.clone());
         }
 
         // request image to be shown
@@ -483,6 +493,14 @@ impl ImageHandler for KittyImageHandler {
             "\x1b_Ga=p,i={},p={}{};\x1b\\",
             img_id, placement_id, suppress
         )?;
+
+        tracing::trace!(
+            image_handler = "kitty",
+            img_id,
+            placement_id,
+            suppress,
+            "draw image command"
+        );
         Ok(())
     }
 
@@ -510,19 +528,30 @@ impl ImageHandler for KittyImageHandler {
         Ok(())
     }
 
-    fn handle(&mut self, event: &TerminalEvent) -> Result<bool, Error> {
+    fn handle(&mut self, mut out: &mut dyn Write, event: &TerminalEvent) -> Result<bool, Error> {
         match event {
-            TerminalEvent::KittyImage { id, error } => {
-                let filter = if !error.is_none() {
-                    tracing::warn!("kitty image error: {:?}", error);
-                    // remove element from cache, and propagate event to
-                    // the user which will cause the redraw
-                    self.imgs.remove(id);
-                    false
-                } else {
-                    true
-                };
-                Ok(filter)
+            TerminalEvent::KittyImage {
+                id,
+                placement,
+                error,
+            } => {
+                if error.is_some() {
+                    let pos = placement.map(kitty_placement_to_pos);
+                    tracing::warn!(id, ?pos, "kitty image error: {:?}", error);
+                    if let (Some(img), Some(pos)) = (self.imgs.remove(id), pos) {
+                        let mut encoder = TTYEncoder::default();
+                        encoder.encode(&mut out, TerminalCommand::CursorSave)?;
+                        encoder.encode(&mut out, TerminalCommand::CursorTo(pos))?;
+                        // suppress responses to avoid infinite loop, for example
+                        // in case of very large image.
+                        let suppress = self.suppress;
+                        self.suppress.replace(2);
+                        self.draw(&mut out, &img, pos)?;
+                        self.suppress = suppress;
+                        encoder.encode(&mut out, TerminalCommand::CursorRestore)?;
+                    }
+                }
+                Ok(true)
             }
             _ => Ok(false),
         }
@@ -683,7 +712,7 @@ impl ImageHandler for SixelImageHandler {
         Ok(())
     }
 
-    fn handle(&mut self, _event: &TerminalEvent) -> Result<bool, Error> {
+    fn handle(&mut self, _out: &mut dyn Write, _event: &TerminalEvent) -> Result<bool, Error> {
         Ok(false)
     }
 }
