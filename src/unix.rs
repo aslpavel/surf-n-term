@@ -540,7 +540,7 @@ impl Terminal for UnixTerminal {
     fn position(&mut self) -> Result<crate::Position, Error> {
         let mut queue = Vec::new();
         self.execute(TerminalCommand::CursorGet)?;
-        write!(self, "\x1b[c")?; // DA1 - as sync event
+        self.execute(TerminalCommand::DeviceAttrs)?; // sync event
         let mut pos = Position::origin();
         while let Some(event) = self.poll(None)? {
             match event {
