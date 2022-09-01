@@ -246,40 +246,49 @@ impl Debug for Layout {
 }
 
 impl Layout {
+    /// Create a new empty layout
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Override layout position
     pub fn with_position(self, pos: Position) -> Self {
         Self { pos, ..self }
     }
 
+    /// Get layout position
     pub fn pos(&self) -> Position {
         self.pos
     }
 
+    /// Set layout position
     pub fn set_pos(&mut self, pos: Position) -> &mut Self {
         self.pos = pos;
         self
     }
 
+    /// Override layout size
     pub fn with_size(self, size: Size) -> Self {
         Self { size, ..self }
     }
 
+    /// Get layout size
     pub fn size(&self) -> Size {
         self.size
     }
 
+    /// Set layout size
     pub fn set_size(&mut self, size: Size) -> &mut Self {
         self.size = size;
         self
     }
 
+    /// Get layout data
     pub fn data<T: Any>(&self) -> Option<&T> {
         self.data.as_ref()?.downcast_ref()
     }
 
+    /// Set layout data
     pub fn set_data(&mut self, data: impl Any) -> &mut Self {
         self.data = Some(Box::new(data));
         self
@@ -305,10 +314,12 @@ pub struct Tree<T> {
 }
 
 impl<T> Tree<T> {
+    /// Construct a new node
     pub fn new(value: T, children: Vec<Tree<T>>) -> Self {
         Self { value, children }
     }
 
+    /// Construct a new leaf node
     pub fn leaf(value: T) -> Self {
         Self {
             value,
@@ -316,10 +327,12 @@ impl<T> Tree<T> {
         }
     }
 
+    /// Add child
     pub fn push(&mut self, child: Tree<T>) {
         self.children.push(child)
     }
 
+    /// Get child by its index
     pub fn get(&self, index: usize) -> Option<&Tree<T>> {
         self.children.get(index)
     }
@@ -564,6 +577,23 @@ impl<T: Clone + Any, V: View> View for Tag<T, V> {
     }
 }
 
+/// Renders nothing takes all space
+impl View for () {
+    fn render<'a>(
+        &self,
+        _ctx: &ViewContext,
+        _surf: &'a mut TerminalSurface<'a>,
+        _layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        Tree::leaf(Layout::new().with_size(ct.max()))
+    }
+}
+
+/// Fills with color takes all space
 impl View for RGBA {
     fn render<'a>(
         &self,
