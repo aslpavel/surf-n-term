@@ -153,25 +153,7 @@ impl<'a> View for Text<'a> {
                     }
                 }
                 _ => {
-                    for chr in text.text.chars() {
-                        match chr {
-                            '\r' => {}
-                            '\n' => {
-                                size.width = max(size.width, pos.col);
-                                size.height += 1;
-                                pos.col = 0;
-                            }
-                            _ => {
-                                if pos.col < ct.max().width {
-                                    pos.col += 1;
-                                } else {
-                                    size.width = max(size.width, pos.col);
-                                    size.height += 1;
-                                    pos.col = 1;
-                                }
-                            }
-                        }
-                    }
+                    layout_string(ct.max().width, size, pos, text.text.chars());
                 }
             }
             for child in &text.children {
@@ -261,6 +243,35 @@ impl View for String {
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         self.as_str().layout(ctx, ct)
+    }
+}
+
+/// Given maximum width and current size, position and characters to be added
+/// calculate new size and position
+pub fn layout_string(
+    max_width: usize,
+    size: &mut Size,
+    pos: &mut Position,
+    cs: impl IntoIterator<Item = char>,
+) {
+    for c in cs {
+        match c {
+            '\r' => {}
+            '\n' => {
+                size.width = max(size.width, pos.col);
+                size.height += 1;
+                pos.col = 0;
+            }
+            _ => {
+                if pos.col < max_width {
+                    pos.col += 1;
+                } else {
+                    size.width = max(size.width, pos.col);
+                    size.height += 1;
+                    pos.col = 1;
+                }
+            }
+        }
     }
 }
 
