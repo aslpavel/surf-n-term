@@ -179,6 +179,17 @@ impl<'a, T: Into<Text<'a>>> Extend<T> for Text<'a> {
     }
 }
 
+impl<'a, A> FromIterator<A> for Text<'a>
+where
+    A: Into<Text<'a>>,
+{
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+        let mut text = Text::new("");
+        text.extend(iter);
+        text
+    }
+}
+
 struct TextWriter<'a> {
     text: &'a mut String,
     decoder: Utf8Decoder,
@@ -352,6 +363,18 @@ mod tests {
             text.layout(&ctx, BoxConstraint::tight(size))
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_text_collect() -> Result<(), Error> {
+        let chunks = ["one", " ", "two", " ", "three"];
+        let text: Text<'static> = chunks.into_iter().collect();
+
+        let size = Size::new(3, 10);
+        print!("{:?}", text.debug(size));
+
+        assert_eq!(text.len(), 13);
         Ok(())
     }
 }

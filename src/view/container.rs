@@ -9,14 +9,30 @@ pub enum Align {
     Center,
     End,
     Fill,
+    Offset(i32),
 }
 
 impl Align {
-    pub fn align(&self, leftover: usize) -> usize {
+    pub fn align(&self, small: usize, large: usize) -> usize {
+        let small = small.clamp(0, large);
         match self {
             Self::Start | Self::Fill => 0,
-            Self::Center => leftover / 2,
-            Self::End => leftover,
+            Self::Center => (large - small) / 2,
+            Self::End => large - small,
+            Self::Offset(offset) => {
+                if *offset >= 0 {
+                    *offset as usize
+                } else {
+                    (large - small).saturating_sub(offset.unsigned_abs() as usize)
+                }
+            }
+        }
+    }
+
+    pub fn reserve(&self) -> usize {
+        match self {
+            Self::Offset(offset) => offset.unsigned_abs() as usize,
+            _ => 0,
         }
     }
 }
@@ -114,15 +130,21 @@ impl<V: View> View for Container<V> {
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         // constraint max size if it is specified
         let size_max = Size {
-            height: if self.size.height == 0 {
-                ct.max().height
-            } else {
-                self.size.height.clamp(ct.min().height, ct.max().height)
+            height: {
+                let height = if self.size.height == 0 {
+                    ct.max().height
+                } else {
+                    self.size.height.clamp(ct.min().height, ct.max().height)
+                };
+                height.saturating_sub(self.align_vertical.reserve())
             },
-            width: if self.size.width == 0 {
-                ct.max().width
-            } else {
-                self.size.width.clamp(ct.min().width, ct.max().width)
+            width: {
+                let width = if self.size.width == 0 {
+                    ct.max().width
+                } else {
+                    self.size.width.clamp(ct.min().width, ct.max().width)
+                };
+                width.saturating_sub(self.align_horizontal.reserve())
             },
         };
         // make it tight along `Align::Fill` axis
@@ -142,25 +164,31 @@ impl<V: View> View for Container<V> {
             .view
             .layout(ctx, BoxConstraint::new(size_min, size_max));
         let size = Size {
-            width: if self.size.width == 0 {
-                view_layout.size.width
-            } else {
-                self.size.width
+            width: {
+                let width = if self.size.width == 0 {
+                    view_layout.size.width
+                } else {
+                    self.size.width
+                };
+                width + self.align_horizontal.reserve()
             },
-            height: if self.size.height == 0 {
-                view_layout.size.height
-            } else {
-                self.size.height
+            height: {
+                let height = if self.size.height == 0 {
+                    view_layout.size.height
+                } else {
+                    self.size.height
+                };
+                height + self.align_vertical.reserve()
             },
         };
         let size = ct.clamp(size);
         view_layout.pos = Position {
             row: self
                 .align_vertical
-                .align(size.height.abs_diff(view_layout.size.height)),
+                .align(view_layout.size.height, size.height),
             col: self
                 .align_horizontal
-                .align(size.width.abs_diff(view_layout.size.width)),
+                .align(view_layout.size.width, size.width),
         };
         Tree::new(Layout::new().with_size(size), vec![view_layout])
     }
@@ -201,13 +229,13 @@ mod tests {
 
     #[test]
     fn test_container() -> Result<(), Error> {
-        let view = Fixed::new(Size::new(1, 4), "#ff0000".parse::<RGBA>()?);
+        let view = Fixed::new(Size::new(1, 4), "#cc241d".parse::<RGBA>()?);
         let ctx = ViewContext::dummy();
 
         let size = Size::new(5, 10);
         let cont = Container::new(&view)
             .with_size(size)
-            .with_color("#00ff00".parse()?)
+            .with_color("#98971a".parse()?)
             .with_horizontal(Align::End);
 
         println!("{:?}", cont.debug(size));
@@ -246,6 +274,36 @@ mod tests {
                     Layout::new()
                         .with_position(Position::new(2, 3))
                         .with_size(Size::new(1, 4))
+                )]
+            ),
+            cont.layout(&ctx, BoxConstraint::loose(size))
+        );
+
+        let cont = cont
+            .with_horizontal(Align::Offset(-2))
+            .with_vertical(Align::Offset(1));
+        println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout::new().with_size(size),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(1, 4))
+                        .with_size(Size::new(1, 4))
+                )]
+            ),
+            cont.layout(&ctx, BoxConstraint::loose(size))
+        );
+
+        let cont = cont.with_vertical(Align::Fill);
+        println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout::new().with_size(size),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(0, 4))
+                        .with_size(Size::new(5, 4))
                 )]
             ),
             cont.layout(&ctx, BoxConstraint::loose(size))
