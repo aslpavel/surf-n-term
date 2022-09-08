@@ -153,7 +153,7 @@ impl<'a> View for Text<'a> {
                     }
                 }
                 _ => {
-                    layout_string(ct.max().width, size, pos, text.text.chars());
+                    layout_string_incremental(ct.max().width, size, pos, text.text.chars());
                 }
             }
             for child in &text.children {
@@ -259,7 +259,7 @@ impl View for String {
 
 /// Given maximum width and current size, position and characters to be added
 /// calculate new size and position
-pub fn layout_string(
+pub fn layout_string_incremental(
     max_width: usize,
     size: &mut Size,
     pos: &mut Position,
@@ -284,6 +284,18 @@ pub fn layout_string(
             }
         }
     }
+    size.width = max(size.width, pos.col);
+}
+
+/// Calculate layout of the string given the constraints
+pub fn layout_string(ct: BoxConstraint, cs: impl IntoIterator<Item = char>) -> Layout {
+    let mut size = Size::empty();
+    let mut pos = Position::origin();
+    layout_string_incremental(ct.max().width, &mut size, &mut pos, cs);
+    if pos != Position::origin() {
+        size.height += 1;
+    }
+    Layout::new().with_size(size)
 }
 
 #[cfg(test)]
