@@ -108,7 +108,7 @@ impl UnixTerminal {
             signal_read,
             signal_write,
             SignalOnly,
-            &[SIGWINCH, SIGTERM, SIGINT, SIGQUIT],
+            [SIGWINCH, SIGTERM, SIGINT, SIGQUIT],
         )?;
 
         // self-pipe trick to implement waker

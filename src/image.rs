@@ -452,7 +452,7 @@ impl ImageHandler for KittyImageHandler {
             let count = chunks.len();
             for (index, chunk) in chunks.enumerate() {
                 // control data
-                let more = if index + 1 < count { 1 } else { 0 };
+                let more = i32::from(index + 1 < count);
                 if index == 0 {
                     // a=t  - action is transmit only
                     // f=32 - RGBA pixel format

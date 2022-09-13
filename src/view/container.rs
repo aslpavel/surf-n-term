@@ -1,6 +1,11 @@
 //! [Container] view can specify the size and alignment for its child view
+use std::ops::Add;
+
 use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
-use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
+use crate::{
+    Error, Face, FaceAttrs, Position, Size, Surface, SurfaceMut, TerminalSurface,
+    TerminalSurfaceExt, RGBA,
+};
 
 /// Alignment of a child view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,13 +33,6 @@ impl Align {
             }
         }
     }
-
-    pub fn reserve(&self) -> usize {
-        match self {
-            Self::Offset(offset) => offset.unsigned_abs() as usize,
-            _ => 0,
-        }
-    }
 }
 
 impl Default for Align {
@@ -43,12 +41,21 @@ impl Default for Align {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub struct Margins {
+    pub left: usize,
+    pub right: usize,
+    pub top: usize,
+    pub bottom: usize,
+}
+
 #[derive(Debug)]
 pub struct Container<V> {
     view: V,
     color: Option<RGBA>,
     align_vertical: Align,
     align_horizontal: Align,
+    margins: Margins,
     size: Size,
 }
 
@@ -60,6 +67,7 @@ impl<V: View> Container<V> {
             color: None,
             align_vertical: Align::default(),
             align_horizontal: Align::default(),
+            margins: Margins::default(),
             view: child.into_view(),
         }
     }
@@ -109,6 +117,10 @@ impl<V: View> Container<V> {
             ..self
         }
     }
+
+    pub fn with_margins(self, margins: Margins) -> Self {
+        Self { margins, ..self }
+    }
 }
 
 impl<V: View> View for Container<V> {
@@ -118,78 +130,75 @@ impl<V: View> View for Container<V> {
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        let surf = &mut layout.apply_to(surf);
+        let mut surf = layout.apply_to(surf);
         if self.color.is_some() {
-            surf.erase(Face::new(None, self.color, FaceAttrs::EMPTY));
+            surf.view_mut(
+                self.margins.top..surf.height().saturating_sub(self.margins.bottom),
+                self.margins.left..surf.width().saturating_sub(self.margins.right),
+            )
+            .erase(Face::new(None, self.color, FaceAttrs::EMPTY));
         }
-        self.view
-            .render(ctx, surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
+        self.view.render(
+            ctx,
+            &mut surf.as_mut(),
+            layout.get(0).ok_or(Error::InvalidLayout)?,
+        )?;
         Ok(())
     }
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        // constraint max size if it is specified
-        let size_max = Size {
-            height: {
-                let height = if self.size.height == 0 {
-                    ct.max().height
-                } else {
-                    self.size.height.clamp(ct.min().height, ct.max().height)
-                };
-                height.saturating_sub(self.align_vertical.reserve())
+        // calculate the size taken by the whole container, it will span
+        // all available space if size is not set.
+        let size = Size {
+            height: if self.size.height == 0 {
+                ct.max().height
+            } else {
+                self.size.height.clamp(ct.min().height, ct.max().height)
             },
-            width: {
-                let width = if self.size.width == 0 {
-                    ct.max().width
-                } else {
-                    self.size.width.clamp(ct.min().width, ct.max().width)
-                };
-                width.saturating_sub(self.align_horizontal.reserve())
+            width: if self.size.width == 0 {
+                ct.max().width
+            } else {
+                self.size.width.clamp(ct.min().width, ct.max().width)
             },
         };
-        // make it tight along `Align::Fill` axis
-        let size_min = Size {
+        // calculate view constraints, reserving space for margin
+        let view_size_max = Size {
+            height: size
+                .height
+                .saturating_sub(self.margins.top)
+                .saturating_sub(self.margins.bottom),
+            width: size
+                .width
+                .saturating_sub(self.margins.left)
+                .saturating_sub(self.margins.right),
+        };
+        let view_size_min = Size {
             height: if self.align_vertical == Align::Fill {
-                size_max.height
+                view_size_max.height
             } else {
                 0
             },
             width: if self.align_horizontal == Align::Fill {
-                size_max.width
+                view_size_max.width
             } else {
                 0
             },
         };
+        // calculate view layout
         let mut view_layout = self
             .view
-            .layout(ctx, BoxConstraint::new(size_min, size_max));
-        let size = Size {
-            width: {
-                let width = if self.size.width == 0 {
-                    view_layout.size.width
-                } else {
-                    self.size.width
-                };
-                width + self.align_horizontal.reserve()
-            },
-            height: {
-                let height = if self.size.height == 0 {
-                    view_layout.size.height
-                } else {
-                    self.size.height
-                };
-                height + self.align_vertical.reserve()
-            },
-        };
-        let size = ct.clamp(size);
+            .layout(ctx, BoxConstraint::new(view_size_min, view_size_max));
         view_layout.pos = Position {
             row: self
                 .align_vertical
-                .align(view_layout.size.height, size.height),
+                .align(view_layout.size.height, view_size_max.height)
+                .add(self.margins.top),
             col: self
                 .align_horizontal
-                .align(view_layout.size.width, size.width),
+                .align(view_layout.size.width, view_size_max.width)
+                .add(self.margins.left),
         };
+        // layout tree
         Tree::new(Layout::new().with_size(size), vec![view_layout])
     }
 }
@@ -234,10 +243,11 @@ mod tests {
 
         let size = Size::new(5, 10);
         let cont = Container::new(&view)
-            .with_size(size)
+            // .with_size(size)
             .with_color("#98971a".parse()?)
             .with_horizontal(Align::End);
 
+        println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
@@ -252,6 +262,7 @@ mod tests {
         );
 
         let cont = cont.with_horizontal(Align::Start);
+        println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
@@ -266,6 +277,7 @@ mod tests {
         );
 
         let cont = cont.with_horizontal(Align::Center);
+        println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
@@ -282,6 +294,7 @@ mod tests {
         let cont = cont
             .with_horizontal(Align::Offset(-2))
             .with_vertical(Align::Offset(1));
+        println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
@@ -296,6 +309,7 @@ mod tests {
         );
 
         let cont = cont.with_vertical(Align::Fill);
+        println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
         assert_eq!(
             Tree::new(
@@ -304,6 +318,26 @@ mod tests {
                     Layout::new()
                         .with_position(Position::new(0, 4))
                         .with_size(Size::new(5, 4))
+                )]
+            ),
+            cont.layout(&ctx, BoxConstraint::loose(size))
+        );
+
+        let cont = cont.with_margins(Margins {
+            top: 1,
+            bottom: 0,
+            left: 2,
+            right: 1,
+        });
+        println!("{:?}", cont);
+        println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout::new().with_size(size),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(1, 3))
+                        .with_size(Size::new(4, 4))
                 )]
             ),
             cont.layout(&ctx, BoxConstraint::loose(size))

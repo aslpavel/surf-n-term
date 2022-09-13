@@ -1,7 +1,7 @@
 //! Defines [View] that represents anything that can be rendered into a terminal.
 //! As well as some useful implementations such as [Text], [Flex], [Container], ...
 mod container;
-pub use container::{Align, Container};
+pub use container::{Align, Container, Margins};
 
 mod flex;
 pub use flex::Flex;
