@@ -54,20 +54,14 @@ pub trait View {
     {
         Preview { view: self, size }
     }
-}
 
-pub struct Preview<V> {
-    view: V,
-    size: Size,
-}
-
-impl<V: View> std::fmt::Debug for Preview<V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ctx = ViewContext::dummy();
-        let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
-        surf.draw_view(&ctx, &self.view)
-            .map_err(|_| std::fmt::Error)?;
-        surf.debug().fmt(f)
+    /// Wrapper around view that calls trace function on every layout call
+    fn trace_layout<T>(self, trace: T) -> TraceLayout<Self, T>
+    where
+        T: Fn(&BoxConstraint, &Tree<Layout>),
+        Self: Sized,
+    {
+        TraceLayout { view: self, trace }
     }
 }
 
@@ -105,6 +99,47 @@ impl<'a> View for Box<dyn View + 'a> {
         Self: Sized + 'b,
     {
         self
+    }
+}
+
+pub struct Preview<V> {
+    view: V,
+    size: Size,
+}
+
+impl<V: View> std::fmt::Debug for Preview<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ctx = ViewContext::dummy();
+        let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
+        surf.draw_view(&ctx, &self.view)
+            .map_err(|_| std::fmt::Error)?;
+        surf.debug().fmt(f)
+    }
+}
+
+pub struct TraceLayout<V, T> {
+    view: V,
+    trace: T,
+}
+
+impl<V, S> View for TraceLayout<V, S>
+where
+    V: View,
+    S: Fn(&BoxConstraint, &Tree<Layout>),
+{
+    fn render<'a>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        self.view.render(ctx, surf, layout)
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        let layout = self.view.layout(ctx, ct);
+        (self.trace)(&ct, &layout);
+        layout
     }
 }
 

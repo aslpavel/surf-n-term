@@ -10,10 +10,18 @@ use crate::{
 /// Alignment of a child view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Align {
+    /// Align to the smallest value along the axis
     Start,
+    /// Align to the center along the axis
     Center,
+    /// Align to the end along the axis
     End,
-    Fill,
+    /// Take all available space along the axis
+    Expand,
+    /// Try to shrink container to match the size of the child
+    Shrink,
+    /// Place  the view at the specified offset, negative means offset is from
+    /// the maximum value
     Offset(i32),
 }
 
@@ -21,7 +29,7 @@ impl Align {
     pub fn align(&self, small: usize, large: usize) -> usize {
         let small = small.clamp(0, large);
         match self {
-            Self::Start | Self::Fill => 0,
+            Self::Start | Self::Expand | Self::Shrink => 0,
             Self::Center => (large - small) / 2,
             Self::End => large - small,
             Self::Offset(offset) => {
@@ -149,7 +157,7 @@ impl<V: View> View for Container<V> {
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         // calculate the size taken by the whole container, it will span
         // all available space if size is not set.
-        let size = Size {
+        let mut size = Size {
             height: if self.size.height == 0 {
                 ct.max().height
             } else {
@@ -161,6 +169,7 @@ impl<V: View> View for Container<V> {
                 self.size.width.clamp(ct.min().width, ct.max().width)
             },
         };
+
         // calculate view constraints, reserving space for margin
         let view_size_max = Size {
             height: size
@@ -173,17 +182,18 @@ impl<V: View> View for Container<V> {
                 .saturating_sub(self.margins.right),
         };
         let view_size_min = Size {
-            height: if self.align_vertical == Align::Fill {
+            height: if self.align_vertical == Align::Expand {
                 view_size_max.height
             } else {
                 0
             },
-            width: if self.align_horizontal == Align::Fill {
+            width: if self.align_horizontal == Align::Expand {
                 view_size_max.width
             } else {
                 0
             },
         };
+
         // calculate view layout
         let mut view_layout = self
             .view
@@ -198,6 +208,25 @@ impl<V: View> View for Container<V> {
                 .align(view_layout.size.width, view_size_max.width)
                 .add(self.margins.left),
         };
+
+        // try to shrink container if necessary
+        if self.align_vertical == Align::Shrink {
+            size.height = view_layout
+                .size
+                .height
+                .add(self.margins.top)
+                .add(self.margins.bottom)
+                .clamp(ct.min.height, ct.max.height)
+        }
+        if self.align_horizontal == Align::Shrink {
+            size.width = view_layout
+                .size
+                .width
+                .add(self.margins.left)
+                .add(self.margins.right)
+                .clamp(ct.min.width, ct.max.width)
+        }
+
         // layout tree
         Tree::new(Layout::new().with_size(size), vec![view_layout])
     }
@@ -308,7 +337,7 @@ mod tests {
             cont.layout(&ctx, BoxConstraint::loose(size))
         );
 
-        let cont = cont.with_vertical(Align::Fill);
+        let cont = cont.with_vertical(Align::Expand);
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
         assert_eq!(
@@ -338,6 +367,21 @@ mod tests {
                     Layout::new()
                         .with_position(Position::new(1, 3))
                         .with_size(Size::new(4, 4))
+                )]
+            ),
+            cont.layout(&ctx, BoxConstraint::loose(size))
+        );
+
+        let cont = cont.with_vertical(Align::Shrink);
+        println!("{:?}", cont);
+        println!("{:?}", cont.debug(size));
+        assert_eq!(
+            Tree::new(
+                Layout::new().with_size(Size::new(2, 10)),
+                vec![Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(1, 3))
+                        .with_size(Size::new(1, 4))
                 )]
             ),
             cont.layout(&ctx, BoxConstraint::loose(size))

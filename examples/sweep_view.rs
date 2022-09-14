@@ -57,7 +57,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         .add_flex_child(
             1.0,
             Container::new(Text::new("query").with_face(input_face))
-                .with_horizontal(Align::Fill)
+                .with_horizontal(Align::Expand)
                 .with_color(bg),
         )
         .add_child(
@@ -83,7 +83,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
                     Flex::row().add_child(tag).add_flex_child(
                         1.0,
                         Container::new(Text::new(item).with_face(face))
-                            .with_horizontal(Align::Fill)
+                            .with_horizontal(Align::Expand)
                             .with_color(bg),
                     ),
                 )
@@ -92,14 +92,17 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         });
 
     let list = Flex::row()
-        .add_flex_child(1.0, Container::new(items_list).with_horizontal(Align::Fill))
+        .add_flex_child(
+            1.0,
+            Container::new(items_list).with_horizontal(Align::Expand),
+        )
         .add_child(ScrollBar::new(Axis::Vertical, scrollbar_face, 127, 40, 30));
     Ok(Container::new(
         Flex::column()
             .add_child(input_view)
             .add_flex_child(1.0, Container::new(list).with_color(bg)),
     )
-    .with_vertical(Align::Fill))
+    .with_vertical(Align::Expand))
 }
 
 fn main() -> Result<(), Error> {

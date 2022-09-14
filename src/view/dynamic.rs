@@ -63,8 +63,8 @@ mod tests {
             } else {
                 red
             })
-            .with_horizontal(Align::Fill)
-            .with_vertical(Align::Fill)
+            .with_horizontal(Align::Expand)
+            .with_vertical(Align::Expand)
         });
 
         let green_size = Size::new(4, 10);
