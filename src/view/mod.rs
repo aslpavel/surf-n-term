@@ -15,6 +15,9 @@ pub use text::{layout_string, layout_string_incremental, Text};
 mod dynamic;
 pub use dynamic::Dynamic;
 
+mod frame;
+pub use frame::Frame;
+
 use crate::{
     Cell, Error, Face, FaceAttrs, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal,
     TerminalSurface, TerminalSurfaceExt, RGBA,
