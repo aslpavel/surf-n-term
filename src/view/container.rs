@@ -274,6 +274,7 @@ mod tests {
         let cont = Container::new(&view)
             // .with_size(size)
             .with_color("#98971a".parse()?)
+            .with_vertical(Align::Center)
             .with_horizontal(Align::End);
 
         println!("{:?}", cont);

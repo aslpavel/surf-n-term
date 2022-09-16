@@ -158,7 +158,7 @@ impl<V: View> View for Frame<V> {
         }
 
         let mut surf = layout.apply_to(surf);
-        let fragments = self.fragments(&ctx);
+        let fragments = self.fragments(ctx);
         let empty = Cell::new(Face::new(None, Some(self.color), Default::default()), None);
         for col in 0..surf.width() {
             for row in 0..surf.height() {
