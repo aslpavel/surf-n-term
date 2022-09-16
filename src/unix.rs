@@ -29,7 +29,7 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -332,7 +332,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
                 size_escape = size;
             }
             Some(TerminalEvent::KeyboardLevel(_)) => {
-                debug!("[detect] kitty keyboard protocol");
+                debug!("[detected] kitty keyboard protocol");
                 caps.kitty_keyboard = true;
             }
             Some(event) => {
@@ -397,6 +397,7 @@ impl Write for UnixTerminal {
 }
 
 impl Terminal for UnixTerminal {
+    #[instrument(level="debug", skip_all, fields(?timeout))]
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error> {
         // NOTE:
         // Only `select` reliably works with /dev/tty on MacOS, `poll` for example
@@ -443,7 +444,7 @@ impl Terminal for UnixTerminal {
             match select {
                 Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => return Ok(None),
                 Err(error) => return Err(error.into()),
-                Ok(count) => tracing::trace!("select count={}", count),
+                Ok(count) => tracing::trace!(%count, "select events"),
             };
 
             // process pending output
@@ -490,6 +491,11 @@ impl Terminal for UnixTerminal {
                     return Err(Error::Quit);
                 }
                 self.stats.recv += recv;
+                tracing::trace!(
+                    size = %recv,
+                    data = format!("\"{}\"", buf[..recv].escape_ascii()),
+                    "received"
+                );
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
                 while let Some(event) = self.decoder.decode(&mut read_queue)? {
@@ -503,11 +509,6 @@ impl Terminal for UnixTerminal {
                     if !self.image_handler.handle(&mut self.write_queue, &event)? {
                         self.events_queue.push_back(event)
                     }
-                }
-                // Dirty hack to extract ambiguous terminal events (such as Escape key)
-                // we assume that ambiguous events are never split across reads.
-                if let Some(event) = self.decoder.take() {
-                    self.events_queue.push_back(event);
                 }
             }
 

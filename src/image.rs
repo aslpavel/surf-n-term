@@ -148,7 +148,10 @@ impl std::hash::Hash for Image {
 
 impl fmt::Debug for Image {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Image({})", self.hash)
+        f.debug_struct("Image")
+            .field("size", &self.size())
+            .field("hash", &self.hash)
+            .finish()
     }
 }
 

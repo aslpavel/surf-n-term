@@ -96,7 +96,10 @@ impl<V> Frame<V> {
         let path = Arc::new(
             PathBuilder::new()
                 .move_to((offset, offset))
-                .rbox(size - Point::new(offset, offset), (radius, radius))
+                .rbox(
+                    size - Point::new(2.0 * offset, 2.0 * offset),
+                    (radius, radius),
+                )
                 .build(),
         );
 

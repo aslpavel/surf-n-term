@@ -105,7 +105,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     )
     .with_vertical(Align::Expand);
 
-    Ok(Frame::new(result, bg, accent, 0.2, 0.5))
+    Ok(Frame::new(result, bg, "#00ff00".parse()?, 0.2, 0.5))
 }
 
 fn main() -> Result<(), Error> {
