@@ -45,7 +45,7 @@ impl Align {
 
 impl Default for Align {
     fn default() -> Self {
-        Self::Center
+        Self::Shrink
     }
 }
 

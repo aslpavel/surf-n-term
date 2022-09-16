@@ -4,10 +4,14 @@ use crate::{
     RGBA,
 };
 use rasterize::{
-    BBox, FillRule, Image as RImage, LinColor, LineCap, LineJoin, PathBuilder, Point, Scalar,
-    Scene, StrokeStyle, Transform,
+    BBox, Color, FillRule, Image as RImage, LinColor, LineCap, LineJoin, PathBuilder, Point,
+    Scalar, Scene, StrokeStyle, Transform,
 };
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    hash::Hasher,
+    sync::{Arc, Mutex},
+};
 
 /// Create a frame with rounded corners and a border around a view
 pub struct Frame<V> {
@@ -15,12 +19,14 @@ pub struct Frame<V> {
     color: RGBA,
     border_color: RGBA,
     border_width: Scalar,
-    broder_radius: Scalar,
+    border_radius: Scalar,
     // offset: Scalar,
 }
 
 type Fragments = Arc<[Cell; 9]>;
-// const FRAGMENTS: Mutex<HashMap<(Size, RGBA, RGBA), Fragments>> = Mutex::new(HashMap::new());
+lazy_static::lazy_static! {
+    static ref FRAGMENTS: Mutex<HashMap<u64, Fragments>> = Default::default();
+}
 
 impl<V> Frame<V> {
     /// Create new frame
@@ -40,12 +46,34 @@ impl<V> Frame<V> {
             color,
             border_color,
             border_width: border_width.clamp(0.0, 1.0),
-            broder_radius: border_radius.clamp(0.0, 1.0),
+            border_radius: border_radius.clamp(0.0, 1.0),
         }
+    }
+
+    /// Frame identifier used to cache generated fragments
+    fn identfier(&self, ctx: &ViewContext) -> u64 {
+        let mut hasher = fnv::FnvHasher::default();
+        hasher.write_usize(ctx.pixels_per_cell.width);
+        hasher.write_usize(ctx.pixels_per_cell.height);
+        hasher.write(&self.color.to_rgba());
+        hasher.write(&self.border_color.to_rgba());
+        hasher.write(&self.border_width.to_le_bytes());
+        hasher.write(&self.border_radius.to_le_bytes());
+        hasher.finish()
     }
 
     /// Generate image fragments of the frame
     fn fragments(&self, ctx: &ViewContext) -> Fragments {
+        // return cached value if available
+        let id = self.identfier(ctx);
+        let fragments = {
+            let guard = FRAGMENTS.lock().expect("lock poisoned");
+            guard.get(&id).cloned()
+        };
+        if let Some(fragments) = fragments {
+            return fragments;
+        }
+
         // size of a single cell
         let height = ctx.pixels_per_cell.height as Scalar;
         let width = ctx.pixels_per_cell.width as Scalar;
@@ -53,7 +81,7 @@ impl<V> Frame<V> {
         // calculate border and radius size
         let total = height.min(width);
         let border = (total * self.border_width).round();
-        let radius = (total - border / 2.0) * self.broder_radius;
+        let radius = (total - border / 2.0) * self.border_radius;
 
         // offset from the left-top corner
         let offset = if radius < total / 2.0 {
@@ -102,12 +130,19 @@ impl<V> Frame<V> {
         let mut fragments: [Cell; 9] = Default::default();
         for x in 0..3 {
             for y in 0..3 {
-                let img = rimage_to_image(image.view(y, h * (y + 1) + 1, x, w * (x + 1) + 1));
+                let img =
+                    rimage_to_image(image.view(h * y, h * (y + 1) + 1, w * x, w * (x + 1) + 1));
                 fragments[x + y * 3] = Cell::new_image(img);
             }
         }
 
-        Arc::new(fragments)
+        let fragments = Arc::new(fragments);
+        {
+            // cache result
+            let mut guard = FRAGMENTS.lock().expect("lock poisoned");
+            guard.insert(id, fragments.clone());
+        }
+        fragments
     }
 }
 
@@ -118,11 +153,12 @@ impl<V: View> View for Frame<V> {
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
+        if !ctx.has_glyphs {
+            return self.view.render(ctx, surf, layout);
+        }
+
         let mut surf = layout.apply_to(surf);
-
-        // TODO: cache this!
         let fragments = self.fragments(&ctx);
-
         let empty = Cell::new(Face::new(None, Some(self.color), Default::default()), None);
         for col in 0..surf.width() {
             for row in 0..surf.height() {
@@ -144,6 +180,10 @@ impl<V: View> View for Frame<V> {
     }
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        if !ctx.has_glyphs {
+            return self.view.layout(ctx, ct);
+        }
+
         let ct = BoxConstraint::new(
             Size {
                 height: ct.min().height.saturating_sub(2),

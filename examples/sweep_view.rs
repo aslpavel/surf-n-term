@@ -1,7 +1,7 @@
-use std::{io::Write, time::Duration};
+use std::time::Duration;
 use surf_n_term::{
     render::TerminalRenderer,
-    view::{Align, Axis, Container, Flex, ScrollBar, Text, View, ViewContext},
+    view::{Align, Axis, Container, Flex, Frame, ScrollBar, Text, View, ViewContext},
     BBox, Color, Error, Face, FaceAttrs, FillRule, Glyph, Path, Position, Size, SurfaceMut,
     SystemTerminal, Terminal, TerminalCommand, TerminalSurfaceExt, RGBA,
 };
@@ -97,21 +97,22 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
             Container::new(items_list).with_horizontal(Align::Expand),
         )
         .add_child(ScrollBar::new(Axis::Vertical, scrollbar_face, 127, 40, 30));
-    Ok(Container::new(
+
+    let result = Container::new(
         Flex::column()
             .add_child(input_view)
             .add_flex_child(1.0, Container::new(list).with_color(bg)),
     )
-    .with_vertical(Align::Expand))
+    .with_vertical(Align::Expand);
+
+    Ok(Frame::new(result, bg, accent, 0.2, 0.5))
 }
 
 fn main() -> Result<(), Error> {
     let mut term = SystemTerminal::new()?;
 
     // reserve space, sweep uses more sophisticated method with scroll
-    for _ in 0..HIGHT {
-        write!(term, "\r\n")?;
-    }
+    term.execute(TerminalCommand::Scroll(HIGHT as i32))?;
     term.execute(TerminalCommand::CursorMove {
         row: -(HIGHT as i32),
         col: 0,

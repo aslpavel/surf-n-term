@@ -41,11 +41,6 @@ impl Image {
         }
     }
 
-    /// Image size in bytes
-    pub fn size(&self) -> usize {
-        self.surf.height() * self.surf.width() * 4
-    }
-
     /// Size in cells
     pub fn size_cells(&self, pixels_per_cell: Size) -> Size {
         if pixels_per_cell.width == 0 || pixels_per_cell.height == 0 {
