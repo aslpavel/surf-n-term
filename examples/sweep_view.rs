@@ -9,9 +9,9 @@ use surf_n_term::{
 const HIGHT: usize = 10;
 
 fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View + 'a, Error> {
-    let fg: RGBA = "#3c3836".parse()?;
-    let bg: RGBA = "#fbf1c7".parse()?;
-    let accent: RGBA = "#8f3f71".parse()?;
+    let fg: RGBA = "#ebdbb2".parse()?;
+    let bg: RGBA = "#282828".parse()?;
+    let accent: RGBA = "#d3869b".parse()?;
     let icon = Glyph::new(
         "M19.873 3.49a.75.75 0 1 0-.246-1.48l-6 1a.75.75 0 0 0-.613.593L12.736
         5H5.75a.75.75 0 0 0-.75.75v4a3.25 3.25 0 0 0 3 3.24v.51c0 1.953 1.4 3.579
@@ -105,7 +105,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     )
     .with_vertical(Align::Expand);
 
-    Ok(Frame::new(result, bg, "#00ff00".parse()?, 0.2, 0.5))
+    Ok(Frame::new(result, bg, accent, 0.2, 0.9))
 }
 
 fn main() -> Result<(), Error> {

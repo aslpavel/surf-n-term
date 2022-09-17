@@ -84,22 +84,20 @@ impl<V> Frame<V> {
         let radius = (total - border / 2.0) * self.border_radius;
 
         // offset from the left-top corner
-        let offset = if radius < total / 2.0 {
+        let x_offset = if radius < total / 2.0 {
             // try to keep in the middle of the cell if radius is small enough
             (total / 2.0).round() + border / 2.0
         } else {
             (total - radius).round() + border / 2.0
         };
+        let offset = Point::new(x_offset, height - (width - x_offset));
 
         // draw 3x3 box which represent all the pieces that we need to render frame
         let size = Point::new(width * 3.0, height * 3.0);
         let path = Arc::new(
             PathBuilder::new()
-                .move_to((offset, offset))
-                .rbox(
-                    size - Point::new(2.0 * offset, 2.0 * offset),
-                    (radius, radius),
-                )
+                .move_to(offset)
+                .rbox(size - 2.0 * offset, (radius, radius))
                 .build(),
         );
 
