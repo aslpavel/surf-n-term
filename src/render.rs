@@ -188,8 +188,8 @@ impl TerminalRenderer {
         self.glyphs_reasterize(term.size()?);
 
         // Images can overlap and newly rendered image might be erased by erase command
-        // addressed to images of the previous frame. That is why we are erasing all images
-        // of the previous frame before rendering new images.
+        // addressed to images of the previous frame. That is why we are erasing all changed
+        // images of the previous frame before rendering new images.
         for row in 0..self.back.height() {
             for col in 0..self.back.width() {
                 let (front, back) = match (self.front.get(row, col), self.back.get(row, col)) {
@@ -231,21 +231,18 @@ impl TerminalRenderer {
                     col += 1;
                     continue;
                 }
+
                 // update face
                 if front.face != self.face {
                     term.execute(TerminalCommand::Face(front.face))?;
                     self.face = front.face;
                 }
-                // update position
-                if self.cursor.row != row || self.cursor.col != col {
-                    self.cursor.row = row;
-                    self.cursor.col = col;
-                    term.execute(TerminalCommand::CursorTo(self.cursor))?;
-                }
+
                 // handle image
                 if let Some(image) = front.image.clone() {
                     let image_changed = front.image != back.image;
-                    // make sure surface under image is not changed
+                    // ignore all the cells covered by this image otherwise
+                    // those cell might erase part of the image (in case of sixel)
                     let size = image.size_cells(self.size.pixels_per_cell());
                     let mut view = self
                         .front
@@ -255,6 +252,19 @@ impl TerminalRenderer {
                     }
                     // render image if changed
                     if image_changed {
+                        // erase area under image (fix hist rendering before enabling)
+                        // for row in 0..size.height {
+                        //     self.set_cursor(
+                        //         term.dyn_ref(),
+                        //         Position {
+                        //             row: self.cursor.row + row,
+                        //             col: self.cursor.col,
+                        //         },
+                        //     )?;
+                        //     // term.execute(TerminalCommand::Face("bg=#ff0000".parse()?))?;
+                        //     term.execute(TerminalCommand::EraseChars(size.width))?;
+                        // }
+                        self.set_cursor(term.dyn_ref(), Position::new(row, col))?;
                         // issue render command
                         term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
                         // set position large enough so it would trigger position update
@@ -262,6 +272,13 @@ impl TerminalRenderer {
                     }
                     col += 1;
                     continue;
+                }
+
+                // update position
+                if self.cursor.row != row || self.cursor.col != col {
+                    self.cursor.row = row;
+                    self.cursor.col = col;
+                    term.execute(TerminalCommand::CursorTo(self.cursor))?;
                 }
                 // identify character
                 let chr = front.character.unwrap_or(' ');
@@ -330,6 +347,14 @@ impl TerminalRenderer {
             }
         }
         repeats
+    }
+
+    fn set_cursor(&mut self, term: &mut dyn Terminal, pos: Position) -> Result<(), Error> {
+        if self.cursor.row != pos.row || self.cursor.col != pos.col {
+            self.cursor = pos;
+            term.execute(TerminalCommand::CursorTo(self.cursor))?;
+        }
+        Ok(())
     }
 }
 
