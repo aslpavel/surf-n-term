@@ -116,7 +116,7 @@ impl<V: View> std::fmt::Debug for Preview<V> {
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
         surf.draw_view(&ctx, &self.view)
             .map_err(|_| std::fmt::Error)?;
-        surf.debug().fmt(f)
+        surf.preview().fmt(f)
     }
 }
 

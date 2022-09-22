@@ -85,6 +85,10 @@ impl Cell {
         self.face
     }
 
+    pub fn with_face(self, face: Face) -> Self {
+        Cell { face, ..self }
+    }
+
     /// Create damaged cell
     fn new_damaged() -> Self {
         Self {
@@ -128,6 +132,8 @@ pub struct TerminalRenderer {
     size: TerminalSize,
     /// Cache of rendered glyphs
     glyph_cache: HashMap<Cell, Image>,
+    /// Frame counter
+    frame_count: usize,
 }
 
 impl TerminalRenderer {
@@ -147,6 +153,7 @@ impl TerminalRenderer {
             back,
             size,
             glyph_cache: HashMap::new(),
+            frame_count: 0,
         })
     }
 
@@ -183,8 +190,11 @@ impl TerminalRenderer {
     }
 
     /// Render the current frame
+    #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
-        // Rasterize all glyphs
+        self.frame_count += 1;
+
+        // rasterize all glyphs
         self.glyphs_reasterize(term.size()?);
 
         // Images can overlap and newly rendered image might be erased by erase command
@@ -202,19 +212,6 @@ impl TerminalRenderer {
                             img.clone(),
                             Some(Position::new(row, col)),
                         ))?;
-                    }
-                }
-                // mark all cells effected by the image as damaged
-                if let Some(size) = front
-                    .image
-                    .as_ref()
-                    .map(|img| img.size_cells(self.size.pixels_per_cell()))
-                {
-                    let mut view = self
-                        .front
-                        .view_mut(row..row + size.height, col..col + size.width);
-                    for cell in view.iter_mut() {
-                        cell.kind = CellKind::Damaged;
                     }
                 }
             }
@@ -244,27 +241,28 @@ impl TerminalRenderer {
                     // ignore all the cells covered by this image otherwise
                     // those cell might erase part of the image (in case of sixel)
                     let size = image.size_cells(self.size.pixels_per_cell());
-                    let mut view = self
-                        .front
-                        .view_mut(row..row + size.height, col..col + size.width);
-                    for cell in view.iter_mut() {
-                        cell.kind = CellKind::Ignore;
-                    }
+                    self.front
+                        .view_mut(row..row + size.height, col..col + size.width)
+                        .fill_with(|_, _, mut cell| {
+                            cell.kind = CellKind::Ignore;
+                            cell
+                        });
+
                     // render image if changed
                     if image_changed {
-                        // erase area under image (fix hist rendering before enabling)
-                        // for row in 0..size.height {
-                        //     self.set_cursor(
-                        //         term.dyn_ref(),
-                        //         Position {
-                        //             row: self.cursor.row + row,
-                        //             col: self.cursor.col,
-                        //         },
-                        //     )?;
-                        //     // term.execute(TerminalCommand::Face("bg=#ff0000".parse()?))?;
-                        //     term.execute(TerminalCommand::EraseChars(size.width))?;
-                        // }
-                        self.set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        // erase area under image, needed for partially transparent images
+                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        for row in 0..size.height {
+                            self.term_set_cursor(
+                                term.dyn_ref(),
+                                Position {
+                                    row: self.cursor.row + row,
+                                    col: self.cursor.col,
+                                },
+                            )?;
+                            self.term_erase(term.dyn_ref(), size.width)?;
+                        }
+                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
                         // issue render command
                         term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
                         // set position large enough so it would trigger position update
@@ -286,18 +284,7 @@ impl TerminalRenderer {
                 if chr == ' ' {
                     let repeats = self.find_repeats(row, col);
                     col += repeats;
-                    if repeats > 4 {
-                        // NOTE:
-                        //   - only use erase command when it is more efficient
-                        //     this value chosen arbitrarily
-                        //   - erase is not moving cursor
-                        term.execute(TerminalCommand::EraseChars(repeats))?;
-                    } else {
-                        self.cursor.col += repeats;
-                        for _ in 0..repeats {
-                            term.execute(TerminalCommand::Char(chr))?;
-                        }
-                    }
+                    self.term_erase(term.dyn_ref(), repeats)?;
                 } else {
                     term.execute(TerminalCommand::Char(chr))?;
                     self.cursor.col += 1;
@@ -349,10 +336,26 @@ impl TerminalRenderer {
         repeats
     }
 
-    fn set_cursor(&mut self, term: &mut dyn Terminal, pos: Position) -> Result<(), Error> {
+    fn term_set_cursor(&mut self, term: &mut dyn Terminal, pos: Position) -> Result<(), Error> {
         if self.cursor.row != pos.row || self.cursor.col != pos.col {
             self.cursor = pos;
             term.execute(TerminalCommand::CursorTo(self.cursor))?;
+        }
+        Ok(())
+    }
+
+    fn term_erase(&mut self, term: &mut dyn Terminal, count: usize) -> Result<(), Error> {
+        if count > 4 {
+            // NOTE:
+            //   - only use erase command when it is more efficient
+            //     this value chosen arbitrarily
+            //   - erase is not moving cursor
+            term.execute(TerminalCommand::EraseChars(count))?;
+        } else {
+            self.cursor.col += count;
+            for _ in 0..count {
+                term.execute(TerminalCommand::Char(' '))?;
+            }
         }
         Ok(())
     }
@@ -380,13 +383,14 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
 
     /// Wrapper around terminal surface that implements [std::fmt::Debug]
     /// which renders a surface to the terminal.
-    fn debug(&self) -> TerminalSurfaceDebug<'_>;
+    fn preview(&self) -> TerminalSurfacePreview<'_>;
 }
 
 impl<S> TerminalSurfaceExt for S
 where
     S: SurfaceMut<Item = Cell>,
 {
+    // Draw square box on the surface
     fn draw_box(&mut self, face: Option<Face>) {
         if self.width() < 2 || self.height() < 2 {
             return;
@@ -406,7 +410,7 @@ where
         self.view_mut(-1, 0).fill(Cell::new(face, Some('└')));
     }
 
-    // draw image using unicode upper half block symbol \u{2580}
+    // Draw image using unicode upper half block symbol \u{2580}
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>) {
         let height = img.height() / 2 + img.height() % 2;
         let width = img.width();
@@ -418,9 +422,10 @@ where
         });
     }
 
+    /// Draw image on the surface
     fn draw_image(&mut self, img: Image) {
         if let Some(cell) = self.get_mut(0, 0) {
-            *cell = Cell::new_image(img);
+            *cell = Cell::new_image(img).with_face(cell.face);
         }
     }
 
@@ -432,16 +437,20 @@ where
         Ok(())
     }
 
+    /// Replace all cells with empty character and provided face
     fn erase(&mut self, face: Face) {
         self.fill_with(|_row, _col, cell| Cell::new(cell.face.overlay(&face), None));
     }
 
+    /// Crete writable wrapper around the terminal surface
     fn writer(&mut self) -> TerminalWriter<'_> {
         TerminalWriter::new(self)
     }
 
-    fn debug(&self) -> TerminalSurfaceDebug<'_> {
-        TerminalSurfaceDebug {
+    /// Create preview object that implements [Debug], only useful in tests
+    /// and for debugging
+    fn preview(&self) -> TerminalSurfacePreview<'_> {
+        TerminalSurfacePreview {
             surf: self.as_ref(),
         }
     }
@@ -571,11 +580,11 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
     }
 }
 
-pub struct TerminalSurfaceDebug<'a> {
+pub struct TerminalSurfacePreview<'a> {
     surf: SurfaceView<'a, Cell>,
 }
 
-impl<'a> TerminalSurfaceDebug<'a> {
+impl<'a> TerminalSurfacePreview<'a> {
     fn as_bytes(&self) -> Result<Vec<u8>, Error> {
         // expect true color and kitty image support
         let capabilities = TerminalCaps {
@@ -643,7 +652,7 @@ impl<'a> TerminalSurfaceDebug<'a> {
     }
 }
 
-impl<'a> Debug for TerminalSurfaceDebug<'a> {
+impl<'a> Debug for TerminalSurfacePreview<'a> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut cur = std::io::Cursor::new(self.as_bytes().map_err(|_| std::fmt::Error)?);
         let mut decoder = crate::decoder::Utf8Decoder::new();
@@ -868,7 +877,7 @@ mod tests {
         let mut writer = view.writer().skip(4).face(purple);
         write!(writer, "TEST")?;
         println!("writer with offset: {}", debug(render.view())?);
-        print!("-> {:?}", render.view().debug());
+        print!("-> {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -891,8 +900,8 @@ mod tests {
             .view_owned(1..2, 1..-1)
             .fill(Cell::new(red, None));
         println!("erase:{}", debug(render.view())?);
-        print!("-> {:?}", render.view().debug());
-        render.view().debug().dump("/tmp/frame.txt")?;
+        print!("-> {:?}", render.view().preview());
+        render.view().preview().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,

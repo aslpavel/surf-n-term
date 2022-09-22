@@ -560,21 +560,19 @@ pub struct Mouse {
     pub name: KeyName,
     /// Key mode
     pub mode: KeyMod,
-    /// Row coordinate
-    pub row: usize,
-    /// Column coordinate
-    pub col: usize,
+    /// Position
+    pub pos: Position,
 }
 
 impl fmt::Debug for Mouse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.mode.is_empty() {
-            write!(f, "{:?} [{},{}]", self.name, self.row, self.col)?;
+            write!(f, "{:?} [{},{}]", self.name, self.pos.row, self.pos.col)?;
         } else {
             write!(
                 f,
                 "{:?}+{:?} [{},{}]",
-                self.name, self.mode, self.row, self.col
+                self.name, self.mode, self.pos.row, self.pos.col
             )?;
         }
         Ok(())

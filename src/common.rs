@@ -194,7 +194,7 @@ impl Rnd {
     }
 
     fn step(&mut self) -> u32 {
-        self.state = self.state.wrapping_mul(214_013).wrapping_add(2_531_011) & 0x7fffffff;
+        self.state = self.state.wrapping_mul(214_013).wrapping_add(2_531_011) & 0x7fff_ffff;
         self.state >> 16
     }
 

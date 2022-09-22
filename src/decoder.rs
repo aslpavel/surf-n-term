@@ -97,9 +97,9 @@ impl Decoder for Utf8Decoder {
             consume += 1;
             match UTF8DFA.transition(self.state, *byte) {
                 None => {
+                    use std::io::{Error, ErrorKind};
                     self.reset();
                     buf.consume(consume);
-                    use std::io::{Error, ErrorKind};
                     return Err(Error::new(ErrorKind::InvalidInput, "utf8 decoder failed"));
                 }
                 Some(state) if UTF8DFA.info(state).accepting => {
@@ -649,8 +649,7 @@ impl TTYMatcher for MouseEventMatcher {
         Some(TerminalEvent::Mouse(Mouse {
             name,
             mode,
-            row,
-            col,
+            pos: Position { row, col },
         }))
     }
 }
@@ -1204,8 +1203,7 @@ mod tests {
             Some(TerminalEvent::Mouse(Mouse {
                 name: KeyName::MouseLeft,
                 mode: KeyMod::PRESS,
-                row: 13,
-                col: 93
+                pos: Position::new(13, 93),
             }))
         );
 
@@ -1215,8 +1213,7 @@ mod tests {
             Some(TerminalEvent::Mouse(Mouse {
                 name: KeyName::MouseRight,
                 mode: KeyMod::ALT | KeyMod::CTRL,
-                row: 25,
-                col: 32
+                pos: Position::new(25, 32),
             }))
         );
 
@@ -1226,8 +1223,7 @@ mod tests {
             Some(TerminalEvent::Mouse(Mouse {
                 name: KeyName::MouseWheelUp,
                 mode: KeyMod::PRESS,
-                row: 29,
-                col: 141,
+                pos: Position::new(29, 141),
             }))
         );
 
