@@ -40,7 +40,7 @@ pub struct Cell {
 
 impl Cell {
     /// Create new cell from face and char
-    pub fn new(face: Face, character: Option<char>) -> Self {
+    pub fn new_char(face: Face, character: Option<char>) -> Self {
         Self {
             face,
             kind: CellKind::Char(character.unwrap_or(' ')),
@@ -92,7 +92,7 @@ impl Cell {
 
 impl Default for Cell {
     fn default() -> Self {
-        Self::new(Face::default(), None)
+        Self::new_char(Face::default(), None)
     }
 }
 
@@ -235,18 +235,18 @@ impl TerminalRenderer {
                 match front.kind.clone() {
                     CellKind::Image(image) => {
                         // erase area under image, needed for partially transparent images
-                        // let size = image.size_cells(self.size.pixels_per_cell());
-                        // self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        // for row in 0..size.height {
-                        //     self.term_set_cursor(
-                        //         term.dyn_ref(),
-                        //         Position {
-                        //             row: self.cursor.row + row,
-                        //             col: self.cursor.col,
-                        //         },
-                        //     )?;
-                        //     self.term_erase(term.dyn_ref(), size.width)?;
-                        // }
+                        let size = image.size_cells(self.size.pixels_per_cell());
+                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        for row in 0..size.height {
+                            self.term_set_cursor(
+                                term.dyn_ref(),
+                                Position {
+                                    row: self.cursor.row + row,
+                                    col: self.cursor.col,
+                                },
+                            )?;
+                            self.term_erase(term.dyn_ref(), size.width)?;
+                        }
 
                         // issue render command
                         self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
@@ -258,14 +258,7 @@ impl TerminalRenderer {
                         col += 1;
                     }
                     CellKind::Char(chr) => {
-                        // update position
-                        if self.cursor.row != row || self.cursor.col != col {
-                            self.cursor.row = row;
-                            self.cursor.col = col;
-                            term.execute(TerminalCommand::CursorTo(self.cursor))?;
-                        }
-
-                        // find if it is possible to erase instead of using ' '
+                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
                         if chr == ' ' {
                             let repeats = self.find_repeats(row, col);
                             col += repeats;
@@ -414,17 +407,17 @@ where
         }
         let face = face.unwrap_or_default();
 
-        let h = Cell::new(face, Some('─'));
-        let v = Cell::new(face, Some('│'));
+        let h = Cell::new_char(face, Some('─'));
+        let v = Cell::new_char(face, Some('│'));
         self.view_mut(0, 1..-1).fill(h.clone());
         self.view_mut(-1, 1..-1).fill(h);
         self.view_mut(1..-1, 0).fill(v.clone());
         self.view_mut(1..-1, -1).fill(v);
 
-        self.view_mut(0, 0).fill(Cell::new(face, Some('┌')));
-        self.view_mut(0, -1).fill(Cell::new(face, Some('┐')));
-        self.view_mut(-1, -1).fill(Cell::new(face, Some('┘')));
-        self.view_mut(-1, 0).fill(Cell::new(face, Some('└')));
+        self.view_mut(0, 0).fill(Cell::new_char(face, Some('┌')));
+        self.view_mut(0, -1).fill(Cell::new_char(face, Some('┐')));
+        self.view_mut(-1, -1).fill(Cell::new_char(face, Some('┘')));
+        self.view_mut(-1, 0).fill(Cell::new_char(face, Some('└')));
     }
 
     // Draw image using unicode upper half block symbol \u{2580}
@@ -435,7 +428,7 @@ where
             let fg = img.get(row * 2, col).copied();
             let bg = img.get(row * 2 + 1, col).copied();
             let face = Face::new(fg, bg, FaceAttrs::EMPTY);
-            Cell::new(face, Some('\u{2580}'))
+            Cell::new_char(face, Some('\u{2580}'))
         });
     }
 
@@ -456,7 +449,7 @@ where
 
     /// Replace all cells with empty character and provided face
     fn erase(&mut self, face: Face) {
-        self.fill_with(|_row, _col, cell| Cell::new(cell.face.overlay(&face), None));
+        self.fill_with(|_row, _col, cell| Cell::new_char(cell.face.overlay(&face), None));
     }
 
     /// Crete writable wrapper around the terminal surface
@@ -556,7 +549,7 @@ impl<'a> TerminalWriter<'a> {
         };
         // fill the rest of the width with empty spaces
         for (_, cell) in (0..blank).zip(&mut self.iter) {
-            *cell = Cell::new(face, Some(' '));
+            *cell = Cell::new_char(face, Some(' '));
         }
         result
     }
@@ -572,7 +565,7 @@ impl<'a> TerminalWriter<'a> {
             chr => match self.iter.next() {
                 Some(cell) => {
                     let face = cell.face.overlay(&face);
-                    *cell = Cell::new(face, Some(chr));
+                    *cell = Cell::new_char(face, Some(chr));
                     true
                 }
                 None => false,
@@ -883,7 +876,7 @@ mod tests {
         render
             .view()
             .view_owned(1..2, 1..-1)
-            .fill(Cell::new(red, None));
+            .fill(Cell::new_char(red, None));
         print!("erase: {:?}", render.view().preview());
         render.view().preview().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;

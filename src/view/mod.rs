@@ -639,7 +639,7 @@ impl View for RGBA {
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        let cell = Cell::new(Face::new(None, Some(*self), FaceAttrs::default()), None);
+        let cell = Cell::new_char(Face::new(None, Some(*self), FaceAttrs::default()), None);
         layout.apply_to(surf).fill(cell);
         Ok(())
     }

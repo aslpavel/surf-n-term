@@ -47,7 +47,7 @@ fn main() -> Result<(), Error> {
     let glyph = if term.capabilities().glyphs {
         Cell::new_glyph("fg=#fb4935".parse()?, serde_json::from_str(SHEEP)?)
     } else {
-        Cell::new("bg=#fb4935".parse()?, None)
+        Cell::new_char("bg=#fb4935".parse()?, None)
     };
     let mut count = 0;
     let mut pos = None;
