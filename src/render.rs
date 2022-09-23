@@ -21,8 +21,6 @@ use std::{
 enum CellKind {
     /// Contains useful content
     Content,
-    /// Must be skipped during rendering
-    Ignore,
     /// Must be re-rendered
     Damaged,
 }
@@ -128,6 +126,8 @@ pub struct TerminalRenderer {
     front: SurfaceOwned<Cell>,
     /// Back surface (keeping previous state)
     back: SurfaceOwned<Cell>,
+    /// Cells that will not be considered during diffing
+    ignored: SurfaceOwned<bool>,
     /// Current terminal size
     size: TerminalSize,
     /// Cache of rendered glyphs
@@ -151,6 +151,7 @@ impl TerminalRenderer {
             cursor: Position::new(0, 0),
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back,
+            ignored: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| false),
             size,
             glyph_cache: HashMap::new(),
             frame_count: 0,
@@ -160,19 +161,9 @@ impl TerminalRenderer {
     /// Clear terminal
     pub fn clear<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // erase all images
-        let mut iter = self.back.iter();
-        loop {
-            let (row, col) = iter.position();
-            match iter.next() {
-                None => break,
-                Some(cell) => {
-                    if let Some(img) = &cell.image {
-                        term.execute(TerminalCommand::ImageErase(
-                            img.clone(),
-                            Some(Position::new(row, col)),
-                        ))?;
-                    }
-                }
+        for (pos, cell) in self.back.iter().with_position() {
+            if let Some(img) = &cell.image {
+                term.execute(TerminalCommand::ImageErase(img.clone(), Some(pos)))?;
             }
         }
 
@@ -186,7 +177,14 @@ impl TerminalRenderer {
 
     /// View associated with the current frame
     pub fn view(&mut self) -> TerminalSurface<'_> {
-        self.front.view_mut(.., ..)
+        self.front.as_mut()
+    }
+
+    pub fn diff(&self) -> impl Iterator<Item = (Position, &'_ Cell, &'_ Cell)> {
+        TerminalRendererDiff {
+            renderer: self,
+            pos: Position::new(0, 0),
+        }
     }
 
     /// Render the current frame
@@ -194,26 +192,38 @@ impl TerminalRenderer {
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         self.frame_count += 1;
 
-        // rasterize all glyphs
+        // replace all glyphs with rendered images
         self.glyphs_reasterize(term.size()?);
 
+        // Erase changed images
+        //
         // Images can overlap and newly rendered image might be erased by erase command
         // addressed to images of the previous frame. That is why we are erasing all changed
         // images of the previous frame before rendering new images.
-        for row in 0..self.back.height() {
-            for col in 0..self.back.width() {
-                let (front, back) = match (self.front.get(row, col), self.back.get(row, col)) {
-                    (Some(front), Some(back)) => (front, back),
-                    _ => break,
-                };
-                if front.image != back.image {
-                    if let Some(img) = &back.image {
-                        term.execute(TerminalCommand::ImageErase(
-                            img.clone(),
-                            Some(Position::new(row, col)),
-                        ))?;
-                    }
-                }
+        for (pos, _, old) in self.diff() {
+            if let Some(img) = &old.image {
+                term.execute(TerminalCommand::ImageErase(
+                    img.clone(),
+                    Some(Position::new(pos.row, pos.col)),
+                ))?;
+            }
+        }
+
+        // Ignores cell covered by new images
+        //
+        // We need to ignore cells covered by images but not containing image itself
+        // otherwise they might show up in the diff and overwrite part of the image
+        // (in case of sixel)
+        self.ignored.fill(false);
+        for (pos, cell) in self.front.iter().with_position() {
+            if let Some(image) = cell.image.clone() {
+                let size = image.size_cells(self.size.pixels_per_cell());
+                self.ignored
+                    .view_mut(
+                        pos.row..pos.row + size.height,
+                        pos.col..pos.col + size.width,
+                    )
+                    .fill_with(|row, col, _| row != 0 || col != 0);
             }
         }
 
@@ -224,7 +234,8 @@ impl TerminalRenderer {
                     (Some(front), Some(back)) => (front, back),
                     _ => break,
                 };
-                if front.kind == CellKind::Ignore || front == back {
+                let ignored = self.ignored.get(row, col).copied().unwrap_or(false);
+                if ignored || front == back {
                     col += 1;
                     continue;
                 }
@@ -237,37 +248,27 @@ impl TerminalRenderer {
 
                 // handle image
                 if let Some(image) = front.image.clone() {
-                    let image_changed = front.image != back.image;
-                    // ignore all the cells covered by this image otherwise
-                    // those cell might erase part of the image (in case of sixel)
-                    let size = image.size_cells(self.size.pixels_per_cell());
-                    self.front
-                        .view_mut(row..row + size.height, col..col + size.width)
-                        .fill_with(|_, _, mut cell| {
-                            cell.kind = CellKind::Ignore;
-                            cell
-                        });
+                    // erase area under image, needed for partially transparent images
+                    // let size = image.size_cells(self.size.pixels_per_cell());
+                    // self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                    // for row in 0..size.height {
+                    //     self.term_set_cursor(
+                    //         term.dyn_ref(),
+                    //         Position {
+                    //             row: self.cursor.row + row,
+                    //             col: self.cursor.col,
+                    //         },
+                    //     )?;
+                    //     self.term_erase(term.dyn_ref(), size.width)?;
+                    // }
 
-                    // render image if changed
-                    if image_changed {
-                        // erase area under image, needed for partially transparent images
-                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        for row in 0..size.height {
-                            self.term_set_cursor(
-                                term.dyn_ref(),
-                                Position {
-                                    row: self.cursor.row + row,
-                                    col: self.cursor.col,
-                                },
-                            )?;
-                            self.term_erase(term.dyn_ref(), size.width)?;
-                        }
-                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        // issue render command
-                        term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
-                        // set position large enough so it would trigger position update
-                        self.cursor = Position::new(100000, 1000000);
-                    }
+                    // issue render command
+                    self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                    term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
+
+                    // set position large enough so it would trigger position update
+                    self.cursor = Position::new(1_000_000, 1_000_000);
+
                     col += 1;
                     continue;
                 }
@@ -348,7 +349,6 @@ impl TerminalRenderer {
         if count > 4 {
             // NOTE:
             //   - only use erase command when it is more efficient
-            //     this value chosen arbitrarily
             //   - erase is not moving cursor
             term.execute(TerminalCommand::EraseChars(count))?;
         } else {
@@ -358,6 +358,36 @@ impl TerminalRenderer {
             }
         }
         Ok(())
+    }
+}
+
+pub struct TerminalRendererDiff<'a> {
+    renderer: &'a TerminalRenderer,
+    pos: Position,
+}
+
+impl<'a> Iterator for TerminalRendererDiff<'a> {
+    type Item = (Position, &'a Cell, &'a Cell);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let pos = self.pos;
+            if self.pos.col + 1 < self.renderer.back.width() {
+                self.pos.col += 1;
+            } else if self.pos.row + 1 < self.renderer.back.height() {
+                self.pos.col = 0;
+                self.pos.row += 1;
+            } else {
+                return None;
+            }
+            let new = self.renderer.front.get(pos.row, pos.col)?;
+            let old = self.renderer.back.get(pos.row, pos.col)?;
+            let ignored = self.renderer.ignored.get(pos.row, pos.col)?;
+            if *ignored || new == old {
+                continue;
+            }
+            return Some((pos, new, old));
+        }
     }
 }
 

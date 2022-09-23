@@ -338,14 +338,23 @@ pub struct SurfaceIter<'a, T> {
 }
 
 impl<'a, T> SurfaceIter<'a, T> {
-    pub fn position(&self) -> (usize, usize) {
-        self.shape.nth(self.index).unwrap_or((self.shape.height, 0))
+    /// Position of the element that will be yielded next
+    pub fn position(&self) -> Position {
+        let (row, col) = self.shape.nth(self.index).unwrap_or((self.shape.height, 0));
+        Position { row, col }
     }
 
+    /// Augment iterator with position
+    pub fn with_position(self) -> SurfacePosIter<'a, T> {
+        SurfacePosIter { iter: self }
+    }
+
+    /// Index of the element that will be yielded next
     pub fn index(&self) -> usize {
         self.index
     }
 
+    /// Shape of the surface
     pub fn shape(&self) -> Shape {
         self.shape
     }
@@ -365,6 +374,19 @@ impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
     }
 }
 
+pub struct SurfacePosIter<'a, T> {
+    iter: SurfaceIter<'a, T>,
+}
+
+impl<'a, T> Iterator for SurfacePosIter<'a, T> {
+    type Item = (Position, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let pos = self.iter.position();
+        Some((pos, self.iter.next()?))
+    }
+}
+
 /// Iterator over mutable elements of the Surface
 pub struct SurfaceMutIter<'a, T> {
     index: usize,
@@ -373,11 +395,18 @@ pub struct SurfaceMutIter<'a, T> {
 }
 
 impl<'a, T> SurfaceMutIter<'a, T> {
+    /// Position of the element that will be yielded next
     pub fn position(&self) -> Position {
         let (row, col) = self.shape.nth(self.index).unwrap_or((self.shape.height, 0));
         Position { row, col }
     }
 
+    /// Augment iterator with position
+    pub fn with_position(self) -> SurfacePosMutIter<'a, T> {
+        SurfacePosMutIter { iter: self }
+    }
+
+    /// Index of the element that will be yielded next
     pub fn index(&self) -> usize {
         self.index
     }
@@ -408,6 +437,19 @@ impl<'a, T: 'a> Iterator for SurfaceMutIter<'a, T> {
             let item = unsafe { &mut *ptr.add(offset) };
             Some(item)
         }
+    }
+}
+
+pub struct SurfacePosMutIter<'a, T> {
+    iter: SurfaceMutIter<'a, T>,
+}
+
+impl<'a, T> Iterator for SurfacePosMutIter<'a, T> {
+    type Item = (Position, &'a mut T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let pos = self.iter.position();
+        Some((pos, self.iter.next()?))
     }
 }
 
@@ -866,7 +908,7 @@ mod tests {
         surf.fill_with(|row, col, _| (row * 7 + col) % 10);
         // 0 1 | 2 3 4 5 | 6
         // 7 8 | 9 0 1 2 | 3
-        // 4 5 | 6 7 8 9 | 1
+        // 4 5 | 6 7 8 9 | 0
         let mut view = surf.view_mut(.., 2..-1);
         let mut iter = view.iter_mut();
         assert_eq!(iter.position(), Position::new(0, 0));
@@ -884,11 +926,11 @@ mod tests {
         let view = surf.view(1..2, 2..4);
         let mut iter = view.iter();
         assert_eq!(iter.next().cloned(), Some(9));
-        assert_eq!(iter.position(), (0, 1));
+        assert_eq!(iter.position(), Position::new(0, 1));
         assert_eq!(iter.next().cloned(), Some(0));
-        assert_eq!(iter.position(), (1, 0));
+        assert_eq!(iter.position(), Position::new(1, 0));
         assert_eq!(iter.next().cloned(), None);
-        assert_eq!(iter.position(), (1, 0));
+        assert_eq!(iter.position(), Position::new(1, 0));
     }
 
     #[test]
