@@ -235,18 +235,19 @@ impl TerminalRenderer {
                 match front.kind.clone() {
                     CellKind::Image(image) => {
                         // erase area under image, needed for partially transparent images
-                        let size = image.size_cells(self.size.pixels_per_cell());
-                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        for row in 0..size.height {
-                            self.term_set_cursor(
-                                term.dyn_ref(),
-                                Position {
-                                    row: self.cursor.row + row,
-                                    col: self.cursor.col,
-                                },
-                            )?;
-                            self.term_erase(term.dyn_ref(), size.width)?;
-                        }
+                        // FIXME: currently leaves marks after exiting from sweep
+                        // let size = image.size_cells(self.size.pixels_per_cell());
+                        // self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        // for row in 0..size.height {
+                        //     self.term_set_cursor(
+                        //         term.dyn_ref(),
+                        //         Position {
+                        //             row: self.cursor.row + row,
+                        //             col: self.cursor.col,
+                        //         },
+                        //     )?;
+                        //     self.term_erase(term.dyn_ref(), size.width)?;
+                        // }
 
                         // issue render command
                         self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
