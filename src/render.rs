@@ -17,10 +17,14 @@ use std::{
 };
 
 /// Terminal cell kind
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CellKind {
-    /// Contains useful content
-    Content,
+    /// Contains character
+    Char(char),
+    /// Contains image
+    Image(Image),
+    /// Contains glyph
+    Glyph(Glyph),
     /// Must be re-rendered
     Damaged,
 }
@@ -28,10 +32,9 @@ enum CellKind {
 /// Terminal cell
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Cell {
+    /// Cell's face
     face: Face,
-    character: Option<char>,
-    image: Option<Image>,
-    glyph: Option<Glyph>,
+    /// Cell's kind
     kind: CellKind,
 }
 
@@ -40,10 +43,7 @@ impl Cell {
     pub fn new(face: Face, character: Option<char>) -> Self {
         Self {
             face,
-            character,
-            image: None,
-            glyph: None,
-            kind: CellKind::Content,
+            kind: CellKind::Char(character.unwrap_or(' ')),
         }
     }
 
@@ -51,10 +51,7 @@ impl Cell {
     pub fn new_image(image: Image) -> Self {
         Self {
             face: Default::default(),
-            character: None,
-            image: Some(image),
-            glyph: None,
-            kind: CellKind::Content,
+            kind: CellKind::Image(image),
         }
     }
 
@@ -62,19 +59,24 @@ impl Cell {
     pub fn new_glyph(face: Face, glyph: Glyph) -> Self {
         Self {
             face,
-            character: None,
-            image: None,
-            glyph: Some(glyph),
-            kind: CellKind::Content,
+            kind: CellKind::Glyph(glyph),
+        }
+    }
+
+    /// Create damaged cell
+    fn new_damaged() -> Self {
+        Self {
+            face: Default::default(),
+            kind: CellKind::Damaged,
         }
     }
 
     /// Width occupied by cell (can be != 1 for Glyph)
     pub fn width(&self) -> NonZeroUsize {
-        let width = self
-            .glyph
-            .as_ref()
-            .map_or_else(|| 1, |g| max(1, g.size().width));
+        let width = match &self.kind {
+            CellKind::Glyph(glyph) => max(1, glyph.size().width),
+            _ => 1,
+        };
         NonZeroUsize::new(width).expect("zero cell width")
     }
 
@@ -86,28 +88,11 @@ impl Cell {
     pub fn with_face(self, face: Face) -> Self {
         Cell { face, ..self }
     }
-
-    /// Create damaged cell
-    fn new_damaged() -> Self {
-        Self {
-            face: Default::default(),
-            character: None,
-            image: None,
-            glyph: None,
-            kind: CellKind::Damaged,
-        }
-    }
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Self {
-            face: Default::default(),
-            character: None,
-            image: None,
-            glyph: None,
-            kind: CellKind::Content,
-        }
+        Self::new(Face::default(), None)
     }
 }
 
@@ -162,7 +147,7 @@ impl TerminalRenderer {
     pub fn clear<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // erase all images
         for (pos, cell) in self.back.iter().with_position() {
-            if let Some(img) = &cell.image {
+            if let CellKind::Image(img) = &cell.kind {
                 term.execute(TerminalCommand::ImageErase(img.clone(), Some(pos)))?;
             }
         }
@@ -180,6 +165,7 @@ impl TerminalRenderer {
         self.front.as_mut()
     }
 
+    /// Iterator over changed cells between back and front buffers
     pub fn diff(&self) -> impl Iterator<Item = (Position, &'_ Cell, &'_ Cell)> {
         TerminalRendererDiff {
             renderer: self,
@@ -201,7 +187,7 @@ impl TerminalRenderer {
         // addressed to images of the previous frame. That is why we are erasing all changed
         // images of the previous frame before rendering new images.
         for (pos, _, old) in self.diff() {
-            if let Some(img) = &old.image {
+            if let CellKind::Image(img) = &old.kind {
                 term.execute(TerminalCommand::ImageErase(
                     img.clone(),
                     Some(Position::new(pos.row, pos.col)),
@@ -216,7 +202,7 @@ impl TerminalRenderer {
         // (in case of sixel)
         self.ignored.fill(false);
         for (pos, cell) in self.front.iter().with_position() {
-            if let Some(image) = cell.image.clone() {
+            if let CellKind::Image(image) = &cell.kind {
                 let size = image.size_cells(self.size.pixels_per_cell());
                 self.ignored
                     .view_mut(
@@ -246,50 +232,51 @@ impl TerminalRenderer {
                     self.face = front.face;
                 }
 
-                // handle image
-                if let Some(image) = front.image.clone() {
-                    // erase area under image, needed for partially transparent images
-                    // let size = image.size_cells(self.size.pixels_per_cell());
-                    // self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                    // for row in 0..size.height {
-                    //     self.term_set_cursor(
-                    //         term.dyn_ref(),
-                    //         Position {
-                    //             row: self.cursor.row + row,
-                    //             col: self.cursor.col,
-                    //         },
-                    //     )?;
-                    //     self.term_erase(term.dyn_ref(), size.width)?;
-                    // }
+                match front.kind.clone() {
+                    CellKind::Image(image) => {
+                        // erase area under image, needed for partially transparent images
+                        // let size = image.size_cells(self.size.pixels_per_cell());
+                        // self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        // for row in 0..size.height {
+                        //     self.term_set_cursor(
+                        //         term.dyn_ref(),
+                        //         Position {
+                        //             row: self.cursor.row + row,
+                        //             col: self.cursor.col,
+                        //         },
+                        //     )?;
+                        //     self.term_erase(term.dyn_ref(), size.width)?;
+                        // }
 
-                    // issue render command
-                    self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                    term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
+                        // issue render command
+                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
 
-                    // set position large enough so it would trigger position update
-                    self.cursor = Position::new(1_000_000, 1_000_000);
+                        // set position large enough so it would trigger position update
+                        self.cursor = Position::new(1_000_000, 1_000_000);
 
-                    col += 1;
-                    continue;
-                }
+                        col += 1;
+                    }
+                    CellKind::Char(chr) => {
+                        // update position
+                        if self.cursor.row != row || self.cursor.col != col {
+                            self.cursor.row = row;
+                            self.cursor.col = col;
+                            term.execute(TerminalCommand::CursorTo(self.cursor))?;
+                        }
 
-                // update position
-                if self.cursor.row != row || self.cursor.col != col {
-                    self.cursor.row = row;
-                    self.cursor.col = col;
-                    term.execute(TerminalCommand::CursorTo(self.cursor))?;
-                }
-                // identify character
-                let chr = front.character.unwrap_or(' ');
-                // find if it is possible to erase instead of using ' '
-                if chr == ' ' {
-                    let repeats = self.find_repeats(row, col);
-                    col += repeats;
-                    self.term_erase(term.dyn_ref(), repeats)?;
-                } else {
-                    term.execute(TerminalCommand::Char(chr))?;
-                    self.cursor.col += 1;
-                    col += 1;
+                        // find if it is possible to erase instead of using ' '
+                        if chr == ' ' {
+                            let repeats = self.find_repeats(row, col);
+                            col += repeats;
+                            self.term_erase(term.dyn_ref(), repeats)?;
+                        } else {
+                            term.execute(TerminalCommand::Char(chr))?;
+                            self.cursor.col += 1;
+                            col += 1;
+                        }
+                    }
+                    _ => col += 1,
                 }
             }
         }
@@ -304,7 +291,7 @@ impl TerminalRenderer {
     /// All glyphs are replaced with rasterized image
     fn glyphs_reasterize(&mut self, term_size: TerminalSize) {
         for cell in self.front.iter_mut() {
-            if let Some(glyph) = &cell.glyph {
+            if let CellKind::Glyph(glyph) = &cell.kind {
                 let image = match self.glyph_cache.get(cell) {
                     Some(image) => image.clone(),
                     None => {
@@ -313,7 +300,7 @@ impl TerminalRenderer {
                         image
                     }
                 };
-                cell.image = Some(image);
+                cell.kind = CellKind::Image(image);
             }
         }
     }
@@ -779,40 +766,9 @@ impl Write for DebugTerminal {
 mod tests {
     use super::*;
     use crate::{
-        encoder::{Encoder, TTYEncoder},
         terminal::{Size, TerminalEvent, TerminalSize, TerminalWaker},
         TerminalCaps,
     };
-    use std::io::Write;
-
-    fn debug(view: impl Surface<Item = Cell>) -> Result<String, Error> {
-        let mut encoder = TTYEncoder::default();
-        let mut out = Vec::new();
-        write!(&mut out, "\n┌")?;
-        for _ in 0..view.width() {
-            write!(&mut out, "─")?;
-        }
-        writeln!(&mut out, "┐")?;
-        for row in 0..view.height() {
-            write!(&mut out, "│")?;
-            for col in 0..view.width() {
-                match view.get(row, col) {
-                    None => break,
-                    Some(cell) => {
-                        encoder.encode(&mut out, TerminalCommand::Face(cell.face))?;
-                        write!(&mut out, "{}", cell.character.unwrap_or(' '))?;
-                    }
-                }
-            }
-            writeln!(&mut out, "\x1b[m│")?;
-        }
-        write!(&mut out, "└")?;
-        for _ in 0..view.width() {
-            write!(&mut out, "─")?;
-        }
-        write!(&mut out, "┘")?;
-        Ok(String::from_utf8_lossy(&out).to_string())
-    }
 
     struct DummyTerminal {
         size: TerminalSize,
@@ -906,8 +862,7 @@ mod tests {
         let mut view = render.view().view_owned(.., 1..);
         let mut writer = view.writer().skip(4).face(purple);
         write!(writer, "TEST")?;
-        println!("writer with offset: {}", debug(render.view())?);
-        print!("-> {:?}", render.view().preview());
+        print!("writer with offset: {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -929,8 +884,7 @@ mod tests {
             .view()
             .view_owned(1..2, 1..-1)
             .fill(Cell::new(red, None));
-        println!("erase:{}", debug(render.view())?);
-        print!("-> {:?}", render.view().preview());
+        print!("erase: {:?}", render.view().preview());
         render.view().preview().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;
         assert_eq!(
@@ -960,7 +914,7 @@ mod tests {
             }
         });
         render.view().view_mut(1.., 2..).draw_image_ascii(&img);
-        println!("ascii image: {}", debug(render.view())?);
+        print!("ascii image: {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -990,7 +944,7 @@ mod tests {
         let mut view = render.view().view_owned(.., 1..-1);
         let mut writer = view.writer().face(purple);
         write!(&mut writer, "one\ntwo")?;
-        println!("writer new line:{}", debug(render.view())?);
+        print!("writer new line: {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1014,7 +968,7 @@ mod tests {
         let mut view = render.view().view_owned(.., 1..-1);
         let mut writer = view.writer().face(purple);
         write!(&mut writer, "  one\nx")?;
-        println!("writer new line:{}", debug(render.view())?);
+        print!("writer new line: {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
