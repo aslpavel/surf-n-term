@@ -96,6 +96,17 @@ impl Default for Cell {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+enum CellMark {
+    /// Not marked
+    #[default]
+    Empty,
+    /// Needs to be ignored
+    Ignored,
+    /// Needs to be returned during diffing
+    Damaged,
+}
+
 pub type TerminalSurface<'a> = SurfaceMutView<'a, Cell>;
 
 /// Terminal renderer
@@ -111,8 +122,8 @@ pub struct TerminalRenderer {
     front: SurfaceOwned<Cell>,
     /// Back surface (keeping previous state)
     back: SurfaceOwned<Cell>,
-    /// Cells that will not be considered during diffing
-    ignored: SurfaceOwned<bool>,
+    /// Marked cell that are treaded specially during diffing
+    marks: SurfaceOwned<CellMark>,
     /// Current terminal size
     size: TerminalSize,
     /// Cache of rendered glyphs
@@ -136,7 +147,9 @@ impl TerminalRenderer {
             cursor: Position::new(0, 0),
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back,
-            ignored: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| false),
+            marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| {
+                CellMark::Empty
+            }),
             size,
             glyph_cache: HashMap::new(),
             frame_count: 0,
@@ -177,21 +190,40 @@ impl TerminalRenderer {
     #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         self.frame_count += 1;
+        self.marks.fill(CellMark::Empty);
 
         // replace all glyphs with rendered images
         self.glyphs_reasterize(term.size()?);
 
         // Erase changed images
         //
-        // Images can overlap and newly rendered image might be erased by erase command
-        // addressed to images of the previous frame. That is why we are erasing all changed
-        // images of the previous frame before rendering new images.
-        for (pos, _, old) in self.diff() {
-            if let CellKind::Image(img) = &old.kind {
+        // - Images can overlap and newly rendered image might be erased by erase
+        //   command addressed to images of the previous frame. That is why we
+        //   are erasing all changed images of the previous frame before rendering
+        //   new images.
+        // - Mark erased areas as damaged, as they will need to be redrawn
+        for ((pos, old), new) in self.back.iter().with_position().zip(self.front.iter()) {
+            if old == new {
+                continue;
+            }
+            if let CellKind::Image(image) = &old.kind {
                 term.execute(TerminalCommand::ImageErase(
-                    img.clone(),
+                    image.clone(),
                     Some(Position::new(pos.row, pos.col)),
                 ))?;
+                let size = image.size_cells(self.size.pixels_per_cell());
+                self.marks
+                    .view_mut(
+                        pos.row..pos.row + size.height,
+                        pos.col..pos.col + size.width,
+                    )
+                    .fill_with(|row, col, _| {
+                        if row != 0 || col != 0 {
+                            CellMark::Damaged
+                        } else {
+                            CellMark::Empty
+                        }
+                    });
             }
         }
 
@@ -200,16 +232,21 @@ impl TerminalRenderer {
         // We need to ignore cells covered by images but not containing image itself
         // otherwise they might show up in the diff and overwrite part of the image
         // (in case of sixel)
-        self.ignored.fill(false);
         for (pos, cell) in self.front.iter().with_position() {
             if let CellKind::Image(image) = &cell.kind {
                 let size = image.size_cells(self.size.pixels_per_cell());
-                self.ignored
+                self.marks
                     .view_mut(
                         pos.row..pos.row + size.height,
                         pos.col..pos.col + size.width,
                     )
-                    .fill_with(|row, col, _| row != 0 || col != 0);
+                    .fill_with(|row, col, _| {
+                        if row != 0 || col != 0 {
+                            CellMark::Ignored
+                        } else {
+                            CellMark::Empty
+                        }
+                    });
             }
         }
 
@@ -220,8 +257,8 @@ impl TerminalRenderer {
                     (Some(front), Some(back)) => (front, back),
                     _ => break,
                 };
-                let ignored = self.ignored.get(row, col).copied().unwrap_or(false);
-                if ignored || front == back {
+                let mark = self.marks.get(row, col).copied().unwrap_or(CellMark::Empty);
+                if mark != CellMark::Damaged && (mark == CellMark::Ignored || front == back) {
                     col += 1;
                     continue;
                 }
@@ -234,20 +271,19 @@ impl TerminalRenderer {
 
                 match front.kind.clone() {
                     CellKind::Image(image) => {
-                        // erase area under image, needed for partially transparent images
-                        // FIXME: currently leaves marks after exiting from sweep
-                        // let size = image.size_cells(self.size.pixels_per_cell());
-                        // self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        // for row in 0..size.height {
-                        //     self.term_set_cursor(
-                        //         term.dyn_ref(),
-                        //         Position {
-                        //             row: self.cursor.row + row,
-                        //             col: self.cursor.col,
-                        //         },
-                        //     )?;
-                        //     self.term_erase(term.dyn_ref(), size.width)?;
-                        // }
+                        // erase area under image, needed for images with transparency
+                        let size = image.size_cells(self.size.pixels_per_cell());
+                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        for row in 0..size.height {
+                            self.term_set_cursor(
+                                term.dyn_ref(),
+                                Position {
+                                    row: self.cursor.row + row,
+                                    col: self.cursor.col,
+                                },
+                            )?;
+                            self.term_erase(term.dyn_ref(), size.width)?;
+                        }
 
                         // issue render command
                         self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
@@ -363,8 +399,8 @@ impl<'a> Iterator for TerminalRendererDiff<'a> {
             }
             let new = self.renderer.front.get(pos.row, pos.col)?;
             let old = self.renderer.back.get(pos.row, pos.col)?;
-            let ignored = self.renderer.ignored.get(pos.row, pos.col)?;
-            if *ignored || new == old {
+            let mark = self.renderer.marks.get(pos.row, pos.col)?;
+            if *mark != CellMark::Damaged && (*mark == CellMark::Ignored || new == old) {
                 continue;
             }
             return Some((pos, new, old));
