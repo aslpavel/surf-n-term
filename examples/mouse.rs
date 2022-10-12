@@ -1,7 +1,7 @@
 use std::io::Write;
 use surf_n_term::{
-    Cell, DecMode, KeyName, SurfaceMut, SystemTerminal, Terminal, TerminalAction, TerminalCommand,
-    TerminalEvent, TerminalSurfaceExt,
+    Cell, DecMode, KeyName, Position, SurfaceMut, SystemTerminal, Terminal, TerminalAction,
+    TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
 type Error = Box<dyn std::error::Error + Sync + Send + 'static>;
@@ -9,7 +9,7 @@ const SHEEP: &str = r#"
 {
     "view_box": [0, 0, 24, 24],
     "size": [2, 4],
-    "path": "M20,8.5A2.5,2.5 0 0,1 17.5,11C16.42,11 15.5,10.31 15.16,9.36C14.72,9.75 14.14,10 13.5,10C12.94,10 12.42,9.81 12,9.5C11.58,9.81 11.07,10 10.5,10C9.86,10 9.28,9.75 8.84,9.36C8.5,10.31 7.58,11 6.5,11A2.5,2.5 0 0,1 4,8.5C4,7.26 4.91,6.23 6.1,6.04C6.04,5.87 6,5.69 6,5.5A1.5,1.5 0 0,1 7.5,4C7.7,4 7.89,4.04 8.06,4.11C8.23,3.47 8.81,3 9.5,3C9.75,3 10,3.07 10.18,3.17C10.5,2.5 11.19,2 12,2C12.81,2 13.5,2.5 13.82,3.17C14,3.07 14.25,3 14.5,3C15.19,3 15.77,3.47 15.94,4.11C16.11,4.04 16.3,4 16.5,4A1.5,1.5 0 0,1 18,5.5C18,5.69 17.96,5.87 17.9,6.04C19.09,6.23 20,7.26 20,8.5M10,12A1,1 0 0,0 9,13A1,1 0 0,0 10,14A1,1 0 0,0 11,13A1,1 0 0,0 10,12M14,12A1,1 0 0,0 13,13A1,1 0 0,0 14,14A1,1 0 0,0 15,13A1,1 0 0,0 14,12M20.23,10.66C19.59,11.47 18.61,12 17.5,12C17.05,12 16.62,11.9 16.21,11.73C16.2,14.28 15.83,17.36 14.45,18.95C13.93,19.54 13.3,19.86 12.5,19.96V18H11.5V19.96C10.7,19.86 10.07,19.55 9.55,18.95C8.16,17.35 7.79,14.29 7.78,11.74C7.38,11.9 6.95,12 6.5,12C5.39,12 4.41,11.47 3.77,10.66C2.88,11.55 2,12 2,12C2,12 3,14 5,14C5.36,14 5.64,13.96 5.88,13.91C6.22,17.73 7.58,22 12,22C16.42,22 17.78,17.73 18.12,13.91C18.36,13.96 18.64,14 19,14C21,14 22,12 22,12C22,12 21.12,11.55 20.23,10.66Z"
+    "path": "M11.5,11L17.88,16.37L17,16.55L16.36,16.67C15.73,16.8 15.37,17.5 15.65,18.07L15.92,18.65L17.28,21.59L15.86,22.25L14.5,19.32L14.24,18.74C13.97,18.15 13.22,17.97 12.72,18.38L12.21,18.78L11.5,19.35V11M10.76,8.69A0.76,0.76 0 0,0 10,9.45V20.9C10,21.32 10.34,21.66 10.76,21.66C10.95,21.66 11.11,21.6 11.24,21.5L13.15,19.95L14.81,23.57C14.94,23.84 15.21,24 15.5,24C15.61,24 15.72,24 15.83,23.92L18.59,22.64C18.97,22.46 19.15,22 18.95,21.63L17.28,18L19.69,17.55C19.85,17.5 20,17.43 20.12,17.29C20.39,16.97 20.35,16.5 20,16.21L11.26,8.86L11.25,8.87C11.12,8.76 10.95,8.69 10.76,8.69M15,10V8H20V10H15M13.83,4.76L16.66,1.93L18.07,3.34L15.24,6.17L13.83,4.76M10,0H12V5H10V0M3.93,14.66L6.76,11.83L8.17,13.24L5.34,16.07L3.93,14.66M3.93,3.34L5.34,1.93L8.17,4.76L6.76,6.17L3.93,3.34M7,10H2V8H7V10"
 }
 "#;
 
@@ -44,48 +44,49 @@ fn main() -> Result<(), Error> {
     term.duplicate_output("/tmp/mouse-example.txt")?;
 
     let q = TerminalEvent::Key("q".parse()?);
+    let ctrlc = TerminalEvent::Key("ctrl+c".parse()?);
     let glyph = if term.capabilities().glyphs {
-        Cell::new_glyph("fg=#fb4935".parse()?, serde_json::from_str(SHEEP)?)
+        Cell::new_glyph(
+            "bg=#504945,fg=#fb4935".parse()?,
+            serde_json::from_str(SHEEP)?,
+        )
     } else {
         Cell::new_char("bg=#fb4935".parse()?, None)
     };
     let mut count = 0;
-    let mut pos = None;
+    let mut pos = Position::new(2, 2);
+    term.waker().wake()?;
     term.run_render(|term, event, mut view| -> Result<_, Error> {
         count += 1;
-
-        // render box
         view.draw_box(None);
 
-        // quit
-        let event = match event {
+        match event {
             None => return Ok(TerminalAction::Wait),
-            Some(event) if &event == &q => return Ok(TerminalAction::Quit(())),
-            Some(event) => event,
+            Some(event) if &event == &q || &event == &ctrlc => return Ok(TerminalAction::Quit(())),
+            Some(event) => {
+                // render label with event
+                let mut label = view.view_mut(0, 3..-3);
+                let mut writer = label.writer();
+                write!(
+                    &mut writer,
+                    "┤ Stats: {:?} Count: {} Event: {:?} ├",
+                    term.stats(),
+                    count,
+                    event
+                )?;
+
+                // render mouse cursor
+                match event {
+                    TerminalEvent::Mouse(mouse) if mouse.name == KeyName::MouseMove => {
+                        pos = mouse.pos;
+                    }
+                    _ => (),
+                }
+            }
         };
 
-        // render label with event
-        let mut label = view.view_mut(0, 3..-3);
-        let mut writer = label.writer();
-        write!(
-            &mut writer,
-            "┤ Stats: {:?} Count: {} Event: {:?} ├",
-            term.stats(),
-            count,
-            event
-        )?;
-
-        // render mouse cursor
-        match event {
-            TerminalEvent::Mouse(mouse) if mouse.name == KeyName::MouseMove => {
-                pos.replace(mouse.pos);
-            }
-            _ => (),
-        }
-        if let Some(pos) = pos {
-            if let Some(cell) = view.get_mut(pos.row, pos.col) {
-                *cell = glyph.clone();
-            }
+        if let Some(cell) = view.get_mut(pos.row, pos.col) {
+            *cell = glyph.clone();
         }
         Ok(TerminalAction::Wait)
     })?;

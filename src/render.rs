@@ -137,14 +137,14 @@ impl TerminalRenderer {
     pub fn new<T: Terminal + ?Sized>(term: &mut T, clear: bool) -> Result<Self, Error> {
         let size = term.size()?;
         term.execute(TerminalCommand::Face(Default::default()))?;
-        term.execute(TerminalCommand::CursorTo(Position::new(0, 0)))?;
+        term.execute(TerminalCommand::CursorTo(Position::origin()))?;
         let mut back = SurfaceOwned::new(size.cells.height, size.cells.width);
         if clear {
             back.fill(Cell::new_damaged());
         }
         Ok(Self {
             face: Default::default(),
-            cursor: Position::new(0, 0),
+            cursor: Position::origin(),
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back,
             marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| {
@@ -273,13 +273,14 @@ impl TerminalRenderer {
                     CellKind::Image(image) => {
                         // erase area under image, needed for images with transparency
                         let size = image.size_cells(self.size.pixels_per_cell());
-                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
+                        let pos = Position::new(row, col);
+                        self.term_set_cursor(term.dyn_ref(), pos)?;
                         for row in 0..size.height {
                             self.term_set_cursor(
                                 term.dyn_ref(),
                                 Position {
-                                    row: self.cursor.row + row,
-                                    col: self.cursor.col,
+                                    row: pos.row + row,
+                                    ..pos
                                 },
                             )?;
                             self.term_erase(term.dyn_ref(), size.width)?;
@@ -813,8 +814,8 @@ mod tests {
                 size: TerminalSize {
                     cells: Size { height, width },
                     pixels: Size {
-                        height: 0,
-                        width: 0,
+                        height: height * 20,
+                        width: width * 10,
                     },
                 },
                 cmds: Default::default(),
@@ -1014,6 +1015,77 @@ mod tests {
                 Char('e'),
                 CursorTo(Position::new(1, 1)),
                 Char('x'),
+            ]
+        );
+        term.clear();
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_image() -> Result<(), Box<dyn std::error::Error>> {
+        use TerminalCommand::*;
+
+        const ICON: &str = r#"
+        {
+            "view_box": [0, 0, 24, 24],
+            "size": [2, 5],
+            "path": "M10,17L5,12L6.41,10.58L10,14.17L17.59,6.58L19,8M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"
+        }
+        "#;
+        let face = "bg=#504945,fg=#fb4935".parse()?;
+        let icon = Cell::new_glyph(face, serde_json::from_str(ICON)?);
+
+        let mut term = DummyTerminal::new(10, 20);
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+        term.clear();
+
+        let mut view = render.view();
+        view.set(1, 2, icon.clone());
+        render.frame(&mut term)?;
+        let img = render
+            .glyph_cache
+            .get(&icon)
+            .expect("image is not rendered")
+            .clone();
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(face),
+                CursorTo(Position::new(1, 2)),
+                EraseChars(5),
+                CursorTo(Position::new(2, 2)),
+                EraseChars(5),
+                CursorTo(Position::new(1, 2)),
+                Image(img.clone(), Position::new(1, 2))
+            ]
+        );
+        term.clear();
+
+        let mut view = render.view();
+        view.set(2, 3, icon.clone());
+        render.frame(&mut term)?;
+        assert_eq!(
+            term.cmds,
+            vec![
+                // erase old image
+                ImageErase(img.clone(), Some(Position::new(1, 2))),
+                Face(crate::Face::default()),
+                CursorTo(Position::new(1, 2)),
+                Char(' '),
+                Char(' '),
+                Char(' '),
+                Char(' '),
+                Char(' '),
+                CursorTo(Position::new(2, 2)),
+                Char(' '),
+                // draw new image
+                Face(face),
+                EraseChars(5),
+                CursorTo(Position::new(3, 3)),
+                EraseChars(5),
+                CursorTo(Position::new(2, 3)),
+                Image(img, Position::new(2, 3)),
             ]
         );
         term.clear();

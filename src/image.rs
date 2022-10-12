@@ -377,7 +377,7 @@ impl KittyImageHandler {
     /// Enable suppression of OK responses from the terminal
     pub fn quiet(self) -> Self {
         Self {
-            suppress: None,
+            suppress: Some(1),
             ..self
         }
     }
@@ -486,9 +486,10 @@ impl ImageHandler for KittyImageHandler {
         let placement_id = kitty_placement_id(pos);
         // a=p - action is put image
         // i   - image data identifier
+        // C=1 - do not move cursor (avoids scrolling if image is too large vertically)
         write!(
             out,
-            "\x1b_Ga=p,i={},p={}{};\x1b\\",
+            "\x1b_Ga=p,i={},C=1,p={}{};\x1b\\",
             img_id, placement_id, suppress
         )?;
 
