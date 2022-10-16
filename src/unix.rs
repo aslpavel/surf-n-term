@@ -596,10 +596,8 @@ fn set_blocking(fd: RawFd, blocking: bool) -> Result<(), nix::Error> {
 }
 
 fn timeval_from_duration(dur: Duration) -> nix::TimeVal {
-    nix::TimeVal::from(libc::timeval {
-        tv_sec: dur.as_secs() as libc::clock_t, // musl complains with `libc::time_t`
-        tv_usec: dur.subsec_micros() as libc::suseconds_t,
-    })
+    use ::nix::sys::time::TimeValLike;
+    nix::TimeVal::milliseconds(dur.as_millis() as i64)
 }
 
 struct IOHandle {
