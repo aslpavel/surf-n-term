@@ -107,11 +107,11 @@ impl<'a> View for Text<'a> {
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        fn render_rec<'a>(
+        fn render_rec(
             ctx: &ViewContext,
             writer: &mut TerminalWriter<'_>,
             face: &Face,
-            this: &Text<'a>,
+            this: &Text<'_>,
         ) -> Result<(), Error> {
             let new_face = face.overlay(&this.face);
             writer.face_set(new_face);

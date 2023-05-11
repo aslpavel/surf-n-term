@@ -12,15 +12,15 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.7.3"
+version = "0.7.4"
 
 [dependencies]
 flate2 = "^1.0"
 fnv = "^1.0"
 lazy_static = "^1.1"
 libc = "^0.2"
-lru = {version = "^0.8", default-features = false}
-nix = { version = "^0.25", default-features = false, features = ["fs", "poll", "term"] }
+lru = {version = "^0.10", default-features = false}
+nix = { version = "^0.26", default-features = false, features = ["fs", "poll", "term"] }
 png = "^0.17"
 serde = { version = "^1.0", features = ["derive"] }
 signal-hook = "^0.3"

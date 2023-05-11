@@ -182,7 +182,7 @@ impl TTYDecoder {
             Box::new(CursorPositionMatcher),
             Box::new(DecModeMatcher),
             Box::new(DeviceAttrsMatcher),
-            Box::new(GraphicRenditionMatcher::default()),
+            Box::<GraphicRenditionMatcher>::default(),
             Box::new(KittyImageMatcher),
             Box::new(KittyKeyboardMatcher),
             Box::new(MouseEventMatcher),
@@ -345,7 +345,10 @@ impl TTYMatcher for KittyImageMatcher {
 #[derive(Debug)]
 struct KittyKeyboardMatcher;
 
-pub(crate) const KEYBOARD_LEVEL: usize = 1;
+// https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
+// 0b001 - Disambiguate escape codes
+// 0b100 - Report alternate keys
+pub(crate) const KEYBOARD_LEVEL: usize = 0b101;
 
 impl TTYMatcher for KittyKeyboardMatcher {
     fn matcher(&self) -> NFA<_Void> {
@@ -1509,6 +1512,7 @@ mod tests {
         write!(cursor.get_mut(), "\x1b[27;7u")?;
         write!(cursor.get_mut(), "\x1b[99;5u")?;
         write!(cursor.get_mut(), "\x1b[1;6P")?;
+        write!(cursor.get_mut(), "\x1b[9;0u")?;
 
         let mut result = Vec::new();
         decoder.decode_into(&mut cursor, &mut result)?;
@@ -1520,6 +1524,7 @@ mod tests {
                 TerminalEvent::Key("ctrl+alt+esc".parse()?),
                 TerminalEvent::Key("ctrl+c".parse()?),
                 TerminalEvent::Key("ctrl+shift+f1".parse()?),
+                TerminalEvent::Key("tab".parse()?)
             ],
         );
 
