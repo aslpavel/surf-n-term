@@ -346,9 +346,10 @@ impl TTYMatcher for KittyImageMatcher {
 struct KittyKeyboardMatcher;
 
 // https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
-// 0b001 - Disambiguate escape codes
-// 0b100 - Report alternate keys
-pub(crate) const KEYBOARD_LEVEL: usize = 0b101;
+// 0b0001 - Disambiguate escape codes
+// 0b0100 - Report alternate keys
+// 0b1000 - Report all keys as escape codes
+pub(crate) const KEYBOARD_LEVEL: usize = 0b1101;
 
 impl TTYMatcher for KittyKeyboardMatcher {
     fn matcher(&self) -> NFA<_Void> {
@@ -369,6 +370,7 @@ impl TTYMatcher for KittyKeyboardMatcher {
             return Some(TerminalEvent::KeyboardLevel(level));
         }
 
+        // CSI unicode-key-code:alternate-key-codes ; modifiers:event-type ; text-as-codepoints u
         let mut fields = data.split(|c| *c == b';');
 
         // decode key
@@ -407,13 +409,16 @@ impl TTYMatcher for KittyKeyboardMatcher {
 }
 
 fn keyboard_decode_key(code: usize) -> Option<KeyName> {
+    // https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-key-definitions
     let key = match code {
         27 => KeyName::Esc,
         13 => KeyName::Enter,
         9 => KeyName::Tab,
         127 => KeyName::Backspace,
         code @ 57376..=57398 => KeyName::F(code - 57376 + 13),
-        code if code <= u32::MAX as usize => KeyName::Char(char::from_u32(code as u32)?),
+        code if code <= u32::MAX as usize && !(57344..=63743).contains(&code) => {
+            KeyName::Char(char::from_u32(code as u32)?)
+        }
         _ => return None,
     };
     Some(key)
