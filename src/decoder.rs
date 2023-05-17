@@ -349,7 +349,8 @@ struct KittyKeyboardMatcher;
 // 0b0001 - Disambiguate escape codes
 // 0b0100 - Report alternate keys
 // 0b1000 - Report all keys as escape codes
-pub(crate) const KEYBOARD_LEVEL: usize = 0b1101;
+//          NOTE: 0b1000 breaks shift+key as it no longer gene ported as uppercase
+pub(crate) const KEYBOARD_LEVEL: usize = 0b0101;
 
 impl TTYMatcher for KittyKeyboardMatcher {
     fn matcher(&self) -> NFA<_Void> {
