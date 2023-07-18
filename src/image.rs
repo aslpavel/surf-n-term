@@ -426,9 +426,7 @@ impl ImageHandler for KittyImageHandler {
         let img_id = kitty_image_id(img);
 
         // q   - suppress response from the terminal 1 - OK only, 2 - All.
-        let suppress = self
-            .suppress
-            .map_or_else(String::new, |val| format!(",q={val}"));
+        let suppress = self.suppress.unwrap_or(0);
 
         // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
@@ -461,7 +459,7 @@ impl ImageHandler for KittyImageHandler {
                     // m    - whether more chunks will follow or not
                     write!(
                         out,
-                        "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={}{};",
+                        "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={},q={};",
                         img_id,
                         img.height(),
                         img.width(),
@@ -470,7 +468,7 @@ impl ImageHandler for KittyImageHandler {
                     )?;
                 } else {
                     // only first chunk requires all attributes
-                    write!(out, "\x1b_Gm={}{};", more, suppress)?;
+                    write!(out, "\x1b_Gm={more},q={suppress};")?;
                 }
                 // data
                 out.write_all(chunk)?;
@@ -489,8 +487,7 @@ impl ImageHandler for KittyImageHandler {
         // C=1 - do not move cursor (avoids scrolling if image is too large vertically)
         write!(
             out,
-            "\x1b_Ga=p,i={},C=1,p={}{};\x1b\\",
-            img_id, placement_id, suppress
+            "\x1b_Ga=p,i={img_id},C=1,p={placement_id},q={suppress};\x1b\\"
         )?;
 
         tracing::trace!(

@@ -105,6 +105,8 @@ impl Encoder for TTYEncoder {
                         (FaceAttrs::STRIKE, b";9"),
                     ] {
                         if face.attrs.contains(*flag) {
+                            // false positive
+                            #[allow(clippy::explicit_auto_deref)]
                             out.write_all(*code)?;
                         }
                     }
