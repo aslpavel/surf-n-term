@@ -3,16 +3,12 @@ authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 description = "Posix terminal rendering library"
 edition = "2021"
 homepage = "https://github.com/aslpavel/surf-n-term"
-include = [
-  "**/*.rs",
-  "**/Cargo.toml",
-  "**/README.md",
-]
+include = ["**/*.rs", "**/Cargo.toml", "**/README.md"]
 license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.7.7"
+version = "0.7.8"
 
 [dependencies]
 flate2 = "^1.0"
@@ -20,7 +16,11 @@ fnv = "^1.0"
 lazy_static = "^1.1"
 libc = "^0.2"
 lru = { version = "^0.11", default-features = false }
-nix = { version = "^0.26", default-features = false, features = ["fs", "poll", "term"] }
+nix = { version = "^0.26", default-features = false, features = [
+  "fs",
+  "poll",
+  "term",
+] }
 png = "^0.17"
 serde = { version = "^1.0", features = ["derive"] }
 signal-hook = "^0.3"

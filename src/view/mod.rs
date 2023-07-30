@@ -4,7 +4,7 @@ mod container;
 pub use container::{Align, Container, Margins};
 
 mod flex;
-pub use flex::Flex;
+pub use flex::{Flex, Justify};
 
 mod scrollbar;
 pub use scrollbar::ScrollBar;
@@ -278,7 +278,7 @@ impl Debug for Layout {
             .field("row", &self.pos.row)
             .field("col", &self.pos.col)
             .field("height", &self.size.height)
-            .field("row", &self.size.width)
+            .field("width", &self.size.width)
             .finish()
     }
 }

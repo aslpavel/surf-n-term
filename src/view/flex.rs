@@ -1,9 +1,6 @@
 use super::{AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
 use crate::{Error, Size, SurfaceMut, TerminalSurface};
-use std::{
-    cmp::{max, min},
-    fmt,
-};
+use std::{cmp::max, fmt};
 
 enum Child<'a> {
     Fixed { view: Box<dyn View + 'a> },
@@ -28,9 +25,20 @@ impl<'a> Child<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Justify {
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
 #[derive(Debug)]
 pub struct Flex<'a> {
     direction: Axis,
+    justify: Justify,
     children: Vec<Child<'a>>,
 }
 
@@ -39,8 +47,13 @@ impl<'a> Flex<'a> {
     pub fn new(direction: Axis) -> Self {
         Self {
             direction,
+            justify: Justify::Start,
             children: Default::default(),
         }
+    }
+
+    pub fn justify(self, justify: Justify) -> Self {
+        Self { justify, ..self }
     }
 
     pub fn row() -> Self {
@@ -51,25 +64,33 @@ impl<'a> Flex<'a> {
         Self::new(Axis::Vertical)
     }
 
-    /// Add new fixed size child
-    pub fn add_child(mut self, child: impl IntoView + 'a) -> Self {
+    pub fn push_child(&mut self, child: impl IntoView + 'a) {
         self.children.push(Child::Fixed {
             view: child.into_view().boxed(),
         });
-        self
     }
 
-    /// Add new flex size child
-    pub fn add_flex_child(mut self, flex: f64, child: impl IntoView + 'a) -> Self {
+    pub fn push_flex_child(&mut self, flex: f64, child: impl IntoView + 'a) {
         if flex > 0.0 {
             self.children.push(Child::Flex {
                 view: child.into_view().boxed(),
                 flex,
             });
-            self
         } else {
-            self.add_child(child)
+            self.push_child(child);
         }
+    }
+
+    /// Add new fixed size child
+    pub fn add_child(mut self, child: impl IntoView + 'a) -> Self {
+        self.push_child(child);
+        self
+    }
+
+    /// Add new flex size child
+    pub fn add_flex_child(mut self, flex: f64, child: impl IntoView + 'a) -> Self {
+        self.push_flex_child(flex, child);
+        self
     }
 }
 
@@ -119,14 +140,13 @@ where
             }
         }
 
-        // calculate available space for flex views
-        let major_total = self.direction.major(ct.max());
-        major_non_flex = min(major_total, major_non_flex);
-        let major_remain = major_total - major_non_flex;
-
         // layout flex
+        let major_remain = self
+            .direction
+            .major(ct.max())
+            .saturating_sub(major_non_flex);
         let mut major_flex = 0;
-        if major_remain > 0 {
+        if major_remain > 0 && flex_total > 0.0 {
             let per_flex = (major_remain as f64) / flex_total;
             for (index, child) in self.children.iter().enumerate() {
                 if let Child::Flex { view, flex } = child {
@@ -144,14 +164,43 @@ where
             }
         }
 
-        // extra space to be filled
-        let _extra = self.direction.major(ct.max()) - (major_non_flex + major_flex);
+        // unused space to be filled
+        let unused = self
+            .direction
+            .major(ct.max())
+            .saturating_sub(major_non_flex + major_flex);
+        let (space_side, space_between) = if unused > 0 {
+            match self.justify {
+                Justify::Start => (0, 0),
+                Justify::Center => (unused / 2, 0),
+                Justify::End => (unused, 0),
+                Justify::SpaceBetween => {
+                    let space_between = if self.children.len() <= 1 {
+                        unused
+                    } else {
+                        unused / (self.children.len() - 1)
+                    };
+                    (0, space_between)
+                }
+                Justify::SpaceEvenly => {
+                    let space = unused / (self.children.len() + 1);
+                    (space, space)
+                }
+                Justify::SpaceAround => {
+                    let space = unused / self.children.len();
+                    (space / 2, space)
+                }
+            }
+        } else {
+            (0, 0)
+        };
 
         // calculate offsets
-        let mut offset = 0;
+        let mut offset = space_side;
         for child_layout in children_layout.iter_mut() {
             *child_layout.pos.major_mut(self.direction) = offset;
             offset += child_layout.size.major(self.direction);
+            offset += space_between;
         }
 
         // create layout tree
