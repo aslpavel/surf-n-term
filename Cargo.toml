@@ -8,7 +8,7 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.7.8"
+version = "0.7.9"
 
 [dependencies]
 flate2 = "^1.0"

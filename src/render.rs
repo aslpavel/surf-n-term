@@ -508,6 +508,7 @@ where
 pub struct TerminalWriter<'a> {
     face: Face,
     iter: SurfaceMutIter<'a, Cell>,
+    end_of_line: bool,
     decoder: crate::decoder::Utf8Decoder,
 }
 
@@ -519,6 +520,7 @@ impl<'a> TerminalWriter<'a> {
         Self {
             face: Default::default(),
             iter: surf.iter_mut(),
+            end_of_line: false,
             decoder: crate::decoder::Utf8Decoder::new(),
         }
     }
@@ -542,7 +544,8 @@ impl<'a> TerminalWriter<'a> {
         self
     }
 
-    /// Get current position inside allocated view
+    /// Get current position inside allocated view, that is next symbol will
+    /// be inserted at this postion
     pub fn position(&self) -> Position {
         self.iter.position()
     }
@@ -556,13 +559,26 @@ impl<'a> TerminalWriter<'a> {
         }
     }
 
-    pub fn put_newline(&mut self) {
-        let index = self.iter.index();
+    pub fn put_newline(&mut self, face: Face) {
+        if self.end_of_line {
+            self.end_of_line = false;
+            return;
+        }
         let shape = self.iter.shape();
         let pos = self.position();
-        if pos.col != 0 {
-            let offset = shape.index(pos.row, shape.width - 1) - index;
-            self.iter.nth(offset);
+        let spaces = shape.width.saturating_sub(pos.col);
+        for _ in 0..spaces {
+            self.put_char(' ', face);
+        }
+    }
+
+    pub fn put_tab(&mut self, face: Face) {
+        let shape = self.iter.shape();
+        let pos = self.position();
+        let spaces = 8 - pos.col % 8;
+        let spaces = spaces.min(shape.width.saturating_sub(pos.col));
+        for _ in 0..spaces {
+            self.put_char(' ', face);
         }
     }
 
@@ -574,7 +590,7 @@ impl<'a> TerminalWriter<'a> {
         // create newline if cell is too wide, but only once
         let width = self.iter.shape().width;
         if self.position().col + cell.width().get() > width {
-            self.put_newline()
+            self.put_newline(Face::default());
         }
         // put cell
         let result = match self.iter.next() {
@@ -597,17 +613,24 @@ impl<'a> TerminalWriter<'a> {
         match c {
             '\r' => true,
             '\n' => {
-                self.put_newline();
+                self.put_newline(face);
                 true
             }
-            chr => match self.iter.next() {
-                Some(cell) => {
-                    let face = cell.face.overlay(&face);
-                    *cell = Cell::new_char(face, Some(chr));
-                    true
+            '\t' => {
+                self.put_tab(face);
+                true
+            }
+            chr => {
+                self.end_of_line = self.position().col + 1 == self.iter.shape().width;
+                match self.iter.next() {
+                    Some(cell) => {
+                        let face = cell.face.overlay(&face);
+                        *cell = Cell::new_char(face, Some(chr));
+                        true
+                    }
+                    None => false,
                 }
-                None => false,
-            },
+            }
         }
     }
 }
@@ -881,6 +904,43 @@ mod tests {
     }
 
     #[test]
+    fn test_writer_tab() -> Result<(), Error> {
+        let guide_face = "bg=#cc241d,fg=#fbf1c7".parse()?;
+        let underline_face = "bg=#b8bb26,fg=#fbf1c7".parse()?;
+        let tab_face = "bg=#458588,fg=#fbf1c7".parse()?;
+        let mark_face = "bg=#b16286,fg=#fbf1c7".parse()?;
+
+        let mut term = DummyTerminal::new(30, 21);
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+
+        {
+            let mut view = render.view().view_owned(1.., ..).transpose();
+            let mut writer = view.writer().face(guide_face);
+            write!(writer, "012345678901234567890123456789")?;
+        }
+        let mut view = render.view().view_owned(.., 1..);
+        let mut writer = view.writer().face(guide_face);
+        write!(writer, "01234567890123456789\n")?;
+        writer.face_set(Face::default());
+
+        let mut cols = Vec::new();
+        for index in 0..22 {
+            (0..index).for_each(|_| {
+                writer.put_char('_', underline_face);
+            });
+            writer.put_char('\t', tab_face);
+            cols.push(writer.position().col);
+            writer.put_char('X', mark_face);
+            writer.put_char('\n', Face::default());
+        }
+        print!("tab rendering: {:?}", render.view().preview());
+        for (line, col) in cols.into_iter().enumerate() {
+            assert_eq!(col % 8, 0, "column {} % 8 != 0 at line {}", col, line);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_render() -> Result<(), Error> {
         use TerminalCommand::*;
 
@@ -892,7 +952,9 @@ mod tests {
 
         let mut view = render.view().view_owned(.., 1..);
         let mut writer = view.writer().skip(4).face(purple);
+        assert_eq!(writer.position(), Position::new(0, 4));
         write!(writer, "TEST")?;
+        assert_eq!(writer.position(), Position::new(1, 2));
         print!("writer with offset: {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
@@ -974,7 +1036,9 @@ mod tests {
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let mut view = render.view().view_owned(.., 1..-1);
         let mut writer = view.writer().face(purple);
+        assert_eq!(writer.position(), Position::new(0, 0));
         write!(&mut writer, "one\ntwo")?;
+        assert_eq!(writer.position(), Position::new(1, 3));
         print!("writer new line: {:?}", render.view().preview());
         render.frame(&mut term)?;
         assert_eq!(
@@ -987,6 +1051,8 @@ mod tests {
                 Char('o'),
                 Char('n'),
                 Char('e'),
+                Char(' '),
+                Char(' '),
                 CursorTo(Position::new(1, 1)),
                 Char('t'),
                 Char('w'),
@@ -998,8 +1064,11 @@ mod tests {
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let mut view = render.view().view_owned(.., 1..-1);
         let mut writer = view.writer().face(purple);
-        write!(&mut writer, "  one\nx")?;
-        print!("writer new line: {:?}", render.view().preview());
+        write!(&mut writer, "  one\ntwo")?;
+        print!(
+            "writer new line at the end of line: {:?}",
+            render.view().preview()
+        );
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1014,7 +1083,9 @@ mod tests {
                 Char('n'),
                 Char('e'),
                 CursorTo(Position::new(1, 1)),
-                Char('x'),
+                Char('t'),
+                Char('w'),
+                Char('o'),
             ]
         );
         term.clear();
