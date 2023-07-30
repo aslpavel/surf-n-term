@@ -1,6 +1,6 @@
 use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt};
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 
 #[derive(Debug)]
 pub struct ScrollBar {
@@ -37,18 +37,18 @@ impl View for ScrollBar {
             return Ok(());
         }
 
-        let (size, offset) = if self.total > 1 {
-            let major = major as f64;
-            let total = self.total as f64;
-            let offset = self.offset as f64;
-            let visible = self.visible as f64;
-            let size = (major * visible / total).clamp(1.0, major).round();
-            let offset = ((major - size) * offset / (total - 1.0)).round();
-            (size as usize, offset as usize)
-        } else if self.total == 1 {
-            (major, 0)
-        } else {
-            (0, 0)
+        let (size, offset) = match self.total.cmp(&1) {
+            Ordering::Greater => {
+                let major = major as f64;
+                let total = self.total as f64;
+                let offset = self.offset as f64;
+                let visible = self.visible as f64;
+                let size = (major * visible / total).clamp(1.0, major).round();
+                let offset = ((major - size) * offset / (total - 1.0)).round();
+                (size as usize, offset as usize)
+            }
+            Ordering::Equal => (major, 0),
+            Ordering::Less => (0, 0),
         };
 
         let mut surf = layout.apply_to(surf);
