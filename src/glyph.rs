@@ -1,7 +1,9 @@
 use crate::{
     Color, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
 };
-use rasterize::{ActiveEdgeRasterizer, Align, Image as _, Rasterizer, Scalar, Scene, Transform};
+use rasterize::{
+    ActiveEdgeRasterizer, Align, Image as _, Point, Rasterizer, Scalar, Scene, Transform,
+};
 pub use rasterize::{BBox, FillRule, Path};
 use serde::{de, Deserialize, Serialize};
 use std::{
@@ -79,9 +81,14 @@ impl Glyph {
         view_box: Option<BBox>,
         size: Size,
     ) -> Self {
-        let path = path.into();
+        let path: Arc<Path> = path.into();
         let view_box = view_box
-            .or_else(|| path.bbox(Transform::identity()))
+            .or_else(|| {
+                let bbox = path.bbox(Transform::identity())?;
+                let padding = bbox.width().min(bbox.height()) * 0.15;
+                let offset = Point::new(padding, padding);
+                Some(BBox::new(bbox.min() - offset, bbox.max() + offset))
+            })
             .unwrap_or_else(|| BBox::new((0.0, 0.0), (1.0, 1.0)));
         Self {
             scene: GlyphScene::Symbol { path, fill_rule },
@@ -159,7 +166,12 @@ struct GlyphSerde {
     view_box: Option<BBox>,
     #[serde(default, skip_serializing_if = "is_default")]
     fill_rule: FillRule,
+    #[serde(default = "glyph_default_size")]
     size: Size,
+}
+
+fn glyph_default_size() -> Size {
+    Size::new(1, 3)
 }
 
 impl Serialize for Glyph {
