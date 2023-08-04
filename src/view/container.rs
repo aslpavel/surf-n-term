@@ -60,7 +60,7 @@ pub struct Margins {
 #[derive(Debug)]
 pub struct Container<V> {
     view: V,
-    color: Option<RGBA>,
+    face: Face,
     align_vertical: Align,
     align_horizontal: Align,
     margins: Margins,
@@ -72,7 +72,7 @@ impl<V: View> Container<V> {
     pub fn new(child: impl IntoView<View = V>) -> Self {
         Self {
             size: Size::empty(),
-            color: None,
+            face: Face::default(),
             align_vertical: Align::default(),
             align_horizontal: Align::default(),
             margins: Margins::default(),
@@ -121,11 +121,16 @@ impl<V: View> Container<V> {
 
     pub fn with_color(self, color: RGBA) -> Self {
         Self {
-            color: Some(color),
+            face: Face::new(None, Some(color), FaceAttrs::EMPTY),
             ..self
         }
     }
 
+    pub fn with_face(self, face: Face) -> Self {
+        Self { face, ..self }
+    }
+
+    /// Set container margins
     pub fn with_margins(self, margins: Margins) -> Self {
         Self { margins, ..self }
     }
@@ -139,12 +144,12 @@ impl<V: View> View for Container<V> {
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        if self.color.is_some() {
+        if self.face != Face::default() {
             surf.view_mut(
                 self.margins.top..surf.height().saturating_sub(self.margins.bottom),
                 self.margins.left..surf.width().saturating_sub(self.margins.right),
             )
-            .erase(Face::new(None, self.color, FaceAttrs::EMPTY));
+            .erase(self.face);
         }
         self.view.render(
             ctx,

@@ -51,11 +51,11 @@ pub trait View {
 
     /// Wrapper around view that implements [std::fmt::Debug] which renders
     /// view. Only supposed to be used for debugging.
-    fn debug(&self, size: Size) -> Preview<&'_ Self>
+    fn debug(&self, size: Size) -> ViewDebug<&'_ Self>
     where
         Self: Sized,
     {
-        Preview { view: self, size }
+        ViewDebug { view: self, size }
     }
 
     /// Wrapper around view that calls trace function on every layout call
@@ -105,12 +105,12 @@ impl<'a> View for Box<dyn View + 'a> {
     }
 }
 
-pub struct Preview<V> {
+pub struct ViewDebug<V> {
     view: V,
     size: Size,
 }
 
-impl<V: View> std::fmt::Debug for Preview<V> {
+impl<V: View> std::fmt::Debug for ViewDebug<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ctx = ViewContext::dummy();
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
