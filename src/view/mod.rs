@@ -10,7 +10,7 @@ mod scrollbar;
 pub use scrollbar::ScrollBar;
 
 mod text;
-pub use text::{layout_string, layout_string_incremental, Text};
+pub use text::{layout_char, layout_string, Text};
 
 mod dynamic;
 pub use dynamic::Dynamic;
@@ -116,7 +116,7 @@ impl<V: View> std::fmt::Debug for ViewDebug<V> {
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
         surf.draw_view(&ctx, &self.view)
             .map_err(|_| std::fmt::Error)?;
-        surf.preview().fmt(f)
+        surf.debug().fmt(f)
     }
 }
 

@@ -18,7 +18,7 @@ use std::{
 
 /// Terminal cell kind
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum CellKind {
+pub enum CellKind {
     /// Contains character
     Char(char),
     /// Contains image
@@ -83,6 +83,10 @@ impl Cell {
     /// Cell face
     pub fn face(&self) -> Face {
         self.face
+    }
+
+    pub fn kind(&self) -> &CellKind {
+        &self.kind
     }
 
     pub fn with_face(self, face: Face) -> Self {
@@ -431,7 +435,7 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
 
     /// Wrapper around terminal surface that implements [std::fmt::Debug]
     /// which renders a surface to the terminal.
-    fn preview(&self) -> TerminalSurfacePreview<'_>;
+    fn debug(&self) -> TerminalSurfaceDebug<'_>;
 }
 
 impl<S> TerminalSurfaceExt for S
@@ -497,8 +501,8 @@ where
 
     /// Create preview object that implements [Debug], only useful in tests
     /// and for debugging
-    fn preview(&self) -> TerminalSurfacePreview<'_> {
-        TerminalSurfacePreview {
+    fn debug(&self) -> TerminalSurfaceDebug<'_> {
+        TerminalSurfaceDebug {
             surf: self.as_ref(),
         }
     }
@@ -545,7 +549,7 @@ impl<'a> TerminalWriter<'a> {
     }
 
     /// Get current position inside allocated view, that is next symbol will
-    /// be inserted at this postion
+    /// be inserted at this position
     pub fn position(&self) -> Position {
         self.iter.position()
     }
@@ -584,6 +588,9 @@ impl<'a> TerminalWriter<'a> {
 
     /// Put cell
     pub fn put(&mut self, mut cell: Cell) -> bool {
+        if let CellKind::Char(c) = cell.kind {
+            return self.put_char(c, cell.face);
+        }
         // compose cell face with the current face
         let face = self.face.overlay(&cell.face);
         let blank = cell.width().get() - 1;
@@ -651,11 +658,11 @@ impl<'a> std::io::Write for TerminalWriter<'a> {
     }
 }
 
-pub struct TerminalSurfacePreview<'a> {
+pub struct TerminalSurfaceDebug<'a> {
     surf: SurfaceView<'a, Cell>,
 }
 
-impl<'a> TerminalSurfacePreview<'a> {
+impl<'a> TerminalSurfaceDebug<'a> {
     fn as_bytes(&self) -> Result<Vec<u8>, Error> {
         // expect true color and kitty image support
         let capabilities = TerminalCaps {
@@ -671,7 +678,7 @@ impl<'a> TerminalSurfacePreview<'a> {
 
         // debug terminal
         let pixels_per_cell = ViewContext::dummy().pixels_per_cell();
-        let mut term = DebugTerminal {
+        let mut term = TerminalDebug {
             size: TerminalSize {
                 cells: size,
                 // TOOD: allow to specify cell size?
@@ -723,7 +730,7 @@ impl<'a> TerminalSurfacePreview<'a> {
     }
 }
 
-impl<'a> Debug for TerminalSurfacePreview<'a> {
+impl<'a> Debug for TerminalSurfaceDebug<'a> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut cur = std::io::Cursor::new(self.as_bytes().map_err(|_| std::fmt::Error)?);
         let mut decoder = crate::decoder::Utf8Decoder::new();
@@ -736,7 +743,7 @@ impl<'a> Debug for TerminalSurfacePreview<'a> {
     }
 }
 
-struct DebugTerminal {
+struct TerminalDebug {
     size: TerminalSize,
     encoder: TTYEncoder,
     image_handler: KittyImageHandler,
@@ -745,7 +752,7 @@ struct DebugTerminal {
     face: Face,
 }
 
-impl Terminal for DebugTerminal {
+impl Terminal for TerminalDebug {
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         use TerminalCommand::*;
         match cmd {
@@ -806,7 +813,7 @@ impl Terminal for DebugTerminal {
     }
 }
 
-impl Write for DebugTerminal {
+impl Write for TerminalDebug {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.output.write(buf)
     }
@@ -933,7 +940,7 @@ mod tests {
             writer.put_char('X', mark_face);
             writer.put_char('\n', Face::default());
         }
-        print!("tab rendering: {:?}", render.view().preview());
+        print!("tab rendering: {:?}", render.view().debug());
         for (line, col) in cols.into_iter().enumerate() {
             assert_eq!(col % 8, 0, "column {} % 8 != 0 at line {}", col, line);
         }
@@ -955,7 +962,7 @@ mod tests {
         assert_eq!(writer.position(), Position::new(0, 4));
         write!(writer, "TEST")?;
         assert_eq!(writer.position(), Position::new(1, 2));
-        print!("writer with offset: {:?}", render.view().preview());
+        print!("writer with offset: {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -977,8 +984,8 @@ mod tests {
             .view()
             .view_owned(1..2, 1..-1)
             .fill(Cell::new_char(red, None));
-        print!("erase: {:?}", render.view().preview());
-        render.view().preview().dump("/tmp/frame.txt")?;
+        print!("erase: {:?}", render.view().debug());
+        render.view().debug().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1007,7 +1014,7 @@ mod tests {
             }
         });
         render.view().view_mut(1.., 2..).draw_image_ascii(&img);
-        print!("ascii image: {:?}", render.view().preview());
+        print!("ascii image: {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1039,7 +1046,7 @@ mod tests {
         assert_eq!(writer.position(), Position::new(0, 0));
         write!(&mut writer, "one\ntwo")?;
         assert_eq!(writer.position(), Position::new(1, 3));
-        print!("writer new line: {:?}", render.view().preview());
+        print!("writer new line: {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1067,7 +1074,7 @@ mod tests {
         write!(&mut writer, "  one\ntwo")?;
         print!(
             "writer new line at the end of line: {:?}",
-            render.view().preview()
+            render.view().debug()
         );
         render.frame(&mut term)?;
         assert_eq!(

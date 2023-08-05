@@ -25,6 +25,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         FillRule::NonZero,
         Some(BBox::new((0.0, 0.0), (24.0, 24.0))),
         Size::new(1, 3),
+        String::new(),
     );
 
     let input_face = Face::new(Some(fg), Some(bg), FaceAttrs::EMPTY);
@@ -48,23 +49,27 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     // prompt | input | status
     let input_view = Flex::row()
         .add_child(
-            Text::new("")
-                .with_face(prompt_face)
-                .add_text(Text::glyph(icon).with_text(" "))
-                .add_text("Input ")
-                .add_text(Text::new(" ").with_face(prompt_face.invert().with_bg(Some(bg)))),
+            Text::new()
+                .set_face(prompt_face)
+                .put_glyph(icon)
+                .push_str("Input ")
+                .set_face(prompt_face.invert().with_bg(Some(bg)))
+                .push_str(" ")
+                .take(),
         )
         .add_flex_child(
             1.0,
-            Container::new(Text::new("query").with_face(input_face))
+            Container::new(Text::new().set_face(input_face).push_str("query").take())
                 .with_horizontal(Align::Expand)
                 .with_color(bg),
         )
         .add_child(
-            Text::new("")
-                .with_face(prompt_face)
-                .add_text(Text::new("").with_face(prompt_face.invert()))
-                .add_text(" 30/127 1us [fuzzy] "),
+            Text::new()
+                .set_face(prompt_face.invert())
+                .push_str("")
+                .set_face(prompt_face)
+                .push_str(" 30/127 1us [fuzzy] ")
+                .take(),
         );
 
     let items_list = items
@@ -72,19 +77,25 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         .enumerate()
         .fold(Flex::column(), |list, (index, item)| {
             let (tag, face) = if index == 1 {
-                let tag = Text::new(" ●  ").with_face(list_selected_face.with_fg(Some(accent)));
+                let tag = Text::new()
+                    .set_face(list_selected_face.with_fg(Some(accent)))
+                    .push_str(" ●  ")
+                    .take();
                 (tag, list_selected_face)
             } else {
-                let tag = Text::new("    ").with_face(list_default_face);
+                let tag = Text::new()
+                    .set_face(list_default_face)
+                    .push_str("    ")
+                    .take();
                 (tag, list_default_face)
             };
             list.add_child(
                 Container::new(
                     Flex::row().add_child(tag).add_flex_child(
                         1.0,
-                        Container::new(Text::new(item).with_face(face))
+                        Container::new(Text::new().set_face(face).push_str(item).take())
                             .with_horizontal(Align::Expand)
-                            .with_color(bg),
+                            .with_face(face),
                     ),
                 )
                 .with_color(face.bg.unwrap()),

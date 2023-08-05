@@ -1,244 +1,30 @@
 use super::{BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{
-    decoder::{Decoder, Utf8Decoder},
-    Cell, Error, Face, Glyph, Position, Size, TerminalSurface, TerminalSurfaceExt, TerminalWriter,
+    render::CellKind, surface::ViewBounds, Cell, Error, Face, Glyph, Position, Size,
+    TerminalSurface, TerminalSurfaceExt,
 };
 use std::{
-    borrow::Cow,
-    cmp::max,
-    io::{Cursor, Write},
+    cmp::{max, min},
+    fmt::Write as _,
 };
-
-#[derive(Debug, Clone, Default)]
-pub struct Text<'a> {
-    text: Cow<'a, str>,
-    glyph: Option<Glyph>,
-    face: Face,
-    children: Vec<Text<'a>>,
-}
-
-impl<'a> Text<'a> {
-    pub fn new(text: impl Into<Cow<'a, str>>) -> Self {
-        Self {
-            text: text.into(),
-            glyph: None,
-            face: Face::default(),
-            children: Vec::new(),
-        }
-    }
-
-    pub fn glyph(glyph: Glyph) -> Self {
-        Self {
-            text: Cow::Borrowed(""),
-            glyph: Some(glyph),
-            face: Face::default(),
-            children: Vec::new(),
-        }
-    }
-
-    /// Length of the text
-    pub fn len(&self) -> usize {
-        let len = self
-            .glyph
-            .as_ref()
-            .map_or_else(|| self.text.len(), |g| g.size().width);
-        self.children
-            .iter()
-            .fold(len, |len, child| len + child.len())
-    }
-
-    /// Check if text is empty
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Replace face of the text with the provided one
-    pub fn with_face(self, face: Face) -> Self {
-        Self { face, ..self }
-    }
-
-    /// Assign glyph to the text. It will replace text content when rendered.
-    /// If glyphs are not supported, draw text instead
-    pub fn with_glyph(self, glyph: Glyph) -> Self {
-        Self {
-            glyph: Some(glyph),
-            ..self
-        }
-    }
-
-    /// Replace text with the provided one, does not change children
-    pub fn with_text(self, text: impl Into<Cow<'a, str>>) -> Self {
-        Self {
-            text: text.into(),
-            ..self
-        }
-    }
-
-    /// Extend with a child text consuming self
-    pub fn add_text(mut self, text: impl Into<Text<'a>>) -> Self {
-        self.push_text(text);
-        self
-    }
-
-    /// Push a child text
-    pub fn push_text(&mut self, text: impl Into<Text<'a>>) -> &mut Self {
-        self.children.push(text.into());
-        self
-    }
-
-    pub fn writer(&mut self) -> impl Write + '_ {
-        let text = if self.children.is_empty() {
-            self.text.to_mut()
-        } else {
-            self.children.push(Text::new(String::new()));
-            self.children.last_mut().unwrap().text.to_mut()
-        };
-        TextWriter {
-            text,
-            decoder: Utf8Decoder::new(),
-        }
-    }
-}
-
-impl<'a> View for Text<'a> {
-    fn render<'b>(
-        &self,
-        ctx: &ViewContext,
-        surf: &'b mut TerminalSurface<'b>,
-        layout: &Tree<Layout>,
-    ) -> Result<(), Error> {
-        fn render_rec(
-            ctx: &ViewContext,
-            writer: &mut TerminalWriter<'_>,
-            face: &Face,
-            this: &Text<'_>,
-        ) -> Result<(), Error> {
-            let new_face = face.overlay(&this.face);
-            writer.face_set(new_face);
-            match &this.glyph {
-                Some(glyph) if ctx.has_glyphs() => {
-                    writer.put(Cell::new_glyph(new_face, glyph.clone()));
-                }
-                _ => write!(writer, "{}", this.text.as_ref())?,
-            };
-            for child in this.children.iter() {
-                render_rec(ctx, writer, &this.face, child)?;
-            }
-            writer.face_set(*face);
-            Ok(())
-        }
-
-        let mut surf = layout.apply_to(surf);
-        surf.erase(self.face);
-        render_rec(ctx, &mut surf.writer(), &Face::default(), self)
-    }
-
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        fn size_rec<'a>(
-            ctx: &ViewContext,
-            ct: BoxConstraint,
-            text: &'a Text<'a>,
-            size: &mut Size,
-            pos: &mut Position,
-        ) {
-            match &text.glyph {
-                Some(glyph) if ctx.has_glyphs() => {
-                    let width = glyph.size().width;
-                    if pos.col + width < ct.max().width {
-                        pos.col += width;
-                    } else {
-                        size.width = max(size.width, pos.col);
-                        size.height += 1;
-                        pos.col = width;
-                    }
-                }
-                _ => {
-                    layout_string_incremental(ct.max().width, size, pos, text.text.chars());
-                }
-            }
-            for child in &text.children {
-                size_rec(ctx, ct, child, size, pos)
-            }
-        }
-        let mut size = Size::empty();
-        let mut pos = Position::origin();
-        size_rec(ctx, ct, self, &mut size, &mut pos);
-        size.width = max(size.width, pos.col);
-        if size.height != 0 || size.width != 0 {
-            size.height += 1;
-        }
-        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
-    }
-}
-
-impl<'a, T: Into<Text<'a>>> Extend<T> for Text<'a> {
-    fn extend<TS: IntoIterator<Item = T>>(&mut self, iter: TS) {
-        for item in iter {
-            self.push_text(item);
-        }
-    }
-}
-
-impl<'a, A> FromIterator<A> for Text<'a>
-where
-    A: Into<Text<'a>>,
-{
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let mut text = Text::new("");
-        text.extend(iter);
-        text
-    }
-}
-
-struct TextWriter<'a> {
-    text: &'a mut String,
-    decoder: Utf8Decoder,
-}
-
-impl<'a> Write for TextWriter<'a> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut cursor = Cursor::new(buf);
-        while let Some(chr) = self.decoder.decode(&mut cursor)? {
-            self.text.push(chr);
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a, 'b: 'a> From<&'b str> for Text<'a> {
-    fn from(string: &'b str) -> Self {
-        Text::new(string)
-    }
-}
-
-impl<'a> From<String> for Text<'a> {
-    fn from(string: String) -> Self {
-        Text::new(string)
-    }
-}
-
-impl<'a> From<Glyph> for Text<'a> {
-    fn from(glyph: Glyph) -> Self {
-        Text::glyph(glyph)
-    }
-}
 
 impl View for str {
     fn render<'b>(
         &self,
-        ctx: &ViewContext,
+        _ctx: &ViewContext,
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
-        Text::new(self).render(ctx, surf, layout)
+        let mut surf = layout.apply_to(surf);
+        let mut writer = surf.writer();
+        self.chars().for_each(|c| {
+            writer.put_char(c, Face::default());
+        });
+        Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        Text::new(self).layout(ctx, ct)
+    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        Tree::leaf(layout_string(ct, self.chars()))
     }
 }
 
@@ -257,30 +43,27 @@ impl View for String {
     }
 }
 
-/// Given maximum width and current size, position and characters to be added
+/// Given maximum width and current size, position and character to be added
 /// calculate new size and position
-pub fn layout_string_incremental(
-    max_width: usize,
-    size: &mut Size,
-    pos: &mut Position,
-    cs: impl IntoIterator<Item = char>,
-) {
-    for c in cs {
-        match c {
-            '\r' => {}
-            '\n' => {
+#[inline]
+pub fn layout_char(max_width: usize, size: &mut Size, pos: &mut Position, character: char) {
+    match character {
+        '\r' => {}
+        '\n' => {
+            size.width = max(size.width, pos.col);
+            size.height += 1;
+            pos.col = 0;
+        }
+        '\t' => {
+            pos.col += (8 - pos.col % 8).min(max_width.saturating_sub(pos.col));
+        }
+        _ => {
+            if pos.col < max_width {
+                pos.col += 1;
+            } else {
                 size.width = max(size.width, pos.col);
                 size.height += 1;
-                pos.col = 0;
-            }
-            _ => {
-                if pos.col < max_width {
-                    pos.col += 1;
-                } else {
-                    size.width = max(size.width, pos.col);
-                    size.height += 1;
-                    pos.col = 1;
-                }
+                pos.col = 1;
             }
         }
     }
@@ -291,35 +74,248 @@ pub fn layout_string_incremental(
 pub fn layout_string(ct: BoxConstraint, cs: impl IntoIterator<Item = char>) -> Layout {
     let mut size = Size::empty();
     let mut pos = Position::origin();
-    layout_string_incremental(ct.max().width, &mut size, &mut pos, cs);
+    let max_width = ct.max().width;
+    cs.into_iter()
+        .for_each(|c| layout_char(max_width, &mut size, &mut pos, c));
     if pos != Position::origin() {
         size.height += 1;
     }
-    Layout::new().with_size(size)
+    Layout::new().with_size(ct.clamp(size))
+}
+
+#[derive(Clone, Default)]
+pub struct Text {
+    cells: Vec<Cell>,
+    // face used write next symbol (not actual face of the text)
+    face: Face,
+}
+
+impl Text {
+    /// Create new empty text
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Number of cells
+    pub fn len(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// Check if [Text] is empty
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Remove all cell and reset face
+    pub fn clear(&mut self) {
+        self.cells.clear();
+        self.face = Face::default();
+    }
+
+    /// Currently set face
+    pub fn face(&self) -> &Face {
+        &self.face
+    }
+
+    /// Overlay face for the length of the scope
+    pub fn with_face(&mut self, face: Face, scope: impl FnOnce(&mut Self)) -> &mut Self {
+        let face_old = self.face;
+        scope(self.set_face(face_old.overlay(&face)));
+        self.set_face(face_old);
+        self
+    }
+
+    /// Set face that will to add new cells
+    pub fn set_face(&mut self, face: Face) -> &mut Self {
+        self.face = face;
+        self
+    }
+
+    /// Append character to the end of the [Text]
+    pub fn put_char(&mut self, c: char) -> &mut Self {
+        self.cells.push(Cell::new_char(self.face, Some(c)));
+        self
+    }
+
+    /// Append a given string to the end of [Text]
+    pub fn push_str(&mut self, str: &str) -> &mut Self {
+        str.chars().for_each(|c| {
+            self.put_char(c);
+        });
+        self
+    }
+
+    /// Append glyph to the end of the [Text]
+    pub fn put_glyph(&mut self, glyph: Glyph) -> &mut Self {
+        self.cells.push(Cell::new_glyph(self.face, glyph));
+        self
+    }
+
+    /// Put cell
+    pub fn put_cell(&mut self, cell: Cell) -> &mut Self {
+        let face = self.face.overlay(&cell.face());
+        self.cells.push(cell.with_face(face));
+        self
+    }
+
+    /// Append string
+    pub fn push_text(&mut self, text: Text) -> &mut Self {
+        self.cells.extend(text.cells.into_iter());
+        self
+    }
+
+    /// Append format argument to the end of the [Text]
+    pub fn push_fmt(&mut self, args: std::fmt::Arguments<'_>) -> &mut Self {
+        self.write_fmt(args).expect("in memory write failed");
+        self
+    }
+
+    /// Mark range of cell with the provided face
+    pub fn mark(&mut self, face: Face, bounds: impl ViewBounds) -> &mut Self {
+        if let Some((start, end)) = bounds.view_bounds(self.cells.len()) {
+            self.cells[start..end].iter_mut().for_each(|cell| {
+                *cell = cell.clone().with_face(cell.face().overlay(&face));
+            })
+        }
+        self
+    }
+
+    /// Take current value replacing it with the default
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Text::new())
+    }
+}
+
+impl std::fmt::Write for Text {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        s.chars().for_each(|c| {
+            self.put_char(c);
+        });
+        Ok(())
+    }
+}
+
+impl<'a> From<&'a str> for Text {
+    fn from(value: &'a str) -> Self {
+        let mut span = Text::new();
+        span.write_str(value).expect("memory write failed");
+        span
+    }
+}
+
+impl View for Text {
+    fn render<'a>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        let mut surf = layout.apply_to(surf);
+        let mut writer = surf.writer();
+        if ctx.has_glyphs {
+            self.cells.iter().for_each(|cell| {
+                writer.put(cell.clone());
+            });
+        } else {
+            self.cells.iter().for_each(|cell| {
+                if let CellKind::Glyph(glyph) = cell.kind() {
+                    let face = cell.face();
+                    glyph.fallback_str().chars().for_each(|c| {
+                        writer.put_char(c, face);
+                    });
+                } else {
+                    writer.put(cell.clone());
+                }
+            });
+        }
+        Ok(())
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        let mut size = Size::empty();
+        let mut pos = Position::origin();
+        let max_width = ct.max().width;
+        for cell in self.cells.iter() {
+            match cell.kind() {
+                CellKind::Image(image) => {
+                    pos.col += image.size_cells(ctx.pixels_per_cell).width;
+                    pos.col = min(pos.col, max_width);
+                }
+                CellKind::Glyph(glyph) if ctx.has_glyphs() => {
+                    let width = glyph.size().width;
+                    if pos.col + width < max_width {
+                        pos.col += width;
+                    } else {
+                        size.width = max(size.width, pos.col);
+                        size.height += 1;
+                        pos.col = min(width, max_width);
+                    }
+                }
+                CellKind::Glyph(glyph) => glyph
+                    .fallback_str()
+                    .chars()
+                    .for_each(|c| layout_char(max_width, &mut size, &mut pos, c)),
+                CellKind::Char(c) => layout_char(max_width, &mut size, &mut pos, *c),
+                CellKind::Damaged => {}
+            }
+        }
+        size.width = max(size.width, pos.col);
+        if pos != Position::origin() {
+            size.height += 1;
+        }
+        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{BBox, FillRule, Glyph, Path};
-
     use super::*;
 
     #[test]
-    fn test_text() -> Result<(), Error> {
-        let two = "two".to_string();
-        let ctx = ViewContext::dummy();
-        let mut text = Text::new("one ")
-            .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
-            .add_text(Text::new(two.as_str()).with_face("fg=#af3a03,bold".parse()?))
-            .add_text(" three".to_string())
-            .add_text("\nfour")
-            .add_text(" ");
-        write!(text.writer(), "and more")?;
-        assert_eq!(text.len(), 27);
-
+    fn test_text_basic() -> Result<(), Error> {
+        let tag = "[text basic]";
         let size = Size::new(5, 10);
-        print!("{:?}", text.debug(size));
+        let ctx = ViewContext::dummy();
+        let mut text = Text::new();
 
+        writeln!(&mut text, "11")?;
+        text.set_face("fg=#3c3836,bg=#ebdbb2".parse()?);
+        writeln!(&mut text, "222")?;
+
+        print!("{tag} first line longest: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(2, 3));
+
+        text.set_face(text.face().overlay(&"fg=#af3a03,bold".parse()?));
+        writeln!(&mut text, "3")?;
+
+        print!("{tag} middle line longest: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(3, 3));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_text_wrap() -> Result<(), Error> {
+        let tag = "[text wrap]";
+        let size = Size::new(5, 10);
+        let ctx = ViewContext::dummy();
+        let mut text = Text::new();
+
+        write!(&mut text, "1 no wrap")?;
+
+        print!("{tag} will not wrap: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(1, 9));
+
+        writeln!(&mut text, "\n2 this will wrap")?;
+        print!("{tag} will wrap: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(3, 10));
+
+        write!(&mut text, "3 bla")?;
+        print!("{tag} one more line: {:?}", text.debug(size));
         let layout = text.layout(&ctx, BoxConstraint::loose(size));
         assert_eq!(layout.size, Size::new(4, 10));
 
@@ -327,66 +323,37 @@ mod tests {
     }
 
     #[test]
-    fn test_text_glyph() -> Result<(), Error> {
-        let path: Path = "
-        M13.5 2a5.5 5.5 0 0 0-4.905 3.008 6.995 6.995 0 0 1 5.49 3.125C14.545 8.046
-        15.018 8 15.5 8h3.478c.014-.165.022-.331.022-.5V3.44A1.44 1.44 0 0 0 17.56 2
-        H13.5ZM8.426 17.997A6 6 0 0 1 2.25 12V7.514C2.25 6.678 2.928 6 3.764 6H8.25
-        c1.966 0 3.712.946 4.806 2.407a7.522 7.522 0 0 0-3.938 3.15L7.53 9.97
-        a.75.75 0 0 0-1.06 1.06l1.96 1.96A7.488 7.488 0 0 0 8 15.5c0 .876.15 1.716.426 2.497Z
-        M9 15.5A6.5 6.5 0 0 1 15.5 9h4.914C21.29 9 22 9.71 22 10.586V15.5
-        a6.5 6.5 0 0 1-10.535 5.096L10.28 21.78a.75.75 0 1 1-1.06-1.06l1.184-1.185
-        A6.473 6.473 0 0 1 9 15.5Zm3.177 4.383 4.603-4.603a.75.75 0 1 0-1.06-1.06
-        l-4.603 4.603c.303.4.66.757 1.06 1.06Z
-        "
-        .parse()
-        .unwrap();
-        let glyph = Glyph::new(
-            path,
-            FillRule::NonZero,
-            Some(BBox::new((1.0, 1.0), (23.0, 23.0))),
-            Size::new(1, 2),
-        );
+    fn test_text_tab() -> Result<(), Error> {
+        let tag = "[text tab]";
+        let size = Size::new(6, 20);
         let ctx = ViewContext::dummy();
+        let mut text = Text::new();
 
-        let text = Text::new("before ->")
-            .with_face("fg=#3c3836,bg=#ebdbb2".parse()?)
-            .add_text(Text::glyph(glyph).with_face("fg=#79740e".parse()?))
-            .add_text("<- after ");
+        writeln!(&mut text, ".\t|")?;
+        print!("{tag} 1 char: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(1, 9));
 
-        let size = Size::new(5, 11);
-        assert_eq!(
-            Tree::leaf(Layout::new().with_size(Size::new(2, 11))),
-            text.layout(&ctx, BoxConstraint::loose(size))
-        );
-        print!("{:?}", text.debug(size));
+        writeln!(&mut text, ".......\t|")?;
+        print!("{tag} 7 chars: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(2, 9));
 
-        let size = Size::new(5, 10);
-        assert_eq!(
-            Tree::leaf(Layout::new().with_size(Size::new(3, 10))),
-            text.layout(&ctx, BoxConstraint::loose(size))
-        );
-        print!("{:?}", text.debug(size));
+        writeln!(&mut text, "........\t|")?;
+        print!("{tag} 8 chars: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(3, 17));
 
-        // check tight constraint
-        let size = Size::new(10, 12);
-        assert_eq!(
-            Tree::leaf(Layout::new().with_size(size)),
-            text.layout(&ctx, BoxConstraint::tight(size))
-        );
+        writeln!(&mut text, "...............\t|")?;
+        print!("{tag} 15 chars: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(4, 17));
 
-        Ok(())
-    }
+        writeln!(&mut text, "................\t|")?;
+        print!("{tag} 16 chars: {:?}", text.debug(size));
+        let layout = text.layout(&ctx, BoxConstraint::loose(size));
+        assert_eq!(layout.size, Size::new(6, 20));
 
-    #[test]
-    fn test_text_collect() -> Result<(), Error> {
-        let chunks = ["one", " ", "two", " ", "three"];
-        let text: Text<'static> = chunks.into_iter().collect();
-
-        let size = Size::new(3, 10);
-        print!("{:?}", text.debug(size));
-
-        assert_eq!(text.len(), 13);
         Ok(())
     }
 }

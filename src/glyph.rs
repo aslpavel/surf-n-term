@@ -35,6 +35,8 @@ struct GlyphInner {
     view_box: BBox,
     /// Glyph size in cells
     size: Size,
+    /// Fallback text (used when image is not supported)
+    fallback_str: String,
 }
 
 /// Glyph defined as an SVG path
@@ -44,7 +46,13 @@ pub struct Glyph {
 }
 
 impl Glyph {
-    pub fn new(path: Path, fill_rule: FillRule, view_box: Option<BBox>, size: Size) -> Self {
+    pub fn new(
+        path: Path,
+        fill_rule: FillRule,
+        view_box: Option<BBox>,
+        size: Size,
+        fallback: String,
+    ) -> Self {
         let view_box = view_box
             .or_else(|| {
                 let bbox = path.bbox(Transform::identity())?;
@@ -58,6 +66,7 @@ impl Glyph {
                 scene: GlyphScene::Symbol { path, fill_rule },
                 view_box,
                 size,
+                fallback_str: fallback,
             }),
         }
     }
@@ -127,6 +136,10 @@ impl Glyph {
     pub fn scene(&self) -> &GlyphScene {
         &self.inner.scene
     }
+
+    pub fn fallback_str(&self) -> &str {
+        &self.inner.fallback_str
+    }
 }
 
 impl std::fmt::Debug for Glyph {
@@ -157,6 +170,8 @@ struct GlyphSerde {
     path: Option<Path>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     view_box: Option<BBox>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fallback: Option<String>,
     #[serde(default, skip_serializing_if = "is_default")]
     fill_rule: FillRule,
     #[serde(default = "glyph_default_size")]
@@ -176,6 +191,10 @@ impl Serialize for Glyph {
             Some(bbox) if bbox == self.inner.view_box => None,
             _ => Some(self.inner.view_box),
         };
+        let fallback = self
+            .fallback_str()
+            .is_empty()
+            .then_some(self.fallback_str().to_owned());
         match &self.inner.scene {
             GlyphScene::Symbol { path, fill_rule } => GlyphSerde {
                 path: Some(path.clone()),
@@ -183,6 +202,7 @@ impl Serialize for Glyph {
                 fill_rule: *fill_rule,
                 size: self.inner.size,
                 scene: None,
+                fallback,
             }
             .serialize(serializer),
             GlyphScene::Scene(scene) => GlyphSerde {
@@ -191,6 +211,7 @@ impl Serialize for Glyph {
                 size: self.inner.size,
                 fill_rule: FillRule::default(),
                 path: None,
+                fallback,
             }
             .serialize(serializer),
         }
@@ -209,6 +230,7 @@ impl<'de> Deserialize<'de> for Glyph {
                 glyph.fill_rule,
                 glyph.view_box,
                 glyph.size,
+                glyph.fallback.unwrap_or_default(),
             ))
         } else if let Some(scene) = glyph.scene {
             let view_box = glyph
@@ -220,6 +242,7 @@ impl<'de> Deserialize<'de> for Glyph {
                     scene: GlyphScene::Scene(scene),
                     view_box,
                     size: glyph.size,
+                    fallback_str: glyph.fallback.unwrap_or_default(),
                 }),
             })
         } else {
@@ -248,6 +271,7 @@ mod tests {
             FillRule::NonZero,
             Some(BBox::new((1.0, 0.0), (25.0, 21.0))),
             Size::new(1, 2),
+            String::new(),
         );
         let glyph_str = serde_json::to_string(&glyph)?;
         let glyph_de: Glyph = serde_json::from_str(glyph_str.as_ref())?;

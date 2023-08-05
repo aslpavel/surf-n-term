@@ -6,6 +6,7 @@ use std::{borrow::Cow, fmt};
 pub enum Error {
     Quit,
     IOError(std::io::Error),
+    FmtError(std::fmt::Error),
     NixError(nix::Error),
     NotATTY,
     ParseError(&'static str, String),
@@ -28,6 +29,7 @@ impl std::error::Error for Error {
         match self {
             Quit => None,
             IOError(ref error) => Some(error),
+            FmtError(ref error) => Some(error),
             NixError(ref error) => Some(error),
             SvgParseError(ref error) => Some(error),
             ColorError(ref error) => Some(error),
@@ -43,6 +45,12 @@ impl std::error::Error for Error {
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Self::IOError(error)
+    }
+}
+
+impl From<std::fmt::Error> for Error {
+    fn from(error: std::fmt::Error) -> Self {
+        Self::FmtError(error)
     }
 }
 
