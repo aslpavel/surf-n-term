@@ -13,11 +13,8 @@ use std::{
 use tracing::debug_span;
 
 #[derive(Clone, Debug)]
-enum GlyphScene {
-    Symbol {
-        path: Arc<Path>,
-        fill_rule: FillRule,
-    },
+pub enum GlyphScene {
+    Symbol { path: Path, fill_rule: FillRule },
     Scene(Scene),
 }
 
@@ -30,42 +27,8 @@ impl GlyphScene {
     }
 }
 
-impl PartialEq for GlyphScene {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Symbol {
-                    path: l_path,
-                    fill_rule: l_fill_rule,
-                },
-                Self::Symbol {
-                    path: r_path,
-                    fill_rule: r_fill_rule,
-                },
-            ) => Arc::ptr_eq(l_path, r_path) && l_fill_rule == r_fill_rule,
-            (Self::Scene(l0), Self::Scene(r0)) => l0 == r0,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for GlyphScene {}
-
-impl Hash for GlyphScene {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match &self {
-            GlyphScene::Symbol { path, fill_rule } => {
-                Arc::as_ptr(path).hash(state);
-                fill_rule.hash(state)
-            }
-            GlyphScene::Scene(scene) => scene.hash(state),
-        }
-    }
-}
-
-/// Glyph defined as an SVG path
-#[derive(Debug, Clone, Hash, PartialEq)]
-pub struct Glyph {
+#[derive(Debug, Clone)]
+struct GlyphInner {
     /// Scene to by rasterized
     scene: GlyphScene,
     /// View box
@@ -74,14 +37,14 @@ pub struct Glyph {
     size: Size,
 }
 
+/// Glyph defined as an SVG path
+#[derive(Clone)]
+pub struct Glyph {
+    inner: Arc<GlyphInner>,
+}
+
 impl Glyph {
-    pub fn new(
-        path: impl Into<Arc<Path>>,
-        fill_rule: FillRule,
-        view_box: Option<BBox>,
-        size: Size,
-    ) -> Self {
-        let path: Arc<Path> = path.into();
+    pub fn new(path: Path, fill_rule: FillRule, view_box: Option<BBox>, size: Size) -> Self {
         let view_box = view_box
             .or_else(|| {
                 let bbox = path.bbox(Transform::identity())?;
@@ -91,20 +54,22 @@ impl Glyph {
             })
             .unwrap_or_else(|| BBox::new((0.0, 0.0), (1.0, 1.0)));
         Self {
-            scene: GlyphScene::Symbol { path, fill_rule },
-            view_box,
-            size,
+            inner: Arc::new(GlyphInner {
+                scene: GlyphScene::Symbol { path, fill_rule },
+                view_box,
+                size,
+            }),
         }
     }
 
     /// Rasterize glyph into an image with provided face.
     pub fn rasterize(&self, face: Face, term_size: TerminalSize) -> Image {
-        let pixel_size = term_size.cells_in_pixels(self.size);
+        let pixel_size = term_size.cells_in_pixels(self.inner.size);
         let size = rasterize::Size {
             height: pixel_size.height,
             width: pixel_size.width,
         };
-        let tr = Transform::fit_size(self.view_box, size, Align::Mid);
+        let tr = Transform::fit_size(self.inner.view_box, size, Align::Mid);
 
         let bg_rgba = face.bg.unwrap_or_else(|| RGBA::new(0, 0, 0, 0));
         let bg: LinColor = bg_rgba.into();
@@ -118,7 +83,7 @@ impl Glyph {
         let mut surf = SurfaceOwned::new_with(size.height, size.width, |_, _| bg_rgba);
         let shape = surf.shape();
         let data = surf.data_mut();
-        match &self.scene {
+        match &self.inner.scene {
             GlyphScene::Symbol { path, fill_rule } => {
                 for pixel in rasterizer.mask_iter(path, tr, size, *fill_rule) {
                     data[shape.offset(pixel.y, pixel.x)] = bg.lerp(fg, pixel.alpha as f32).into();
@@ -150,18 +115,46 @@ impl Glyph {
 
     /// Size of the glyph in cells
     pub fn size(&self) -> Size {
-        self.size
+        self.inner.size
+    }
+
+    /// View box used to render scene
+    pub fn view_box(&self) -> BBox {
+        self.inner.view_box
+    }
+
+    /// Scene use to render glyph
+    pub fn scene(&self) -> &GlyphScene {
+        &self.inner.scene
+    }
+}
+
+impl std::fmt::Debug for Glyph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl PartialEq for Glyph {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 }
 
 impl Eq for Glyph {}
+
+impl Hash for Glyph {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.inner).hash(state);
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct GlyphSerde {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scene: Option<Scene>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    path: Option<Arc<Path>>,
+    path: Option<Path>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     view_box: Option<BBox>,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -179,23 +172,23 @@ impl Serialize for Glyph {
     where
         S: serde::Serializer,
     {
-        let view_box = match self.scene.bbox(Transform::identity()) {
-            Some(bbox) if bbox == self.view_box => None,
-            _ => Some(self.view_box),
+        let view_box = match self.inner.scene.bbox(Transform::identity()) {
+            Some(bbox) if bbox == self.inner.view_box => None,
+            _ => Some(self.inner.view_box),
         };
-        match &self.scene {
+        match &self.inner.scene {
             GlyphScene::Symbol { path, fill_rule } => GlyphSerde {
                 path: Some(path.clone()),
                 view_box,
                 fill_rule: *fill_rule,
-                size: self.size,
+                size: self.inner.size,
                 scene: None,
             }
             .serialize(serializer),
             GlyphScene::Scene(scene) => GlyphSerde {
                 scene: Some(scene.clone()),
                 view_box,
-                size: self.size,
+                size: self.inner.size,
                 fill_rule: FillRule::default(),
                 path: None,
             }
@@ -223,9 +216,11 @@ impl<'de> Deserialize<'de> for Glyph {
                 .or_else(|| scene.bbox(Transform::identity()))
                 .unwrap_or_else(|| BBox::new((0.0, 0.0), (1.0, 1.0)));
             Ok(Glyph {
-                scene: GlyphScene::Scene(scene),
-                view_box,
-                size: glyph.size,
+                inner: Arc::new(GlyphInner {
+                    scene: GlyphScene::Scene(scene),
+                    view_box,
+                    size: glyph.size,
+                }),
             })
         } else {
             Err(de::Error::custom("must contain either scene or path"))
@@ -256,15 +251,15 @@ mod tests {
         );
         let glyph_str = serde_json::to_string(&glyph)?;
         let glyph_de: Glyph = serde_json::from_str(glyph_str.as_ref())?;
-        assert_eq!(glyph.view_box, glyph_de.view_box);
-        assert_eq!(glyph.size, glyph_de.size);
-        match glyph_de.scene {
+        assert_eq!(glyph.view_box(), glyph_de.view_box());
+        assert_eq!(glyph.size(), glyph_de.size());
+        match glyph_de.scene() {
             GlyphScene::Symbol {
                 path: path_de,
                 fill_rule: fill_rule_de,
             } => {
-                assert_eq!(&path, path_de.as_ref());
-                assert_eq!(FillRule::NonZero, fill_rule_de);
+                assert_eq!(&path, path_de);
+                assert_eq!(FillRule::NonZero, *fill_rule_de);
             }
             _ => panic!("symbol expected"),
         }
