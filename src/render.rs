@@ -681,7 +681,7 @@ impl<'a> TerminalSurfaceDebug<'a> {
         let mut term = TerminalDebug {
             size: TerminalSize {
                 cells: size,
-                // TOOD: allow to specify cell size?
+                // TODO: allow to specify cell size?
                 pixels: Size {
                     height: pixels_per_cell.height * size.height,
                     width: pixels_per_cell.width * size.width,

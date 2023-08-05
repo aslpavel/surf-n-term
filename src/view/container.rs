@@ -57,9 +57,10 @@ pub struct Margins {
     pub bottom: usize,
 }
 
+/// View that can constrain and align its child view
 #[derive(Debug)]
 pub struct Container<V> {
-    view: V,
+    child: V,
     face: Face,
     align_vertical: Align,
     align_horizontal: Align,
@@ -68,7 +69,7 @@ pub struct Container<V> {
 }
 
 impl<V: View> Container<V> {
-    /// create new container view
+    /// Create new container view
     pub fn new(child: impl IntoView<View = V>) -> Self {
         Self {
             size: Size::empty(),
@@ -76,11 +77,11 @@ impl<V: View> Container<V> {
             align_vertical: Align::default(),
             align_horizontal: Align::default(),
             margins: Margins::default(),
-            view: child.into_view(),
+            child: child.into_view(),
         }
     }
 
-    /// set size for the container
+    /// Set size for the container
     pub fn with_width(self, width: usize) -> Self {
         Self {
             size: Size { width, ..self.size },
@@ -88,7 +89,7 @@ impl<V: View> Container<V> {
         }
     }
 
-    /// set hight for the container
+    /// Set hight for the container
     pub fn with_height(self, height: usize) -> Self {
         Self {
             size: Size {
@@ -99,11 +100,12 @@ impl<V: View> Container<V> {
         }
     }
 
+    /// Set size for the container
     pub fn with_size(self, size: Size) -> Self {
         Self { size, ..self }
     }
 
-    /// set horizontal alignment
+    /// Set horizontal alignment
     pub fn with_horizontal(self, align: Align) -> Self {
         Self {
             align_horizontal: align,
@@ -111,7 +113,7 @@ impl<V: View> Container<V> {
         }
     }
 
-    /// set vertical alignment
+    /// Set vertical alignment
     pub fn with_vertical(self, align: Align) -> Self {
         Self {
             align_vertical: align,
@@ -119,6 +121,7 @@ impl<V: View> Container<V> {
         }
     }
 
+    /// Fill container with color
     pub fn with_color(self, color: RGBA) -> Self {
         Self {
             face: Face::new(None, Some(color), FaceAttrs::EMPTY),
@@ -126,6 +129,7 @@ impl<V: View> Container<V> {
         }
     }
 
+    /// Fill container with face
     pub fn with_face(self, face: Face) -> Self {
         Self { face, ..self }
     }
@@ -151,7 +155,7 @@ impl<V: View> View for Container<V> {
             )
             .erase(self.face);
         }
-        self.view.render(
+        self.child.render(
             ctx,
             &mut surf.as_mut(),
             layout.get(0).ok_or(Error::InvalidLayout)?,
@@ -162,7 +166,7 @@ impl<V: View> View for Container<V> {
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         // calculate the size taken by the whole container, it will span
         // all available space if size is not set.
-        let mut size = Size {
+        let mut container_size = Size {
             height: if self.size.height == 0 {
                 ct.max().height
             } else {
@@ -176,47 +180,46 @@ impl<V: View> View for Container<V> {
         };
 
         // calculate view constraints, reserving space for margin
-        let view_size_max = Size {
-            height: size
+        let child_size_max = Size {
+            height: container_size
                 .height
                 .saturating_sub(self.margins.top)
                 .saturating_sub(self.margins.bottom),
-            width: size
+            width: container_size
                 .width
                 .saturating_sub(self.margins.left)
                 .saturating_sub(self.margins.right),
         };
-        let view_size_min = Size {
+        let child_size_min = Size {
             height: if self.align_vertical == Align::Expand {
-                view_size_max.height
+                child_size_max.height
             } else {
                 0
             },
             width: if self.align_horizontal == Align::Expand {
-                view_size_max.width
+                child_size_max.width
             } else {
                 0
             },
         };
+        let child_constraint = BoxConstraint::new(child_size_min, child_size_max);
 
-        // calculate view layout
-        let mut view_layout = self
-            .view
-            .layout(ctx, BoxConstraint::new(view_size_min, view_size_max));
-        view_layout.pos = Position {
+        // calculate child layout
+        let mut child_layout = self.child.layout(ctx, child_constraint);
+        child_layout.pos = Position {
             row: self
                 .align_vertical
-                .align(view_layout.size.height, view_size_max.height)
+                .align(child_layout.size.height, child_size_max.height)
                 .add(self.margins.top),
             col: self
                 .align_horizontal
-                .align(view_layout.size.width, view_size_max.width)
+                .align(child_layout.size.width, child_size_max.width)
                 .add(self.margins.left),
         };
 
         // try to shrink container if necessary
         if self.align_vertical == Align::Shrink {
-            size.height = view_layout
+            container_size.height = child_layout
                 .size
                 .height
                 .add(self.margins.top)
@@ -224,7 +227,7 @@ impl<V: View> View for Container<V> {
                 .clamp(ct.min.height, ct.max.height)
         }
         if self.align_horizontal == Align::Shrink {
-            size.width = view_layout
+            container_size.width = child_layout
                 .size
                 .width
                 .add(self.margins.left)
@@ -233,7 +236,7 @@ impl<V: View> View for Container<V> {
         }
 
         // layout tree
-        Tree::new(Layout::new().with_size(size), vec![view_layout])
+        Tree::new(Layout::new().with_size(container_size), vec![child_layout])
     }
 }
 

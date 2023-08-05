@@ -96,6 +96,15 @@ impl Text {
         Default::default()
     }
 
+    /// Calculate maximum size of the text
+    pub fn max_size(&self) -> Size {
+        self.layout(
+            &ViewContext::dummy(),
+            BoxConstraint::loose(Size::new(usize::MAX, usize::MAX)),
+        )
+        .size()
+    }
+
     /// Number of cells
     pub fn len(&self) -> usize {
         self.cells.len()

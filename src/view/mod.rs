@@ -345,7 +345,7 @@ impl Layout {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Default)]
+#[derive(PartialEq, Eq, Hash, Default)]
 pub struct Tree<T> {
     pub value: T,
     pub children: Vec<Tree<T>>,
@@ -373,6 +373,25 @@ impl<T> Tree<T> {
     /// Get child by its index
     pub fn get(&self, index: usize) -> Option<&Tree<T>> {
         self.children.get(index)
+    }
+}
+
+impl<T: Debug> Debug for Tree<T> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn debug_rec<T: Debug>(
+            this: &Tree<T>,
+            offset: usize,
+            fmt: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
+            writeln!(fmt, "{0:<1$}{2:?}", "", offset, this.value)?;
+            for child in this.children.iter() {
+                debug_rec(child, offset + 2, fmt)?;
+            }
+            Ok(())
+        }
+        writeln!(fmt)?;
+        debug_rec(self, 0, fmt)?;
+        Ok(())
     }
 }
 
