@@ -141,25 +141,33 @@ where
         }
 
         // layout flex
-        let major_remain = self
+        let mut major_remain = self
             .direction
             .major(ct.max())
             .saturating_sub(major_non_flex);
         let mut major_flex = 0;
         if major_remain > 0 && flex_total > 0.0 {
-            let per_flex = (major_remain as f64) / flex_total;
             for (index, child) in self.children.iter().enumerate() {
                 if let Child::Flex { view, flex } = child {
-                    let child_major = (flex * per_flex).round() as usize;
-                    if child_major == 0 {
+                    // compute available flex
+                    let child_major_max =
+                        ((major_remain as f64) * flex / flex_total).round() as usize;
+                    flex_total -= flex;
+                    if child_major_max == 0 {
                         continue;
                     }
-                    let child_ct = self.direction.constraint(ct_loosen, 0, child_major);
-                    let child_layout = view.layout(ctx, child_ct);
 
-                    major_flex += self.direction.major(child_layout.size);
-                    minor = max(minor, self.direction.minor(child_layout.size));
+                    // layout child
+                    let child_ct = self.direction.constraint(ct_loosen, 0, child_major_max);
+                    let child_layout = view.layout(ctx, child_ct);
+                    let child_major = self.direction.major(child_layout.size);
+                    let child_minor = self.direction.minor(child_layout.size);
                     children_layout[index] = child_layout;
+
+                    // update counters
+                    major_remain -= child_major;
+                    major_flex += child_major;
+                    minor = max(minor, child_minor);
                 }
             }
         }
