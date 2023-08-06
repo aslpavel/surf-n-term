@@ -147,9 +147,11 @@ impl Text {
     }
 
     /// Append a given string to the end of [Text]
-    pub fn push_str(&mut self, str: &str) -> &mut Self {
-        str.chars().for_each(|c| {
-            self.put_char(c);
+    pub fn push_str(&mut self, str: &str, face: Option<Face>) -> &mut Self {
+        self.with_face(face.unwrap_or_default(), |text| {
+            str.chars().for_each(|c| {
+                text.put_char(c);
+            })
         });
         self
     }
