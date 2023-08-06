@@ -83,7 +83,7 @@ pub fn layout_string(ct: BoxConstraint, cs: impl IntoIterator<Item = char>) -> L
     Layout::new().with_size(ct.clamp(size))
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Text {
     cells: Vec<Cell>,
     // face used write next symbol (not actual face of the text)
@@ -169,9 +169,11 @@ impl Text {
         self
     }
 
-    /// Append string
-    pub fn push_text(&mut self, text: Text) -> &mut Self {
-        self.cells.extend(text.cells.into_iter());
+    /// Append text to the end of the [Text]
+    pub fn push_text(&mut self, text: &Text) -> &mut Self {
+        text.cells.iter().cloned().for_each(|cell| {
+            self.put_cell(cell);
+        });
         self
     }
 

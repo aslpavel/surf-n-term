@@ -19,8 +19,8 @@ mod frame;
 pub use frame::Frame;
 
 use crate::{
-    Cell, Error, Face, FaceAttrs, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal,
-    TerminalSurface, TerminalSurfaceExt, RGBA,
+    encoder::ColorDepth, Cell, Error, Face, FaceAttrs, Image, Position, Size, SurfaceMut,
+    SurfaceOwned, Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use std::{
     any::Any,
@@ -163,9 +163,11 @@ impl<V: View> IntoView for V {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ViewContext {
     pixels_per_cell: Size,
     has_glyphs: bool,
+    color_depth: ColorDepth,
 }
 
 impl ViewContext {
@@ -174,6 +176,7 @@ impl ViewContext {
         Ok(Self {
             pixels_per_cell: term.size()?.pixels_per_cell(),
             has_glyphs: caps.glyphs,
+            color_depth: caps.depth,
         })
     }
 
@@ -185,6 +188,7 @@ impl ViewContext {
                 width: 15,
             },
             has_glyphs: true,
+            color_depth: ColorDepth::TrueColor,
         }
     }
 
@@ -196,6 +200,11 @@ impl ViewContext {
     /// Whether terminal supports glyph rendering
     pub fn has_glyphs(&self) -> bool {
         self.has_glyphs
+    }
+
+    /// Color depth supported by terminal
+    pub fn color_depth(&self) -> ColorDepth {
+        self.color_depth
     }
 }
 
