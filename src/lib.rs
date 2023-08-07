@@ -56,6 +56,7 @@ pub use face::{Face, FaceAttrs};
 pub use glyph::{BBox, FillRule, Glyph, Path};
 pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImageHandler};
 pub use keys::{Key, KeyMap, KeyMod, KeyName};
+pub use rasterize;
 pub use rasterize::{Color, LinColor, RGBA};
 pub use render::{Cell, TerminalSurface, TerminalSurfaceExt, TerminalWriter};
 pub use surface::{
