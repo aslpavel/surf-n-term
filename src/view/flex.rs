@@ -1,27 +1,21 @@
-use super::{AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
-use crate::{Error, Size, SurfaceMut, TerminalSurface};
+use super::{Align, AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
+use crate::{Error, Face, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt};
 use std::{cmp::max, fmt};
 
-enum Child<'a> {
-    Fixed { view: Box<dyn View + 'a> },
-    Flex { view: Box<dyn View + 'a>, flex: f64 },
+struct Child<'a> {
+    view: Box<dyn View + 'a>,
+    flex: Option<f64>,
+    face: Option<Face>,
+    align: Align,
 }
 
 impl<'a> fmt::Debug for Child<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Fixed { .. } => write!(f, "Fixed"),
-            Self::Flex { flex, .. } => write!(f, "Flex({flex})"),
-        }
-    }
-}
-
-impl<'a> Child<'a> {
-    fn view(&self) -> &dyn View {
-        match self {
-            Self::Fixed { view, .. } => view,
-            Self::Flex { view, .. } => view,
-        }
+        f.debug_struct("Child")
+            .field("flex", &self.flex)
+            .field("face", &self.face)
+            .field("align", &self.align)
+            .finish()
     }
 }
 
@@ -65,25 +59,42 @@ impl<'a> Flex<'a> {
     }
 
     pub fn push_child(&mut self, child: impl IntoView + 'a) {
-        self.children.push(Child::Fixed {
-            view: child.into_view().boxed(),
-        });
+        self.push_child_ext(child, None, None, Align::Start)
     }
 
     pub fn push_flex_child(&mut self, flex: f64, child: impl IntoView + 'a) {
-        if flex > 0.0 {
-            self.children.push(Child::Flex {
-                view: child.into_view().boxed(),
-                flex,
-            });
-        } else {
-            self.push_child(child);
-        }
+        self.push_child_ext(child, Some(flex), None, Align::Start)
+    }
+
+    pub fn push_child_ext(
+        &mut self,
+        child: impl IntoView + 'a,
+        flex: Option<f64>,
+        face: Option<Face>,
+        align: Align,
+    ) {
+        self.children.push(Child {
+            view: child.into_view().boxed(),
+            flex: flex.and_then(|flex| (flex > 0.0).then_some(flex)),
+            face,
+            align,
+        });
     }
 
     /// Add new fixed size child
     pub fn add_child(mut self, child: impl IntoView + 'a) -> Self {
         self.push_child(child);
+        self
+    }
+
+    pub fn add_child_ext(
+        mut self,
+        child: impl IntoView + 'a,
+        flex: Option<f64>,
+        face: Option<Face>,
+        align: Align,
+    ) -> Self {
+        self.push_child_ext(child, flex, face, align);
         self
     }
 
@@ -110,7 +121,25 @@ where
             if child_layout.size.is_empty() {
                 continue;
             }
-            child.view().render(ctx, &mut surf.as_mut(), child_layout)?;
+
+            // fill allocated space
+            if let Some(face) = child.face {
+                let mut surf = match self.direction {
+                    Axis::Horizontal => {
+                        let start = child_layout.pos.col;
+                        let end = start + child_layout.size.width;
+                        surf.view_mut(.., start..end)
+                    }
+                    Axis::Vertical => {
+                        let start = child_layout.pos.row;
+                        let end = start + child_layout.size.height;
+                        surf.view_mut(start..end, ..)
+                    }
+                };
+                surf.erase(face);
+            }
+
+            child.view.render(ctx, &mut surf.as_mut(), child_layout)?;
         }
         Ok(())
     }
@@ -127,16 +156,14 @@ where
 
         // layout non-flex
         for (index, child) in self.children.iter().enumerate() {
-            match child {
-                Child::Fixed { view } => {
-                    let child_layout = view.layout(ctx, ct_loosen);
+            match child.flex {
+                None => {
+                    let child_layout = child.view.layout(ctx, ct_loosen);
                     major_non_flex += self.direction.major(child_layout.size);
                     minor = max(minor, self.direction.minor(child_layout.size));
                     children_layout[index] = child_layout;
                 }
-                Child::Flex { flex, .. } => {
-                    flex_total += flex;
-                }
+                Some(flex) => flex_total += flex,
             }
         }
 
@@ -148,7 +175,7 @@ where
         let mut major_flex = 0;
         if major_remain > 0 && flex_total > 0.0 {
             for (index, child) in self.children.iter().enumerate() {
-                if let Child::Flex { view, flex } = child {
+                if let Some(flex) = child.flex {
                     // compute available flex
                     let child_major_max =
                         ((major_remain as f64) * flex / flex_total).round() as usize;
@@ -159,7 +186,7 @@ where
 
                     // layout child
                     let child_ct = self.direction.constraint(ct_loosen, 0, child_major_max);
-                    let child_layout = view.layout(ctx, child_ct);
+                    let child_layout = child.view.layout(ctx, child_ct);
                     let child_major = self.direction.major(child_layout.size);
                     let child_minor = self.direction.minor(child_layout.size);
                     children_layout[index] = child_layout;
@@ -204,16 +231,23 @@ where
         };
 
         // calculate offsets
-        let mut offset = space_side;
-        for child_layout in children_layout.iter_mut() {
-            *child_layout.pos.major_mut(self.direction) = offset;
-            offset += child_layout.size.major(self.direction);
-            offset += space_between;
+        let mut major_offset = space_side;
+        for (index, child_layout) in children_layout.iter_mut().enumerate() {
+            child_layout.pos = Position::from_axes(
+                self.direction,
+                major_offset,
+                self.children[index]
+                    .align
+                    .align(self.direction.minor(child_layout.size), minor),
+            );
+
+            major_offset += child_layout.size.major(self.direction);
+            major_offset += space_between;
         }
 
         // create layout tree
         Tree::new(
-            Layout::new().with_size(ct.clamp(Size::from_axes(self.direction, offset, minor))),
+            Layout::new().with_size(ct.clamp(Size::from_axes(self.direction, major_offset, minor))),
             children_layout,
         )
     }
@@ -228,24 +262,76 @@ mod tests {
     fn test_flex() -> Result<(), Error> {
         let ctx = ViewContext::dummy();
         let flex = Flex::row()
-            .add_flex_child(
-                2.0,
+            .add_child_ext(
                 Text::from("some text")
-                    .mark("fg=#ff0000".parse()?, ..)
+                    .mark("bg=#458588".parse()?, ..)
                     .take(),
+                Some(2.0),
+                Some("bg=#83a598".parse()?),
+                Align::End,
             )
-            .add_flex_child(1.0, "other text");
+            .add_child_ext(
+                Text::from("other text")
+                    .mark("bg=#b16286".parse()?, ..)
+                    .take(),
+                Some(1.0),
+                Some("bg=#d3869b".parse()?),
+                Align::Start,
+            );
 
         let size = Size::new(5, 12);
-        print!("[flex] {:?}", flex.debug(size));
+        print!("[flex] squeeze {:?}", flex.debug(size));
         let reference = Tree::new(
             Layout::new().with_size(Size::new(3, 12)),
             vec![
-                Tree::leaf(Layout::new().with_size(Size::new(2, 8))),
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(1, 0))
+                        .with_size(Size::new(2, 8)),
+                ),
                 Tree::leaf(
                     Layout::new()
                         .with_position(Position::new(0, 8))
                         .with_size(Size::new(3, 4)),
+                ),
+            ],
+        );
+        assert_eq!(reference, flex.layout(&ctx, BoxConstraint::loose(size)));
+
+        let size = Size::new(5, 40);
+        print!("[flex] justify start {:?}", flex.debug(size));
+        let reference = Tree::new(
+            Layout::new().with_size(Size::new(1, 19)),
+            vec![
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(0, 0))
+                        .with_size(Size::new(1, 9)),
+                ),
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(0, 9))
+                        .with_size(Size::new(1, 10)),
+                ),
+            ],
+        );
+        assert_eq!(reference, flex.layout(&ctx, BoxConstraint::loose(size)));
+
+        let size = Size::new(5, 40);
+        let flex = flex.justify(Justify::SpaceBetween);
+        print!("[flex] justify space between {:?}", flex.debug(size));
+        let reference = Tree::new(
+            Layout::new().with_size(Size::new(1, 40)),
+            vec![
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(0, 0))
+                        .with_size(Size::new(1, 9)),
+                ),
+                Tree::leaf(
+                    Layout::new()
+                        .with_position(Position::new(0, 30))
+                        .with_size(Size::new(1, 10)),
                 ),
             ],
         );

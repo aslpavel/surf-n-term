@@ -26,17 +26,17 @@ pub enum Align {
 }
 
 impl Align {
-    pub fn align(&self, small: usize, large: usize) -> usize {
-        let small = small.clamp(0, large);
+    pub fn align(&self, size: usize, space: usize) -> usize {
+        let size = size.clamp(0, space);
         match self {
             Self::Start | Self::Expand | Self::Shrink => 0,
-            Self::Center => (large - small) / 2,
-            Self::End => large - small,
+            Self::Center => (space - size) / 2,
+            Self::End => space - size,
             Self::Offset(offset) => {
                 if *offset >= 0 {
                     *offset as usize
                 } else {
-                    (large - small).saturating_sub(offset.unsigned_abs() as usize)
+                    (space - size).saturating_sub(offset.unsigned_abs() as usize)
                 }
             }
         }
