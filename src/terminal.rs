@@ -10,6 +10,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     io::Write,
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -501,6 +502,31 @@ impl<'de> Deserialize<'de> for Size {
     {
         let (height, width) = Deserialize::deserialize(deserializer)?;
         Ok(Size::new(height, width))
+    }
+}
+
+impl FromStr for Size {
+    type Err = Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        let mut values = string
+            .split(|c| matches!(c, ' ' | ','))
+            .map(|s| s.trim().parse().ok());
+        let height = values
+            .next()
+            .flatten()
+            .ok_or_else(|| Error::ParseError("Size", "failed to parse height".to_owned()))?;
+        let width = values
+            .next()
+            .flatten()
+            .ok_or_else(|| Error::ParseError("Size", "failed to parse width".to_owned()))?;
+        Ok(Size { height, width })
+    }
+}
+
+impl fmt::Display for Size {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.height, self.width)
     }
 }
 

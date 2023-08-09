@@ -1,5 +1,6 @@
 use crate::{
-    Color, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize, RGBA,
+    Color, Error, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize,
+    RGBA,
 };
 use rasterize::{
     ActiveEdgeRasterizer, Align, Image as _, Point, Rasterizer, Scalar, Scene, Transform,
@@ -8,6 +9,7 @@ pub use rasterize::{BBox, FillRule, Path};
 use serde::{de, Deserialize, Serialize};
 use std::{
     hash::{Hash, Hasher},
+    str::FromStr,
     sync::Arc,
 };
 use tracing::debug_span;
@@ -36,7 +38,7 @@ struct GlyphInner {
     /// Glyph size in cells
     size: Size,
     /// Fallback text (used when image is not supported)
-    fallback_str: String,
+    fallback: String,
 }
 
 /// Glyph defined as an SVG path
@@ -66,7 +68,7 @@ impl Glyph {
                 scene: GlyphScene::Symbol { path, fill_rule },
                 view_box,
                 size,
-                fallback_str: fallback,
+                fallback,
             }),
         }
     }
@@ -138,7 +140,7 @@ impl Glyph {
     }
 
     pub fn fallback_str(&self) -> &str {
-        &self.inner.fallback_str
+        &self.inner.fallback
     }
 }
 
@@ -159,6 +161,62 @@ impl Eq for Glyph {}
 impl Hash for Glyph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Arc::as_ptr(&self.inner).hash(state);
+    }
+}
+
+impl FromStr for Glyph {
+    type Err = Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        struct Attrs {
+            path: Option<Path>,
+            fill_rule: FillRule,
+            view_box: Option<BBox>,
+            size: Option<Size>,
+            fallback: String,
+        }
+
+        let attrs = string.split(';').try_fold(
+            Attrs {
+                path: None,
+                fill_rule: FillRule::default(),
+                view_box: None,
+                size: None,
+                fallback: String::new(),
+            },
+            |mut attrs, attr| {
+                let mut iter = attr.splitn(2, '=');
+                let key = iter.next().unwrap_or_default().trim();
+                let value = iter.next().unwrap_or_default();
+                match key {
+                    "path" => {
+                        attrs.path.replace(value.parse()?);
+                    }
+                    "fill_rule" => attrs.fill_rule = value.parse()?,
+                    "view_box" => {
+                        attrs.view_box.replace(value.parse()?);
+                    }
+                    "size" => {
+                        attrs.size.replace(value.parse()?);
+                    }
+                    "fallback" => attrs.fallback = value.to_owned(),
+                    "" => {}
+                    _ => return Err(Error::ParseError("Glyph", string.to_owned())),
+                }
+                Ok(attrs)
+            },
+        )?;
+
+        let Some(path) = attrs.path else {
+            return Err(Error::ParseError("Glyph", format!("path is requred: {}",string)))
+        };
+        Ok(Glyph::new(
+            path,
+            attrs.fill_rule,
+            attrs.view_box,
+            attrs.size.unwrap_or_else(glyph_default_size),
+            attrs.fallback,
+        ))
     }
 }
 
@@ -242,7 +300,7 @@ impl<'de> Deserialize<'de> for Glyph {
                     scene: GlyphScene::Scene(scene),
                     view_box,
                     size: glyph.size,
-                    fallback_str: glyph.fallback.unwrap_or_default(),
+                    fallback: glyph.fallback.unwrap_or_default(),
                 }),
             })
         } else {

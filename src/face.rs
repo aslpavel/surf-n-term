@@ -194,9 +194,9 @@ impl FromStr for Face {
             .split(',')
             .try_fold(Face::default(), |mut face, attrs| {
                 let mut iter = attrs.splitn(2, '=');
-                let key = iter.next().unwrap_or_default().trim().to_lowercase();
+                let key = iter.next().unwrap_or_default().trim();
                 let value = iter.next().unwrap_or_default().trim();
-                match key.as_str() {
+                match key {
                     "fg" => face.fg = Some(value.parse()?),
                     "bg" => face.bg = Some(value.parse()?),
                     "bold" => face.attrs |= FaceAttrs::BOLD,
