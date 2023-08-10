@@ -25,8 +25,6 @@ pub enum CellKind {
     Image(Image),
     /// Contains glyph
     Glyph(Glyph),
-    /// Must be re-rendered
-    Damaged,
 }
 
 /// Terminal cell
@@ -63,14 +61,6 @@ impl Cell {
         }
     }
 
-    /// Create damaged cell
-    fn new_damaged() -> Self {
-        Self {
-            face: Default::default(),
-            kind: CellKind::Damaged,
-        }
-    }
-
     /// Width occupied by cell (can be != 1 for Glyph)
     pub fn width(&self) -> NonZeroUsize {
         let width = match &self.kind {
@@ -85,10 +75,12 @@ impl Cell {
         self.face
     }
 
+    /// Return cell kind
     pub fn kind(&self) -> &CellKind {
         &self.kind
     }
 
+    /// Replace cell face
     pub fn with_face(self, face: Face) -> Self {
         Cell { face, ..self }
     }
@@ -142,18 +134,17 @@ impl TerminalRenderer {
         let size = term.size()?;
         term.execute(TerminalCommand::Face(Default::default()))?;
         term.execute(TerminalCommand::CursorTo(Position::origin()))?;
-        let mut back = SurfaceOwned::new(size.cells.height, size.cells.width);
-        if clear {
-            back.fill(Cell::new_damaged());
-        }
+        let mark = if clear {
+            CellMark::Damaged
+        } else {
+            CellMark::Empty
+        };
         Ok(Self {
             face: Default::default(),
             cursor: Position::origin(),
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
-            back,
-            marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| {
-                CellMark::Empty
-            }),
+            back: SurfaceOwned::new(size.cells.height, size.cells.width),
+            marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| mark),
             size,
             glyph_cache: HashMap::new(),
             frame_count: 0,
@@ -170,9 +161,10 @@ impl TerminalRenderer {
         }
 
         self.face = Face::default().with_fg(Some(RGBA::new(254, 0, 253, 252)));
-        self.cursor = Position::new(100_000, 100_000);
-        self.front.fill(Cell::new_damaged());
-        self.back.fill(Cell::new_damaged());
+        self.cursor = Position::new(123_456, 654_123); // force cursor update
+        self.marks.fill(CellMark::Damaged);
+        self.front.fill(Cell::default());
+        self.back.fill(Cell::default());
 
         Ok(())
     }
@@ -193,9 +185,6 @@ impl TerminalRenderer {
     /// Render the current frame
     #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
-        self.frame_count += 1;
-        self.marks.fill(CellMark::Empty);
-
         // replace all glyphs with rendered images
         self.glyphs_reasterize(term.size()?);
 
@@ -316,6 +305,8 @@ impl TerminalRenderer {
             }
         }
         // swap buffers
+        self.frame_count += 1;
+        self.marks.fill(CellMark::Empty);
         std::mem::swap(&mut self.front, &mut self.back);
         self.front.clear();
         Ok(())

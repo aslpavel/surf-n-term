@@ -269,7 +269,6 @@ impl View for Text {
                     .chars()
                     .for_each(|c| layout_char(max_width, &mut size, &mut pos, c)),
                 CellKind::Char(c) => layout_char(max_width, &mut size, &mut pos, *c),
-                CellKind::Damaged => {}
             }
         }
         size.width = max(size.width, pos.col);
