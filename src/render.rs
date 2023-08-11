@@ -85,6 +85,12 @@ impl Cell {
         &self.kind
     }
 
+    pub fn overlay(&mut self, other: Cell) -> &mut Self {
+        self.face = self.face.overlay(&other.face);
+        self.kind = other.kind;
+        self
+    }
+
     /// Layout cell
     ///
     /// Arguments:
@@ -667,7 +673,7 @@ impl<'a> TerminalWriter<'a> {
         );
         let Some(pos) = pos else { return true };
         if let Some(cell_ref) = self.surf.get_mut(pos.row, pos.col) {
-            *cell_ref = cell;
+            cell_ref.overlay(cell);
             true
         } else {
             false
