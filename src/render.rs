@@ -9,12 +9,13 @@ use crate::{
     TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker, RGBA,
 };
 use std::{
-    cmp::max,
+    cmp::{max, min},
     collections::HashMap,
     fmt::Debug,
     io::{BufWriter, Write},
     num::NonZeroUsize,
 };
+use unicode_width::UnicodeWidthChar;
 
 /// Terminal cell kind
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -38,10 +39,10 @@ pub struct Cell {
 
 impl Cell {
     /// Create new cell from face and char
-    pub fn new_char(face: Face, character: Option<char>) -> Self {
+    pub fn new_char(face: Face, character: char) -> Self {
         Self {
             face,
-            kind: CellKind::Char(character.unwrap_or(' ')),
+            kind: CellKind::Char(character),
         }
     }
 
@@ -70,9 +71,23 @@ impl Cell {
         NonZeroUsize::new(width).expect("zero cell width")
     }
 
+    /// Get size of the cell
+    pub fn size(&self, pixels_per_cell: Size) -> Size {
+        match &self.kind {
+            CellKind::Char(ch) => Size::new(1, ch.width().unwrap_or(0)),
+            CellKind::Glyph(glyph) => glyph.size(),
+            CellKind::Image(image) => image.size_cells(pixels_per_cell),
+        }
+    }
+
     /// Cell face
     pub fn face(&self) -> Face {
         self.face
+    }
+
+    /// Replace cell face
+    pub fn with_face(self, face: Face) -> Self {
+        Cell { face, ..self }
     }
 
     /// Return cell kind
@@ -80,15 +95,72 @@ impl Cell {
         &self.kind
     }
 
-    /// Replace cell face
-    pub fn with_face(self, face: Face) -> Self {
-        Cell { face, ..self }
+    /// Layout cell
+    ///
+    /// Arguments:
+    ///   - `max_width`       - maximum available width
+    ///   - `pixels_per_cell` - number of pixels in a cell
+    ///   - `size`            - tracked total size
+    ///   - `cursor`          - tracked current cursor position
+    ///
+    /// Returns optional position where cell needs to be placed.
+    pub fn layout(
+        &self,
+        max_width: usize,
+        pixels_per_cell: Size,
+        size: &mut Size,
+        cursor: &mut Position,
+    ) -> Option<Position> {
+        // special characters
+        if let CellKind::Char(character) = &self.kind {
+            match character {
+                '\n' => {
+                    size.width = max(size.width, cursor.col);
+                    size.height = max(size.height, cursor.row + 1);
+                    cursor.col = 0;
+                    cursor.row += 1;
+                    return None;
+                }
+                '\t' => {
+                    cursor.col += (8 - cursor.col % 8).min(max_width.saturating_sub(cursor.col));
+                    size.width = max(size.width, cursor.col);
+                    return None;
+                }
+                _ => {}
+            }
+        }
+
+        // skip empty cells
+        let cell_size = self.size(pixels_per_cell);
+        if cell_size.height == 0 || cell_size.width == 0 {
+            return None;
+        }
+
+        if cursor.col + cell_size.width < max_width {
+            // enough space to put cell
+            let pos = *cursor;
+            cursor.col += cell_size.width;
+            size.width = max(size.width, cursor.col);
+            size.height = max(size.height, cursor.row + cell_size.height);
+            Some(pos)
+        } else {
+            // put new line
+            cursor.row += 1;
+            cursor.col = 0;
+            size.height = max(size.height, cursor.row);
+            // put cell unconditionally
+            let pos = *cursor;
+            cursor.col = min(cell_size.width, max_width);
+            size.width = max(size.width, cursor.col);
+            size.height = max(size.height, cursor.row + cell_size.height);
+            Some(pos)
+        }
     }
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Self::new_char(Face::default(), None)
+        Self::new_char(Face::default(), ' ')
     }
 }
 
@@ -120,6 +192,8 @@ pub struct TerminalRenderer {
     back: SurfaceOwned<Cell>,
     /// Marked cell that are treaded specially during diffing
     marks: SurfaceOwned<CellMark>,
+    /// Images to be rendered (frame function local kept here to avoid allocation)
+    images: Vec<(Position, Image)>,
     /// Current terminal size
     size: TerminalSize,
     /// Cache of rendered glyphs
@@ -145,6 +219,7 @@ impl TerminalRenderer {
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back: SurfaceOwned::new(size.cells.height, size.cells.width),
             marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| mark),
+            images: Vec::new(),
             size,
             glyph_cache: HashMap::new(),
             frame_count: 0,
@@ -182,6 +257,87 @@ impl TerminalRenderer {
         }
     }
 
+    #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
+    pub fn frame_v2<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+        // First pass
+        //
+        // - Replace glyphs with images
+        // - Erase changed images
+        // - Record images that needs to be rendered
+        for ((pos, old), new) in self.back.iter().with_position().zip(self.front.iter_mut()) {
+            // replace glyphs with images
+            if let CellKind::Glyph(glyph) = &new.kind {
+                let image = match self.glyph_cache.get(new) {
+                    Some(image) => image.clone(),
+                    None => {
+                        let image = glyph.rasterize(new.face, self.size);
+                        self.glyph_cache.insert(new.clone(), image.clone());
+                        image
+                    }
+                };
+                new.kind = CellKind::Image(image);
+            }
+
+            // skip cells that have not changed
+            if old == new && self.marks.get(pos.row, pos.col) != Some(&CellMark::Damaged) {
+                continue;
+            }
+
+            // erase and damage area under old image
+            if let CellKind::Image(image) = &old.kind {
+                term.execute(TerminalCommand::ImageErase(image.clone(), Some(pos)))?;
+                let size = image.size_cells(self.size.pixels_per_cell());
+                self.marks
+                    .view_mut(
+                        pos.row..pos.row + size.height,
+                        pos.col..pos.col + size.width,
+                    )
+                    .fill(CellMark::Damaged);
+            }
+
+            // record image to be rendered
+            if let CellKind::Image(image) = &new.kind {
+                self.images.push((pos, image.clone()));
+            }
+        }
+
+        // Second pass
+        //
+        // Render or characters
+        /*
+        for (((pos, old), new), mark) in self
+            .back
+            .iter()
+            .with_position()
+            .zip(self.front.iter())
+            .zip(self.marks.iter().copied())
+        {
+            if mark != CellMark::Damaged && (mark == CellMark::Ignored || old == new) {
+                continue;
+            }
+            let CellKind::Char(ch) = &new.kind else { continue };
+        }
+        */
+
+        // Render images
+        for (pos, image) in self.images.drain(..) {
+            //DO WE WANT TO ERASE UNDER IMAGE?
+            // - we probably need to set face from the image cell?
+            // - what if image has face with background set?
+            term.execute(TerminalCommand::CursorTo(pos))?;
+            term.execute(TerminalCommand::Image(image, pos))?;
+        }
+
+        // Flip and clear buffers
+        self.frame_count += 1;
+        self.marks.fill(CellMark::Empty);
+        self.images.clear();
+        std::mem::swap(&mut self.front, &mut self.back);
+        self.front.clear();
+
+        Ok(())
+    }
+
     /// Render the current frame
     #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
@@ -199,25 +355,21 @@ impl TerminalRenderer {
             if old == new {
                 continue;
             }
-            if let CellKind::Image(image) = &old.kind {
-                term.execute(TerminalCommand::ImageErase(
-                    image.clone(),
-                    Some(Position::new(pos.row, pos.col)),
-                ))?;
-                let size = image.size_cells(self.size.pixels_per_cell());
-                self.marks
-                    .view_mut(
-                        pos.row..pos.row + size.height,
-                        pos.col..pos.col + size.width,
-                    )
-                    .fill_with(|row, col, _| {
-                        if row != 0 || col != 0 {
-                            CellMark::Damaged
-                        } else {
-                            CellMark::Empty
-                        }
-                    });
-            }
+            let CellKind::Image(image) = &old.kind else { continue };
+            term.execute(TerminalCommand::ImageErase(image.clone(), Some(pos)))?;
+            let size = image.size_cells(self.size.pixels_per_cell());
+            self.marks
+                .view_mut(
+                    pos.row..pos.row + size.height,
+                    pos.col..pos.col + size.width,
+                )
+                .fill_with(|row, col, _| {
+                    if row != 0 || col != 0 {
+                        CellMark::Damaged
+                    } else {
+                        CellMark::Empty
+                    }
+                });
         }
 
         // Ignores cell covered by new images
@@ -351,7 +503,7 @@ impl TerminalRenderer {
     }
 
     fn term_set_cursor(&mut self, term: &mut dyn Terminal, pos: Position) -> Result<(), Error> {
-        if self.cursor.row != pos.row || self.cursor.col != pos.col {
+        if self.cursor != pos {
             self.cursor = pos;
             term.execute(TerminalCommand::CursorTo(self.cursor))?;
         }
@@ -409,6 +561,9 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Draw box
     fn draw_box(&mut self, face: Option<Face>);
 
+    /// Fill surface with check pattern
+    fn draw_check_pattern(&mut self, face: Face);
+
     /// Draw image encoded as ascii blocks
     fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
 
@@ -440,17 +595,24 @@ where
         }
         let face = face.unwrap_or_default();
 
-        let h = Cell::new_char(face, Some('─'));
-        let v = Cell::new_char(face, Some('│'));
+        let h = Cell::new_char(face, '─');
+        let v = Cell::new_char(face, '│');
         self.view_mut(0, 1..-1).fill(h.clone());
         self.view_mut(-1, 1..-1).fill(h);
         self.view_mut(1..-1, 0).fill(v.clone());
         self.view_mut(1..-1, -1).fill(v);
 
-        self.view_mut(0, 0).fill(Cell::new_char(face, Some('┌')));
-        self.view_mut(0, -1).fill(Cell::new_char(face, Some('┐')));
-        self.view_mut(-1, -1).fill(Cell::new_char(face, Some('┘')));
-        self.view_mut(-1, 0).fill(Cell::new_char(face, Some('└')));
+        self.view_mut(0, 0).fill(Cell::new_char(face, '┌'));
+        self.view_mut(0, -1).fill(Cell::new_char(face, '┐'));
+        self.view_mut(-1, -1).fill(Cell::new_char(face, '┘'));
+        self.view_mut(-1, 0).fill(Cell::new_char(face, '└'));
+    }
+
+    /// Fill surface with check pattern
+    fn draw_check_pattern(&mut self, face: Face) {
+        self.fill_with(|_, col, _| {
+            Cell::new_char(face, if col & 1 == 1 { '\u{2580}' } else { '\u{2584}' })
+        })
     }
 
     // Draw image using unicode upper half block symbol \u{2580}
@@ -461,7 +623,7 @@ where
             let fg = img.get(row * 2, col).copied();
             let bg = img.get(row * 2 + 1, col).copied();
             let face = Face::new(fg, bg, FaceAttrs::EMPTY);
-            Cell::new_char(face, Some('\u{2580}'))
+            Cell::new_char(face, '\u{2580}')
         });
     }
 
@@ -482,7 +644,7 @@ where
 
     /// Replace all cells with empty character and provided face
     fn erase(&mut self, face: Face) {
-        self.fill_with(|_row, _col, cell| Cell::new_char(cell.face.overlay(&face), None));
+        self.fill_with(|_row, _col, cell| Cell::new_char(cell.face.overlay(&face), ' '));
     }
 
     /// Crete writable wrapper around the terminal surface
@@ -490,7 +652,7 @@ where
         TerminalWriter::new(self)
     }
 
-    /// Create preview object that implements [Debug], only useful in tests
+    /// Create object that implements [Debug], only useful in tests
     /// and for debugging
     fn debug(&self) -> TerminalSurfaceDebug<'_> {
         TerminalSurfaceDebug {
@@ -601,14 +763,14 @@ impl<'a> TerminalWriter<'a> {
         };
         // fill the rest of the width with empty spaces
         for (_, cell) in (0..blank).zip(&mut self.iter) {
-            *cell = Cell::new_char(face, Some(' '));
+            *cell = Cell::new_char(face, ' ');
         }
         result
     }
 
     /// Put char
-    pub fn put_char(&mut self, c: char, face: Face) -> bool {
-        match c {
+    pub fn put_char(&mut self, character: char, face: Face) -> bool {
+        match character {
             '\r' => true,
             '\n' => {
                 self.put_newline(face);
@@ -618,12 +780,12 @@ impl<'a> TerminalWriter<'a> {
                 self.put_tab(face);
                 true
             }
-            chr => {
+            _ => {
                 self.end_of_line = self.position().col + 1 == self.iter.shape().width;
                 match self.iter.next() {
                     Some(cell) => {
                         let face = cell.face.overlay(&face);
-                        *cell = Cell::new_char(face, Some(chr));
+                        *cell = Cell::new_char(face, character);
                         true
                     }
                     None => false,
@@ -974,7 +1136,7 @@ mod tests {
         render
             .view()
             .view_owned(1..2, 1..-1)
-            .fill(Cell::new_char(red, None));
+            .fill(Cell::new_char(red, ' '));
         print!("erase: {:?}", render.view().debug());
         render.view().debug().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;
@@ -1160,5 +1322,107 @@ mod tests {
         term.clear();
 
         Ok(())
+    }
+
+    #[test]
+    fn test_cell_layout() {
+        let max_width = 10;
+        let pixels_per_cell = Size::new(10, 10);
+        let face = Face::default();
+
+        let mut size = Size::default();
+        let mut cursor = Position::default();
+
+        // empty new line at the start
+        let pos =
+            Cell::new_char(face, '\n').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert!(pos.is_none());
+        assert_eq!(cursor, Position::new(1, 0));
+        assert_eq!(size, Size::new(1, 0));
+
+        // simple text line
+        for c in "test".chars() {
+            Cell::new_char(face, c).layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        }
+        assert_eq!(cursor, Position::new(1, 4));
+        assert_eq!(size, Size::new(2, 4));
+
+        // new line
+        let pos =
+            Cell::new_char(face, '\n').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert!(pos.is_none());
+        assert_eq!(cursor, Position::new(2, 0));
+        assert_eq!(size, Size::new(2, 4));
+
+        // single width character
+        let pos =
+            Cell::new_char(face, ' ').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(2, 0)));
+        assert_eq!(cursor, Position::new(2, 1));
+        assert_eq!(size, Size::new(3, 4));
+
+        // double width character
+        let pos =
+            Cell::new_char(face, '🤩').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(2, 1)));
+        assert_eq!(cursor, Position::new(2, 3));
+        assert_eq!(size, Size::new(3, 4));
+
+        // tabulation
+        let pos =
+            Cell::new_char(face, '\t').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert!(pos.is_none());
+        assert_eq!(cursor, Position::new(2, 8));
+        assert_eq!(size, Size::new(3, 8));
+
+        // zero-width character
+        let pos =
+            Cell::new_char(face, '\0').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert!(pos.is_none());
+        assert_eq!(cursor, Position::new(2, 8));
+        assert_eq!(size, Size::new(3, 8));
+
+        // single width character close to the end of line
+        let pos =
+            Cell::new_char(face, 'P').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(2, 8)));
+        assert_eq!(cursor, Position::new(2, 9));
+        assert_eq!(size, Size::new(3, 9));
+
+        // double width character wraps
+        let pos =
+            Cell::new_char(face, '🥳').layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(3, 0)));
+        assert_eq!(cursor, Position::new(3, 2));
+        assert_eq!(size, Size::new(4, 9));
+
+        // glyph
+        let glyph = Glyph::new(
+            rasterize::Path::empty(),
+            Default::default(),
+            None,
+            Size::new(1, 3),
+            " ".to_owned(),
+        );
+        let pos =
+            Cell::new_glyph(face, glyph).layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(3, 2)));
+        assert_eq!(cursor, Position::new(3, 5));
+        assert_eq!(size, Size::new(4, 9));
+
+        // image
+        let image = Image::new(SurfaceOwned::new(14, 30));
+        let image_cell = Cell::new_image(image);
+        assert_eq!(image_cell.size(pixels_per_cell), Size::new(2, 3));
+        let pos = image_cell.layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(3, 5)));
+        assert_eq!(cursor, Position::new(3, 8));
+        assert_eq!(size, Size::new(5, 9));
+
+        // image wrap
+        let pos = image_cell.layout(max_width, pixels_per_cell, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(4, 0)));
+        assert_eq!(cursor, Position::new(4, 3));
+        assert_eq!(size, Size::new(6, 9));
     }
 }

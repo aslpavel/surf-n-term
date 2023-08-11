@@ -46,8 +46,14 @@ impl Image {
         if pixels_per_cell.width == 0 || pixels_per_cell.height == 0 {
             return Size::new(0, 0);
         }
-        let height = self.height() / pixels_per_cell.height;
-        let width = self.width() / pixels_per_cell.width;
+        let mut height = self.height() / pixels_per_cell.height;
+        if self.height() % pixels_per_cell.height != 0 {
+            height += 1;
+        }
+        let mut width = self.width() / pixels_per_cell.width;
+        if self.width() % pixels_per_cell.width != 0 {
+            width += 1;
+        }
         Size { height, width }
     }
 
@@ -556,7 +562,9 @@ impl ImageHandler for KittyImageHandler {
 
 /// Image handler for sixel graphic protocol
 ///
-/// Reference: [Sixel](https://en.wikipedia.org/wiki/Sixel)
+/// References:
+///  - [Sixel](https://en.wikipedia.org/wiki/Sixel)
+///  - [All About SIXELs](https://www.digiater.nl/openvms/decus/vax90b1/krypton-nasa/all-about-sixels.text)
 pub struct SixelImageHandler {
     imgs: lru::LruCache<u64, Vec<u8>>,
     size: usize,
@@ -585,9 +593,11 @@ impl ImageHandler for SixelImageHandler {
             return Ok(());
         }
         let _ = tracing::debug_span!("encode image", image_handler = "sixel");
+        // make sure height is always dividable by 6
+        let height = (img.height() / 6) * 6;
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
         // quantization, it will produce smaller or/and better palette for this color depth
-        let dimg = Image::new(img.map(|_, _, color| {
+        let dimg = Image::new(img.view(..height, ..).map(|_, _, color| {
             let [red, green, blue, alpha] = color.to_rgba();
             let red = ((red as f32 / 2.55).round() * 2.55) as u8;
             let green = ((green as f32 / 2.55).round() * 2.55) as u8;
@@ -609,11 +619,12 @@ impl ImageHandler for SixelImageHandler {
             let red = (red as f32 / 2.55).round() as u8;
             let green = (green as f32 / 2.55).round() as u8;
             let blue = (blue as f32 / 2.55).round() as u8;
+            // 2 - means RGB, 1 - means HLS
             write!(sixel_image, "#{};2;{};{};{}", index, red, green, blue)?;
         }
-        // color_index -> [(offset, sixel_code)]
+        // color_index -> [(column, sixel_code)]
         let mut sixel_lines: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
-        let mut colors: HashSet<usize> = HashSet::with_capacity(6);
+        let mut unique_colors: HashSet<usize> = HashSet::with_capacity(6);
         for row in (0..qimg.height()).step_by(6) {
             sixel_lines.clear();
             // extract sixel line
@@ -626,24 +637,30 @@ impl ImageHandler for SixelImageHandler {
                     }
                 }
                 // construct sixel
-                colors.clear();
-                colors.extend(sixel.iter().copied());
-                for color in colors.iter() {
-                    let mut code = 0;
+                unique_colors.clear();
+                unique_colors.extend(sixel.iter().copied());
+                for color in unique_colors.iter() {
+                    let mut sixel_code = 0;
                     for (s_index, s_color) in sixel.iter().enumerate() {
                         if s_color == color {
-                            code |= 1 << s_index;
+                            sixel_code |= 1 << s_index;
                         }
                     }
                     sixel_lines
                         .entry(*color)
                         .or_insert_with(Vec::new)
-                        .push((col, code + 63));
+                        .push((col, sixel_code + 63));
                 }
             }
             // render sixel line
+            // commands:
+            //   `#<color_index>`  - set color palette
+            //   `!<number>`       - repeat next sixel multiple times
+            //   `?`               - it is just empty sixel
+            //   `$`               - move to the beginning of the current line
+            //   `-`               - move to the next sixel line
             for (color, sixel_line) in sixel_lines.iter() {
-                write!(sixel_image, "#{}", color)?;
+                write!(sixel_image, "#{}", color)?; // set color
 
                 let mut offset = 0;
                 let mut codes = sixel_line.iter().peekable();
@@ -651,6 +668,8 @@ impl ImageHandler for SixelImageHandler {
                     // find shift needed to get to the correct offset
                     let shift = column - offset;
                     if shift > 0 {
+                        // determine whether it is more efficient to send repeats
+                        // or just blank sixel `?` multiple times
                         if shift > 3 {
                             write!(sixel_image, "!{}?", shift)?;
                         } else {
@@ -690,10 +709,9 @@ impl ImageHandler for SixelImageHandler {
 
         self.size += sixel_image.len();
         self.imgs.put(img.hash(), sixel_image);
-        if self.size > IMAGE_CACHE_SIZE {
-            if let Some((_, lru_image)) = self.imgs.pop_lru() {
-                self.size -= lru_image.len();
-            }
+        while self.size > IMAGE_CACHE_SIZE {
+            let Some((_, lru_image)) = self.imgs.pop_lru() else { break };
+            self.size -= lru_image.len();
         }
 
         Ok(())

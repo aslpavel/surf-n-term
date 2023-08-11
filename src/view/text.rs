@@ -142,7 +142,7 @@ impl Text {
 
     /// Append character to the end of the [Text]
     pub fn put_char(&mut self, c: char) -> &mut Self {
-        self.cells.push(Cell::new_char(self.face, Some(c)));
+        self.cells.push(Cell::new_char(self.face, c));
         self
     }
 

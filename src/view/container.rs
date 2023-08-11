@@ -3,8 +3,7 @@ use std::ops::Add;
 
 use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
 use crate::{
-    Error, Face, FaceAttrs, Position, Size, Surface, SurfaceMut, TerminalSurface,
-    TerminalSurfaceExt, RGBA,
+    Error, Face, FaceAttrs, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 
 /// Alignment of a child view
@@ -149,11 +148,7 @@ impl<V: View> View for Container<V> {
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         if self.face != Face::default() {
-            surf.view_mut(
-                self.margins.top..surf.height().saturating_sub(self.margins.bottom),
-                self.margins.left..surf.width().saturating_sub(self.margins.right),
-            )
-            .erase(self.face);
+            surf.erase(self.face);
         }
         self.child.render(
             ctx,
