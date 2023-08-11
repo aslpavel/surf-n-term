@@ -28,7 +28,7 @@ impl ScrollBar {
 impl View for ScrollBar {
     fn render<'a>(
         &self,
-        _ctx: &ViewContext,
+        ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
@@ -52,7 +52,7 @@ impl View for ScrollBar {
         };
 
         let mut surf = layout.apply_to(surf);
-        let mut writer = surf.writer();
+        let mut writer = surf.writer(ctx);
         let fg = Face::new(None, self.face.fg, FaceAttrs::EMPTY);
         let bg = Face::new(None, self.face.bg, FaceAttrs::EMPTY);
         for index in 0..major {

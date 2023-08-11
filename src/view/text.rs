@@ -8,12 +8,12 @@ use std::fmt::Write as _;
 impl View for str {
     fn render<'b>(
         &self,
-        _ctx: &ViewContext,
+        ctx: &ViewContext,
         surf: &'b mut TerminalSurface<'b>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        let mut writer = surf.writer();
+        let mut writer = surf.writer(ctx);
         self.chars().for_each(|c| {
             writer.put_char(c, Face::default());
         });
@@ -192,7 +192,7 @@ impl View for Text {
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        let mut writer = surf.writer();
+        let mut writer = surf.writer(ctx);
         if ctx.has_glyphs {
             self.cells.iter().for_each(|cell| {
                 writer.put(cell.clone());

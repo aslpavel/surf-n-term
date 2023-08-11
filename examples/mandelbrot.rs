@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 use surf_n_term::{
-    Color, DecMode, Error, Image, LinColor, Size, Surface, SurfaceOwned, SystemTerminal, Terminal,
-    TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    view::ViewContext, Color, DecMode, Error, Image, LinColor, Size, Surface, SurfaceOwned,
+    SystemTerminal, Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
 #[derive(Copy, Clone, Default)]
@@ -156,16 +156,17 @@ fn main() -> Result<(), Error> {
     let mut index = 0;
     let mut ascii = true;
     let delay = Duration::from_millis(16);
-    term.run_render(move |_term, event, mut view| -> Result<_, Error> {
+    term.run_render(move |term, event, mut view| -> Result<_, Error> {
         if imgs.len() < max_iter {
             let mand = mandelbrot(xs.clone(), ys.clone(), size, max_iter);
             imgs = mandlebrot_imgs(mand, &colormap, max_iter);
         };
 
+        let ctx = ViewContext::new(term)?;
         if ascii {
-            view.draw_image_ascii(&imgs[index]);
+            view.draw_view(&ctx, &imgs[index].ascii_view())?;
         } else {
-            view.draw_image(imgs[index].clone());
+            view.draw_view(&ctx, &imgs[index])?;
         }
         index = (index + 1) % max_iter;
 

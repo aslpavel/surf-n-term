@@ -7,8 +7,9 @@
 use crate::{
     common::{clamp, Rnd},
     encoder::{Base64Encoder, Encoder, TTYEncoder},
-    Color, Error, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned, TerminalCommand,
-    TerminalEvent, RGBA,
+    view::{BoxConstraint, Layout, Tree, View, ViewContext},
+    Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
+    TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
 };
 use flate2::{write::ZlibEncoder, Compression};
 use std::{
@@ -124,6 +125,13 @@ impl Image {
         stream_writer.flush()?;
         Ok(())
     }
+
+    /// ASCII image view
+    pub fn ascii_view(&self) -> ImageAsciiView {
+        ImageAsciiView {
+            image: self.clone(),
+        }
+    }
 }
 
 impl PartialEq for Image {
@@ -174,6 +182,57 @@ impl Surface for Image {
 
     fn data(&self) -> &[Self::Item] {
         self.surf.data()
+    }
+}
+
+impl View for Image {
+    fn render<'a>(
+        &self,
+        _ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        let mut surf = layout.apply_to(surf);
+        if let Some(cell) = surf.get_mut(layout.pos().row, layout.pos().col) {
+            *cell = Cell::new_image(self.clone()).with_face(cell.face());
+        }
+        Ok(())
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        let size = ct.clamp(self.size_cells(ctx.pixels_per_cell()));
+        Tree::leaf(Layout::new().with_size(size))
+    }
+}
+
+/// Draw image with ASCII blocks
+pub struct ImageAsciiView {
+    image: Image,
+}
+
+impl View for ImageAsciiView {
+    fn render<'a>(
+        &self,
+        _ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        let mut surf = layout.apply_to(surf);
+        surf.fill_with(|row, col, _| {
+            let fg = self.image.get(row * 2, col).copied();
+            let bg = self.image.get(row * 2 + 1, col).copied();
+            let face = Face::new(fg, bg, FaceAttrs::EMPTY);
+            Cell::new_char(face, '\u{2580}')
+        });
+        Ok(())
+    }
+
+    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        let size = Size {
+            height: self.image.height() / 2 + self.image.height() % 2,
+            width: self.image.width(),
+        };
+        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
     }
 }
 

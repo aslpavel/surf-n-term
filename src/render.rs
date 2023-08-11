@@ -4,16 +4,15 @@ use crate::{
     encoder::{Encoder, TTYEncoder},
     error::Error,
     view::{BoxConstraint, IntoView, View, ViewContext},
-    Face, FaceAttrs, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface,
-    SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps,
-    TerminalCommand, TerminalEvent, TerminalSize, TerminalWaker, RGBA,
+    Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
+    SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps, TerminalCommand,
+    TerminalEvent, TerminalSize, TerminalWaker, RGBA,
 };
 use std::{
     cmp::{max, min},
     collections::HashMap,
     fmt::Debug,
     io::{BufWriter, Write},
-    num::NonZeroUsize,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -60,15 +59,6 @@ impl Cell {
             face,
             kind: CellKind::Glyph(glyph),
         }
-    }
-
-    /// Width occupied by cell (can be != 1 for Glyph)
-    pub fn width(&self) -> NonZeroUsize {
-        let width = match &self.kind {
-            CellKind::Glyph(glyph) => max(1, glyph.size().width),
-            _ => 1,
-        };
-        NonZeroUsize::new(width).expect("zero cell width")
     }
 
     /// Get size of the cell
@@ -186,9 +176,9 @@ pub struct TerminalRenderer {
     face: Face,
     /// Current cursor position
     cursor: Position,
-    /// Front surface (modified)
+    /// Front surface (new)
     front: SurfaceOwned<Cell>,
-    /// Back surface (keeping previous state)
+    /// Back surface (old)
     back: SurfaceOwned<Cell>,
     /// Marked cell that are treaded specially during diffing
     marks: SurfaceOwned<CellMark>,
@@ -247,14 +237,6 @@ impl TerminalRenderer {
     /// View associated with the current frame
     pub fn view(&mut self) -> TerminalSurface<'_> {
         self.front.as_mut()
-    }
-
-    /// Iterator over changed cells between back and front buffers
-    pub fn diff(&self) -> impl Iterator<Item = (Position, &'_ Cell, &'_ Cell)> {
-        TerminalRendererDiff {
-            renderer: self,
-            pos: Position::new(0, 0),
-        }
     }
 
     #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
@@ -526,36 +508,6 @@ impl TerminalRenderer {
     }
 }
 
-pub struct TerminalRendererDiff<'a> {
-    renderer: &'a TerminalRenderer,
-    pos: Position,
-}
-
-impl<'a> Iterator for TerminalRendererDiff<'a> {
-    type Item = (Position, &'a Cell, &'a Cell);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let pos = self.pos;
-            if self.pos.col + 1 < self.renderer.back.width() {
-                self.pos.col += 1;
-            } else if self.pos.row + 1 < self.renderer.back.height() {
-                self.pos.col = 0;
-                self.pos.row += 1;
-            } else {
-                return None;
-            }
-            let new = self.renderer.front.get(pos.row, pos.col)?;
-            let old = self.renderer.back.get(pos.row, pos.col)?;
-            let mark = self.renderer.marks.get(pos.row, pos.col)?;
-            if *mark != CellMark::Damaged && (*mark == CellMark::Ignored || new == old) {
-                continue;
-            }
-            return Some((pos, new, old));
-        }
-    }
-}
-
 /// Terminal surface extension trait
 pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Draw box
@@ -564,12 +516,6 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Fill surface with check pattern
     fn draw_check_pattern(&mut self, face: Face);
 
-    /// Draw image encoded as ascii blocks
-    fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>);
-
-    /// Draw image
-    fn draw_image(&mut self, img: Image);
-
     /// Draw view on the surface
     fn draw_view(&mut self, ctx: &ViewContext, view: impl IntoView) -> Result<(), Error>;
 
@@ -577,7 +523,7 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn erase(&mut self, face: Face);
 
     /// Write object that can be used to add text to the surface
-    fn writer(&mut self) -> TerminalWriter<'_>;
+    fn writer(&mut self, ctx: &ViewContext) -> TerminalWriter<'_>;
 
     /// Wrapper around terminal surface that implements [std::fmt::Debug]
     /// which renders a surface to the terminal.
@@ -611,27 +557,15 @@ where
     /// Fill surface with check pattern
     fn draw_check_pattern(&mut self, face: Face) {
         self.fill_with(|_, col, _| {
-            Cell::new_char(face, if col & 1 == 1 { '\u{2580}' } else { '\u{2584}' })
+            Cell::new_char(
+                face,
+                if col & 1 == 1 {
+                    '\u{2580}' // upper half block
+                } else {
+                    '\u{2584}' // lower half block
+                },
+            )
         })
-    }
-
-    // Draw image using unicode upper half block symbol \u{2580}
-    fn draw_image_ascii(&mut self, img: impl Surface<Item = RGBA>) {
-        let height = img.height() / 2 + img.height() % 2;
-        let width = img.width();
-        self.view_mut(..height, ..width).fill_with(|row, col, _| {
-            let fg = img.get(row * 2, col).copied();
-            let bg = img.get(row * 2 + 1, col).copied();
-            let face = Face::new(fg, bg, FaceAttrs::EMPTY);
-            Cell::new_char(face, '\u{2580}')
-        });
-    }
-
-    /// Draw image on the surface
-    fn draw_image(&mut self, img: Image) {
-        if let Some(cell) = self.get_mut(0, 0) {
-            *cell = Cell::new_image(img).with_face(cell.face);
-        }
     }
 
     /// Draw view on the surface
@@ -648,8 +582,8 @@ where
     }
 
     /// Crete writable wrapper around the terminal surface
-    fn writer(&mut self) -> TerminalWriter<'_> {
-        TerminalWriter::new(self)
+    fn writer(&mut self, ctx: &ViewContext) -> TerminalWriter<'_> {
+        TerminalWriter::new(ctx.clone(), self)
     }
 
     /// Create object that implements [Debug], only useful in tests
@@ -663,135 +597,96 @@ where
 
 /// Writable (implements `Write`) object for `TerminalSurface`
 pub struct TerminalWriter<'a> {
-    face: Face,
-    iter: SurfaceMutIter<'a, Cell>,
-    end_of_line: bool,
+    ctx: ViewContext,
+    face: Face,       // face underlay-ed over all cells
+    cursor: Position, // cursor position (next insert will happen at this position)
+    size: Size,       // actual used size
+    surf: SurfaceMutView<'a, Cell>,
     decoder: crate::decoder::Utf8Decoder,
 }
 
 impl<'a> TerminalWriter<'a> {
-    pub fn new<S>(surf: &'a mut S) -> Self
+    pub fn new<S>(ctx: ViewContext, surf: &'a mut S) -> Self
     where
         S: SurfaceMut<Item = Cell> + ?Sized,
     {
         Self {
+            ctx,
             face: Default::default(),
-            iter: surf.iter_mut(),
-            end_of_line: false,
+            cursor: Position::origin(),
+            size: Size::empty(),
+            surf: surf.as_mut(),
             decoder: crate::decoder::Utf8Decoder::new(),
         }
     }
 
+    /// Get currently set face
+    pub fn face(&self) -> Face {
+        self.face
+    }
+
     /// Create new surface with updated face
-    pub fn face(self, face: Face) -> Self {
+    pub fn with_face(self, face: Face) -> Self {
         Self { face, ..self }
     }
 
     /// Set current face
-    pub fn face_set(&mut self, face: Face) -> &mut Self {
+    pub fn set_face(&mut self, face: Face) -> &mut Self {
         self.face = face;
         self
     }
 
-    /// Skip offset amount of cells (row major order)
-    pub fn skip(mut self, offset: usize) -> Self {
-        if offset > 0 {
-            self.iter.nth(offset - 1);
-        }
-        self
+    /// Get current cursor position
+    pub fn cursor(&self) -> Position {
+        self.cursor
     }
 
-    /// Get current position inside allocated view, that is next symbol will
-    /// be inserted at this position
-    pub fn position(&self) -> Position {
-        self.iter.position()
+    /// Move cursor to specified position
+    pub fn set_cursor(&mut self, pos: Position) -> &mut Self {
+        self.cursor = Position {
+            col: min(pos.col, self.size().width),
+            row: min(pos.row, self.size().height),
+        };
+        self
     }
 
     /// Get size of the view backing this writer
     pub fn size(&self) -> Size {
-        let shape = self.iter.shape();
-        Size {
-            height: shape.height,
-            width: shape.width,
-        }
-    }
-
-    pub fn put_newline(&mut self, face: Face) {
-        if self.end_of_line {
-            self.end_of_line = false;
-            return;
-        }
-        let shape = self.iter.shape();
-        let pos = self.position();
-        let spaces = shape.width.saturating_sub(pos.col);
-        for _ in 0..spaces {
-            self.put_char(' ', face);
-        }
-    }
-
-    pub fn put_tab(&mut self, face: Face) {
-        let shape = self.iter.shape();
-        let pos = self.position();
-        let spaces = 8 - pos.col % 8;
-        let spaces = spaces.min(shape.width.saturating_sub(pos.col));
-        for _ in 0..spaces {
-            self.put_char(' ', face);
-        }
+        self.surf.size()
     }
 
     /// Put cell
-    pub fn put(&mut self, mut cell: Cell) -> bool {
-        if let CellKind::Char(c) = cell.kind {
-            return self.put_char(c, cell.face);
-        }
-        // compose cell face with the current face
+    pub fn put(&mut self, cell: Cell) -> bool {
         let face = self.face.overlay(&cell.face);
-        let blank = cell.width().get() - 1;
-        // create newline if cell is too wide, but only once
-        let width = self.iter.shape().width;
-        if self.position().col + cell.width().get() > width {
-            self.put_newline(Face::default());
+        let cell = cell.with_face(face);
+        let pos = cell.layout(
+            self.size().width,
+            self.ctx.pixels_per_cell(),
+            &mut self.size,
+            &mut self.cursor,
+        );
+        let Some(pos) = pos else { return true };
+        if let Some(cell_ref) = self.surf.get_mut(pos.row, pos.col) {
+            *cell_ref = cell;
+            true
+        } else {
+            false
         }
-        // put cell
-        let result = match self.iter.next() {
-            Some(cell_ref) => {
-                cell.face = cell_ref.face.overlay(&face);
-                *cell_ref = cell;
-                true
-            }
-            None => false,
-        };
-        // fill the rest of the width with empty spaces
-        for (_, cell) in (0..blank).zip(&mut self.iter) {
-            *cell = Cell::new_char(face, ' ');
-        }
-        result
     }
 
-    /// Put char
+    /// Put character
     pub fn put_char(&mut self, character: char, face: Face) -> bool {
-        match character {
-            '\r' => true,
-            '\n' => {
-                self.put_newline(face);
-                true
-            }
-            '\t' => {
-                self.put_tab(face);
-                true
-            }
-            _ => {
-                self.end_of_line = self.position().col + 1 == self.iter.shape().width;
-                match self.iter.next() {
-                    Some(cell) => {
-                        let face = cell.face.overlay(&face);
-                        *cell = Cell::new_char(face, character);
-                        true
-                    }
-                    None => false,
-                }
-            }
-        }
+        self.put(Cell::new_char(face, character))
+    }
+
+    /// Put glyph
+    pub fn put_glyph(&mut self, glyph: Glyph, face: Face) -> bool {
+        self.put(Cell::new_glyph(face, glyph))
+    }
+
+    /// Put image
+    pub fn put_image(&mut self, image: Image) -> bool {
+        self.put(Cell::new_image(image))
     }
 }
 
@@ -817,24 +712,25 @@ pub struct TerminalSurfaceDebug<'a> {
 
 impl<'a> TerminalSurfaceDebug<'a> {
     fn as_bytes(&self) -> Result<Vec<u8>, Error> {
-        // expect true color and kitty image support
+        // init capabilities
         let capabilities = TerminalCaps {
             depth: crate::encoder::ColorDepth::TrueColor,
             glyphs: true,
             kitty_keyboard: false,
         };
-        // space for a box around the provided surface
+
+        // init size
         let size = Size {
             width: self.surf.width() + 2,
             height: self.surf.height() + 2,
         };
 
-        // debug terminal
-        let pixels_per_cell = ViewContext::dummy().pixels_per_cell();
+        // init debug terminal
+        let ctx = ViewContext::dummy();
+        let pixels_per_cell = ctx.pixels_per_cell();
         let mut term = TerminalDebug {
             size: TerminalSize {
                 cells: size,
-                // TODO: allow to specify cell size?
                 pixels: Size {
                     height: pixels_per_cell.height * size.height,
                     width: pixels_per_cell.width * size.width,
@@ -847,29 +743,37 @@ impl<'a> TerminalSurfaceDebug<'a> {
             face: Default::default(),
         };
 
-        // render single frame
+        // reserve space for the hight of the terminal
         for _ in 0..size.height {
             writeln!(term)?;
         }
+        // move to origin an save cursor position
         term.execute(TerminalCommand::CursorMove {
             row: -(size.height as i32),
             col: 0,
         })?;
         term.execute(TerminalCommand::CursorSave)?;
+
+        // create renderer
         let mut renderer = TerminalRenderer::new(&mut term, true)?;
         let mut view = renderer.view();
-        view.draw_box(None);
+
+        // draw frame an pattern
+        view.draw_box(Some("fg=#665c54".parse()?));
         write!(
-            view.view_mut(0, 2..-1).writer(),
+            view.view_mut(0, 2..-1).writer(&ctx),
             "{}x{}",
             size.height - 2,
             size.width - 2,
         )?;
+
+        // render frame
         view.view_mut(1..-1, 1..-1)
             .iter_mut()
             .zip(self.surf.iter())
             .for_each(|(dst, src)| *dst = src.clone());
         renderer.frame(&mut term)?;
+        write!(&mut term, "\x1b[m")?;
 
         Ok(term.output)
     }
@@ -1064,43 +968,6 @@ mod tests {
     }
 
     #[test]
-    fn test_writer_tab() -> Result<(), Error> {
-        let guide_face = "bg=#cc241d,fg=#fbf1c7".parse()?;
-        let underline_face = "bg=#b8bb26,fg=#fbf1c7".parse()?;
-        let tab_face = "bg=#458588,fg=#fbf1c7".parse()?;
-        let mark_face = "bg=#b16286,fg=#fbf1c7".parse()?;
-
-        let mut term = DummyTerminal::new(30, 21);
-        let mut render = TerminalRenderer::new(&mut term, false)?;
-
-        {
-            let mut view = render.view().view_owned(1.., ..).transpose();
-            let mut writer = view.writer().face(guide_face);
-            write!(writer, "012345678901234567890123456789")?;
-        }
-        let mut view = render.view().view_owned(.., 1..);
-        let mut writer = view.writer().face(guide_face);
-        write!(writer, "01234567890123456789\n")?;
-        writer.face_set(Face::default());
-
-        let mut cols = Vec::new();
-        for index in 0..22 {
-            (0..index).for_each(|_| {
-                writer.put_char('_', underline_face);
-            });
-            writer.put_char('\t', tab_face);
-            cols.push(writer.position().col);
-            writer.put_char('X', mark_face);
-            writer.put_char('\n', Face::default());
-        }
-        print!("tab rendering: {:?}", render.view().debug());
-        for (line, col) in cols.into_iter().enumerate() {
-            assert_eq!(col % 8, 0, "column {} % 8 != 0 at line {}", col, line);
-        }
-        Ok(())
-    }
-
-    #[test]
     fn test_render() -> Result<(), Error> {
         use TerminalCommand::*;
 
@@ -1109,13 +976,16 @@ mod tests {
 
         let mut term = DummyTerminal::new(3, 7);
         let mut render = TerminalRenderer::new(&mut term, false)?;
+        let ctx = ViewContext::new(&term)?;
 
         let mut view = render.view().view_owned(.., 1..);
-        let mut writer = view.writer().skip(4).face(purple);
-        assert_eq!(writer.position(), Position::new(0, 4));
+        let mut writer = view.writer(&ctx).with_face(purple);
+        writer.set_cursor(Position::new(0, 4));
+
+        assert_eq!(writer.cursor(), Position::new(0, 4));
         write!(writer, "TEST")?;
-        assert_eq!(writer.position(), Position::new(1, 2));
-        print!("writer with offset: {:?}", render.view().debug());
+        assert_eq!(writer.cursor(), Position::new(1, 2));
+        print!("[render] writer with offset: {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1137,8 +1007,8 @@ mod tests {
             .view()
             .view_owned(1..2, 1..-1)
             .fill(Cell::new_char(red, ' '));
-        print!("erase: {:?}", render.view().debug());
-        render.view().debug().dump("/tmp/frame.txt")?;
+        print!("[render] erase: {:?}", render.view().debug());
+        // render.view().debug().dump("/tmp/frame.txt")?;
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1156,18 +1026,22 @@ mod tests {
         );
         term.clear();
 
-        let mut img = SurfaceOwned::new(3, 3);
+        let mut image_surf = SurfaceOwned::new(3, 3);
         let purple_color = "#d3869b".parse()?;
         let green_color = "#b8bb26".parse()?;
-        img.fill_with(|r, c, _| {
+        image_surf.fill_with(|r, c, _| {
             if (r + c) % 2 == 0 {
                 purple_color
             } else {
                 green_color
             }
         });
-        render.view().view_mut(1.., 2..).draw_image_ascii(&img);
-        print!("ascii image: {:?}", render.view().debug());
+        let image_ascii = crate::Image::new(image_surf).ascii_view();
+        render
+            .view()
+            .view_mut(1.., 2..)
+            .draw_view(&ctx, image_ascii)?;
+        print!("[render] ascii image: {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1195,11 +1069,11 @@ mod tests {
 
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let mut view = render.view().view_owned(.., 1..-1);
-        let mut writer = view.writer().face(purple);
-        assert_eq!(writer.position(), Position::new(0, 0));
+        let mut writer = view.writer(&ctx).with_face(purple);
+        assert_eq!(writer.cursor(), Position::new(0, 0));
         write!(&mut writer, "one\ntwo")?;
-        assert_eq!(writer.position(), Position::new(1, 3));
-        print!("writer new line: {:?}", render.view().debug());
+        assert_eq!(writer.cursor(), Position::new(1, 3));
+        print!("[render] writer new line: {:?}", render.view().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1211,8 +1085,6 @@ mod tests {
                 Char('o'),
                 Char('n'),
                 Char('e'),
-                Char(' '),
-                Char(' '),
                 CursorTo(Position::new(1, 1)),
                 Char('t'),
                 Char('w'),
@@ -1223,10 +1095,10 @@ mod tests {
 
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let mut view = render.view().view_owned(.., 1..-1);
-        let mut writer = view.writer().face(purple);
+        let mut writer = view.writer(&ctx).with_face(purple);
         write!(&mut writer, "  one\ntwo")?;
         print!(
-            "writer new line at the end of line: {:?}",
+            "[render] writer new line at the end of line: {:?}",
             render.view().debug()
         );
         render.frame(&mut term)?;
@@ -1254,7 +1126,7 @@ mod tests {
     }
 
     #[test]
-    fn test_image() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_render_image() -> Result<(), Box<dyn std::error::Error>> {
         use TerminalCommand::*;
 
         const ICON: &str = r#"
@@ -1424,5 +1296,44 @@ mod tests {
         assert_eq!(pos, Some(Position::new(4, 0)));
         assert_eq!(cursor, Position::new(4, 3));
         assert_eq!(size, Size::new(6, 9));
+    }
+
+    #[test]
+    fn test_writer_tab() -> Result<(), Error> {
+        let guide_face = "bg=#cc241d,fg=#fbf1c7".parse()?;
+        let underline_face = "bg=#b8bb26,fg=#fbf1c7".parse()?;
+        let tab_face = "bg=#458588,fg=#fbf1c7".parse()?;
+        let mark_face = "bg=#b16286,fg=#fbf1c7".parse()?;
+
+        let mut term = DummyTerminal::new(30, 21);
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+        let ctx = ViewContext::new(&term)?;
+
+        {
+            let mut view = render.view().view_owned(1.., 0).transpose();
+            let mut writer = view.writer(&ctx).with_face(guide_face);
+            write!(writer, "012345678901234567890123456789")?;
+        }
+
+        let mut view = render.view().view_owned(.., 1..);
+        let mut writer = view.writer(&ctx).with_face(guide_face);
+        write!(writer, "01234567890123456789\n")?;
+        writer.set_face(Face::default());
+
+        let mut cols = Vec::new();
+        for index in 0..22 {
+            (0..index).for_each(|_| {
+                writer.put_char('_', underline_face);
+            });
+            writer.put_char('\t', tab_face);
+            writer.put_char('X', mark_face);
+            cols.push(writer.cursor().col);
+            writer.put_char('\n', Face::default());
+        }
+        print!("[render] tab writer: {:?}", render.view().debug());
+        for (line, col) in cols.into_iter().enumerate() {
+            assert_eq!((col - 1) % 8, 0, "column {} % 8 != 0 at line {}", col, line);
+        }
+        Ok(())
     }
 }

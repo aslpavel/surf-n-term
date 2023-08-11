@@ -19,8 +19,8 @@ mod frame;
 pub use frame::Frame;
 
 use crate::{
-    encoder::ColorDepth, Cell, Error, Face, FaceAttrs, Image, Position, Size, SurfaceMut,
-    SurfaceOwned, Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
+    encoder::ColorDepth, Cell, Error, Face, FaceAttrs, Position, Size, SurfaceMut, SurfaceOwned,
+    Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use std::{
     any::Any,
@@ -114,6 +114,11 @@ impl<V: View> std::fmt::Debug for ViewDebug<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ctx = ViewContext::dummy();
         let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
+        surf.draw_check_pattern(
+            "fg=#282828,bg=#3c3836"
+                .parse()
+                .expect("[ViewDebug] failed parse face"),
+        );
         surf.draw_view(&ctx, &self.view)
             .map_err(|_| std::fmt::Error)?;
         surf.debug().fmt(f)
@@ -674,24 +679,6 @@ impl View for RGBA {
 
     fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         Tree::leaf(Layout::new().with_size(ct.max()))
-    }
-}
-
-impl View for Image {
-    fn render<'a>(
-        &self,
-        _ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
-        layout: &Tree<Layout>,
-    ) -> Result<(), Error> {
-        let mut surf = layout.apply_to(surf);
-        surf.draw_image(self.clone());
-        Ok(())
-    }
-
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        let size = ct.clamp(self.size_cells(ctx.pixels_per_cell()));
-        Tree::leaf(Layout::new().with_size(size))
     }
 }
 
