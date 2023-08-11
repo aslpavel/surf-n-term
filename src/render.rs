@@ -189,7 +189,7 @@ pub struct TerminalRenderer {
     /// Marked cell that are treaded specially during diffing
     marks: SurfaceOwned<CellMark>,
     /// Images to be rendered (frame function local kept here to avoid allocation)
-    images: Vec<(Position, Image)>,
+    images: Vec<(Position, Face, Image)>,
     /// Current terminal size
     size: TerminalSize,
     /// Cache of rendered glyphs
@@ -245,13 +245,15 @@ impl TerminalRenderer {
         self.front.as_mut()
     }
 
+    /// Generate frame, that is issue terminal command to reconcile
+    /// back (old) and front (new) buffers.
     #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame_v2<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // First pass
         //
-        // - Replace glyphs with images
+        // - Replace glyphs with images in the front buffer
         // - Erase changed images
-        // - Record images that needs to be rendered
+        // - Record images that we need to render
         for ((pos, old), new) in self.back.iter().with_position().zip(self.front.iter_mut()) {
             // replace glyphs with images
             if let CellKind::Glyph(glyph) = &new.kind {
@@ -285,33 +287,97 @@ impl TerminalRenderer {
 
             // record image to be rendered
             if let CellKind::Image(image) = &new.kind {
-                self.images.push((pos, image.clone()));
+                self.images.push((pos, new.face, image.clone()));
             }
         }
 
         // Second pass
         //
         // Render or characters
-        /*
-        for (((pos, old), new), mark) in self
-            .back
-            .iter()
-            .with_position()
-            .zip(self.front.iter())
-            .zip(self.marks.iter().copied())
-        {
-            if mark != CellMark::Damaged && (mark == CellMark::Ignored || old == new) {
-                continue;
+        let mut face = Face::default();
+        term.execute(TerminalCommand::Face(face))?;
+        let mut cursor = Position::origin();
+        term.execute(TerminalCommand::CursorTo(cursor))?;
+
+        let mut pos = Position::origin();
+        while pos.row < self.front.height() {
+            while pos.col < self.front.width() {
+                // fetch buffers
+                let offset = self.front.shape().offset(pos.row, pos.col);
+                let new = &self.front.data()[offset];
+                let old = &self.back.data()[offset];
+                let mark = self.marks.data()[offset];
+
+                // skip conditions
+                if mark != CellMark::Damaged && (mark == CellMark::Ignored || old == new) {
+                    pos.col += 1;
+                    continue;
+                }
+                let CellKind::Char(character) = &new.kind else {
+                    pos.col += 1;
+                    continue
+                };
+                let character_width = character.width().unwrap_or(0);
+                if character_width == 0 {
+                    pos.col += 1;
+                    continue;
+                }
+
+                // update face and cursor
+                if cursor != pos {
+                    cursor = pos;
+                    term.execute(TerminalCommand::CursorTo(cursor))?;
+                }
+                if face != new.face {
+                    face = new.face;
+                    term.execute(TerminalCommand::Face(face))?;
+                }
+
+                if matches!(character, ' ') {
+                    // find repeated empty cells
+                    let mut repeats = 1;
+                    for col in pos.col + 1..self.front.width() {
+                        let Some(next) = self.front.get(pos.row, col) else { break };
+                        let next_mark = self.marks.get(pos.row, col).copied().unwrap_or_default();
+                        if next == new && next_mark != CellMark::Ignored {
+                            repeats += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    pos.col += repeats;
+                    // erase if it is more efficient
+                    if repeats > 4 {
+                        // NOTE: erase is not moving cursor
+                        term.execute(TerminalCommand::EraseChars(repeats))?;
+                    } else {
+                        cursor.col += repeats;
+                        for _ in 0..repeats {
+                            term.execute(TerminalCommand::Char(' '))?;
+                        }
+                    }
+                } else {
+                    term.execute(TerminalCommand::Char(*character))?;
+                    cursor.col += character_width;
+                    pos.col += character_width;
+                }
             }
-            let CellKind::Char(ch) = &new.kind else { continue };
+            pos.row += 1;
         }
-        */
 
         // Render images
-        for (pos, image) in self.images.drain(..) {
-            //DO WE WANT TO ERASE UNDER IMAGE?
-            // - we probably need to set face from the image cell?
-            // - what if image has face with background set?
+        for (pos, face, image) in self.images.drain(..) {
+            term.execute(TerminalCommand::CursorTo(pos))?;
+            // Erase area under image, which makes sure are under image
+            // has the same face as image cells.
+            term.execute(TerminalCommand::Face(face))?;
+            let size = image.size_cells(self.size.pixels_per_cell());
+            for row in pos.row..pos.row + size.height {
+                term.execute(TerminalCommand::CursorTo(Position::new(row, pos.col)))?;
+                term.execute(TerminalCommand::EraseChars(size.width))?;
+            }
+
+            // draw image
             term.execute(TerminalCommand::CursorTo(pos))?;
             term.execute(TerminalCommand::Image(image, pos))?;
         }
