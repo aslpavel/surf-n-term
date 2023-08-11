@@ -3,10 +3,7 @@ use crate::{
     render::CellKind, surface::ViewBounds, Cell, Error, Face, Glyph, Position, Size,
     TerminalSurface, TerminalSurfaceExt,
 };
-use std::{
-    cmp::{max, min},
-    fmt::Write as _,
-};
+use std::fmt::Write as _;
 
 impl View for str {
     fn render<'b>(
@@ -23,8 +20,19 @@ impl View for str {
         Ok(())
     }
 
-    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        Tree::leaf(layout_string(ct, self.chars()))
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        let mut size = Size::empty();
+        let mut cursor = Position::origin();
+        let face = Face::default();
+        self.chars().for_each(|c| {
+            Cell::new_char(face, c).layout(
+                ct.max.width,
+                ctx.pixels_per_cell,
+                &mut size,
+                &mut cursor,
+            );
+        });
+        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
     }
 }
 
@@ -41,46 +49,6 @@ impl View for String {
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         self.as_str().layout(ctx, ct)
     }
-}
-
-/// Given maximum width and current size, position and character to be added
-/// calculate new size and position
-#[inline]
-pub fn layout_char(max_width: usize, size: &mut Size, pos: &mut Position, character: char) {
-    match character {
-        '\r' => {}
-        '\n' => {
-            size.width = max(size.width, pos.col);
-            size.height += 1;
-            pos.col = 0;
-        }
-        '\t' => {
-            pos.col += (8 - pos.col % 8).min(max_width.saturating_sub(pos.col));
-        }
-        _ => {
-            if pos.col < max_width {
-                pos.col += 1;
-            } else {
-                size.width = max(size.width, pos.col);
-                size.height += 1;
-                pos.col = 1;
-            }
-        }
-    }
-    size.width = max(size.width, pos.col);
-}
-
-/// Calculate layout of the string given the constraints
-pub fn layout_string(ct: BoxConstraint, cs: impl IntoIterator<Item = char>) -> Layout {
-    let mut size = Size::empty();
-    let mut pos = Position::origin();
-    let max_width = ct.max().width;
-    cs.into_iter()
-        .for_each(|c| layout_char(max_width, &mut size, &mut pos, c));
-    if pos != Position::origin() {
-        size.height += 1;
-    }
-    Layout::new().with_size(ct.clamp(size))
 }
 
 #[derive(Clone, Default, Debug)]
@@ -246,35 +214,10 @@ impl View for Text {
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         let mut size = Size::empty();
-        let mut pos = Position::origin();
-        let max_width = ct.max().width;
-        for cell in self.cells.iter() {
-            match cell.kind() {
-                CellKind::Image(image) => {
-                    pos.col += image.size_cells(ctx.pixels_per_cell).width;
-                    pos.col = min(pos.col, max_width);
-                }
-                CellKind::Glyph(glyph) if ctx.has_glyphs() => {
-                    let width = glyph.size().width;
-                    if pos.col + width < max_width {
-                        pos.col += width;
-                    } else {
-                        size.width = max(size.width, pos.col);
-                        size.height += 1;
-                        pos.col = min(width, max_width);
-                    }
-                }
-                CellKind::Glyph(glyph) => glyph
-                    .fallback_str()
-                    .chars()
-                    .for_each(|c| layout_char(max_width, &mut size, &mut pos, c)),
-                CellKind::Char(c) => layout_char(max_width, &mut size, &mut pos, *c),
-            }
-        }
-        size.width = max(size.width, pos.col);
-        if pos != Position::origin() {
-            size.height += 1;
-        }
+        let mut cursor = Position::origin();
+        self.cells.iter().for_each(|cell| {
+            cell.layout(ct.max.width, ctx.pixels_per_cell, &mut size, &mut cursor);
+        });
         Tree::leaf(Layout::new().with_size(ct.clamp(size)))
     }
 }

@@ -10,7 +10,7 @@ mod scrollbar;
 pub use scrollbar::ScrollBar;
 
 mod text;
-pub use text::{layout_char, layout_string, Text};
+pub use text::Text;
 
 mod dynamic;
 pub use dynamic::Dynamic;

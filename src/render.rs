@@ -136,7 +136,7 @@ impl Cell {
             return None;
         }
 
-        if cursor.col + cell_size.width < max_width {
+        if cursor.col + cell_size.width <= max_width {
             // enough space to put cell
             let pos = *cursor;
             cursor.col += cell_size.width;
