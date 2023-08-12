@@ -38,6 +38,14 @@ pub trait Terminal: Write + Send {
     /// None duration blocks indefinitely until event received from the terminal.
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error>;
 
+    /// Schedule multiple commands at once
+    fn execute_many(&mut self, cmds: impl IntoIterator<Item = TerminalCommand>) -> Result<(), Error>
+    where
+        Self: Sized,
+    {
+        cmds.into_iter().try_for_each(|cmd| self.execute(cmd))
+    }
+
     /// Iterator over pending events
     fn drain(&mut self) -> TerminalDrain<'_> {
         TerminalDrain(self.dyn_ref())
@@ -95,7 +103,7 @@ pub trait Terminal: Write + Send {
             match event {
                 Err(error) => {
                     // cleanup on error
-                    renderer.view().erase(Face::default());
+                    renderer.surface().erase(Face::default());
                     renderer.frame(self)?;
                     let _ = self.poll(Some(Duration::new(0, 0)));
                     return Err(error.into());
@@ -107,7 +115,7 @@ pub trait Terminal: Write + Send {
                         renderer = TerminalRenderer::new(self, true)?;
                     }
                     // handle event
-                    let action = handler(self, event, renderer.view())?;
+                    let action = handler(self, event, renderer.surface())?;
                     // drop frames if we are too far behind
                     if self.frames_pending() > TERMINAL_FRAMES_DROP {
                         warn!("dropping frames: {}", self.frames_pending());
@@ -300,6 +308,70 @@ pub enum TerminalCommand {
     DeviceAttrs,
     /// Set kitty keyboard protocol level
     KeyboardLevel(usize),
+}
+
+impl TerminalCommand {
+    /// Create alternative screen set command
+    pub fn altscreen_set(enable: bool) -> Self {
+        TerminalCommand::DecModeSet {
+            enable,
+            mode: DecMode::AltScreen,
+        }
+    }
+
+    /// Create visible cursor set command
+    pub fn visible_cursor_set(enable: bool) -> Self {
+        TerminalCommand::DecModeSet {
+            enable,
+            mode: DecMode::VisibleCursor,
+        }
+    }
+
+    /// Create auto wrap set command
+    pub fn auto_wrap_set(enable: bool) -> Self {
+        TerminalCommand::DecModeSet {
+            enable,
+            mode: DecMode::AutoWrap,
+        }
+    }
+
+    /// Enable or disable mouse events
+    pub fn mouse_events_set(
+        enable: bool,
+        motion: bool,
+    ) -> impl IntoIterator<Item = TerminalCommand> {
+        if enable {
+            [
+                TerminalCommand::DecModeSet {
+                    enable: true,
+                    mode: DecMode::MouseSGR,
+                },
+                TerminalCommand::DecModeSet {
+                    enable: true,
+                    mode: DecMode::MouseReport,
+                },
+                TerminalCommand::DecModeSet {
+                    enable: motion,
+                    mode: DecMode::MouseMotions,
+                },
+            ]
+        } else {
+            [
+                TerminalCommand::DecModeSet {
+                    enable: false,
+                    mode: DecMode::MouseMotions,
+                },
+                TerminalCommand::DecModeSet {
+                    enable: false,
+                    mode: DecMode::MouseReport,
+                },
+                TerminalCommand::DecModeSet {
+                    enable: false,
+                    mode: DecMode::MouseSGR,
+                },
+            ]
+        }
+    }
 }
 
 /// Kind of terminal color

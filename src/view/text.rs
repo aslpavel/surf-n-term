@@ -231,7 +231,7 @@ mod tests {
         let tag = "[text basic]";
         let size = Size::new(5, 10);
         let ctx = ViewContext::dummy();
-        let mut text = Text::new();
+        let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
 
         writeln!(&mut text, "11")?;
         text.set_face("fg=#3c3836,bg=#ebdbb2".parse()?);
@@ -256,7 +256,7 @@ mod tests {
         let tag = "[text wrap]";
         let size = Size::new(5, 10);
         let ctx = ViewContext::dummy();
-        let mut text = Text::new();
+        let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
 
         write!(&mut text, "1 no wrap")?;
 
@@ -282,7 +282,7 @@ mod tests {
         let tag = "[text tab]";
         let size = Size::new(6, 20);
         let ctx = ViewContext::dummy();
-        let mut text = Text::new();
+        let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
 
         writeln!(&mut text, ".\t|")?;
         print!("{tag} 1 char: {:?}", text.debug(size));

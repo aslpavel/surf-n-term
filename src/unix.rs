@@ -197,12 +197,9 @@ impl UnixTerminal {
         self.tty_handle.set_blocking(true)?;
 
         // flush currently queued output and submit the epilogue
-        let epilogue = [
+        self.execute_many([
             TerminalCommand::Face(Default::default()),
-            TerminalCommand::DecModeSet {
-                enable: true,
-                mode: DecMode::VisibleCursor,
-            },
+            TerminalCommand::visible_cursor_set(true),
             TerminalCommand::DecModeSet {
                 enable: false,
                 mode: DecMode::MouseMotions,
@@ -224,11 +221,8 @@ impl UnixTerminal {
             // which is supported by all terminals, and indicates that we handled
             // all pending events such as status report from kitty image protocol
             TerminalCommand::DeviceAttrs,
-        ];
-        epilogue
-            .into_iter()
-            .try_for_each(|cmd| self.execute(cmd))
-            .unwrap_or(()); // ignore write errors
+        ])
+        .unwrap_or(()); // ignore write errors
 
         // wait for device attributes report or error
         loop {

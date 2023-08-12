@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 use surf_n_term::{
-    view::ViewContext, Color, DecMode, Error, Image, LinColor, Size, Surface, SurfaceOwned,
-    SystemTerminal, Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    view::ViewContext, Color, Error, Image, LinColor, Size, Surface, SurfaceOwned, SystemTerminal,
+    Terminal, TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
 #[derive(Copy, Clone, Default)]
@@ -132,15 +132,11 @@ fn main() -> Result<(), Error> {
     term.duplicate_output("/tmp/surf_n_term.log")?;
 
     // init
-    term.execute(TerminalCommand::CursorSave)?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::VisibleCursor,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: true,
-        mode: DecMode::AltScreen,
-    })?;
+    term.execute_many([
+        TerminalCommand::CursorSave,
+        TerminalCommand::visible_cursor_set(false),
+        TerminalCommand::altscreen_set(true),
+    ])?;
 
     let mut imgs = Vec::new();
     let xs = -2.5..1.0;
@@ -194,11 +190,10 @@ fn main() -> Result<(), Error> {
     })?;
 
     // clean up
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::AltScreen,
-    })?;
-    term.execute(TerminalCommand::CursorRestore)?;
+    term.execute_many([
+        TerminalCommand::altscreen_set(false),
+        TerminalCommand::CursorRestore,
+    ])?;
     term.poll(Some(Duration::from_millis(50)))?;
 
     Ok(())

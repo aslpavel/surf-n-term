@@ -1,6 +1,6 @@
 use surf_n_term::{
     view::{Align, Container, Margins, Text, View, ViewContext},
-    Cell, DecMode, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
+    Cell, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
     TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 
@@ -55,30 +55,12 @@ fn main() -> Result<(), Error> {
     let mut term = SystemTerminal::new()?;
 
     // enable mouse
-    term.execute(TerminalCommand::DecModeSet {
-        enable: true,
-        mode: DecMode::MouseReport,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: true,
-        mode: DecMode::MouseMotions,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: true,
-        mode: DecMode::MouseSGR,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: true,
-        mode: DecMode::AltScreen,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::AutoWrap,
-    })?;
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::VisibleCursor,
-    })?;
+    term.execute_many(TerminalCommand::mouse_events_set(true, true))?;
+    term.execute_many([
+        TerminalCommand::altscreen_set(true),
+        TerminalCommand::auto_wrap_set(false),
+        TerminalCommand::visible_cursor_set(false),
+    ])?;
     term.duplicate_output("/tmp/mouse-example.txt")?;
 
     let q = TerminalEvent::Key("q".parse()?);
@@ -162,10 +144,7 @@ fn main() -> Result<(), Error> {
     })?;
 
     // switch off alt screen
-    term.execute(TerminalCommand::DecModeSet {
-        enable: false,
-        mode: DecMode::AltScreen,
-    })?;
+    term.execute(TerminalCommand::altscreen_set(false))?;
     term.poll(Some(std::time::Duration::new(0, 0)))?;
 
     Ok(())

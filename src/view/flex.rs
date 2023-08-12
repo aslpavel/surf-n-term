@@ -264,7 +264,7 @@ mod tests {
         let flex = Flex::row()
             .add_child_ext(
                 Text::from("some text")
-                    .mark("bg=#458588".parse()?, ..)
+                    .mark("fg=#ebdbb2,bg=#458588".parse()?, ..)
                     .take(),
                 Some(2.0),
                 Some("bg=#83a598".parse()?),
@@ -272,7 +272,7 @@ mod tests {
             )
             .add_child_ext(
                 Text::from("other text")
-                    .mark("bg=#b16286".parse()?, ..)
+                    .mark("fg=#ebdbb2,bg=#b16286".parse()?, ..)
                     .take(),
                 Some(1.0),
                 Some("bg=#d3869b".parse()?),

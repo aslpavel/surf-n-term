@@ -6,8 +6,9 @@ use crate::{
     view::{BoxConstraint, IntoView, View, ViewContext},
     Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
     SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps, TerminalCommand,
-    TerminalEvent, TerminalSize, TerminalWaker, RGBA,
+    TerminalEvent, TerminalSize, TerminalWaker,
 };
+use rasterize::RGBA;
 use std::{
     cmp::{max, min},
     collections::HashMap,
@@ -175,23 +176,21 @@ pub type TerminalSurface<'a> = SurfaceMutView<'a, Cell>;
 
 /// Terminal renderer
 ///
-/// This object keeps two surfaces (front and back) and on each call to frame
-/// generates necessary terminal commands to reconcile them.
+/// This object keeps two surfaces front (new) and back (old) and on each call
+/// to frame function it generates necessary terminal commands to reconcile them.
 pub struct TerminalRenderer {
-    /// Current face
-    face: Face,
-    /// Current cursor position
-    cursor: Position,
+    /// Current terminal size (not changes for the lifetime of the object)
+    size: TerminalSize,
     /// Front surface (new)
     front: SurfaceOwned<Cell>,
     /// Back surface (old)
     back: SurfaceOwned<Cell>,
+
     /// Marked cell that are treaded specially during diffing
     marks: SurfaceOwned<CellMark>,
     /// Images to be rendered (frame function local kept here to avoid allocation)
     images: Vec<(Position, Face, Image)>,
-    /// Current terminal size
-    size: TerminalSize,
+
     /// Cache of rendered glyphs
     glyph_cache: HashMap<Cell, Image>,
     /// Frame counter
@@ -202,21 +201,17 @@ impl TerminalRenderer {
     /// Create new terminal renderer
     pub fn new<T: Terminal + ?Sized>(term: &mut T, clear: bool) -> Result<Self, Error> {
         let size = term.size()?;
-        term.execute(TerminalCommand::Face(Default::default()))?;
-        term.execute(TerminalCommand::CursorTo(Position::origin()))?;
         let mark = if clear {
             CellMark::Damaged
         } else {
             CellMark::Empty
         };
         Ok(Self {
-            face: Default::default(),
-            cursor: Position::origin(),
+            size,
             front: SurfaceOwned::new(size.cells.height, size.cells.width),
             back: SurfaceOwned::new(size.cells.height, size.cells.width),
             marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| mark),
             images: Vec::new(),
-            size,
             glyph_cache: HashMap::new(),
             frame_count: 0,
         })
@@ -231,8 +226,6 @@ impl TerminalRenderer {
             }
         }
 
-        self.face = Face::default().with_fg(Some(RGBA::new(254, 0, 253, 252)));
-        self.cursor = Position::new(123_456, 654_123); // force cursor update
         self.marks.fill(CellMark::Damaged);
         self.front.fill(Cell::default());
         self.back.fill(Cell::default());
@@ -240,15 +233,15 @@ impl TerminalRenderer {
         Ok(())
     }
 
-    /// View associated with the current frame
-    pub fn view(&mut self) -> TerminalSurface<'_> {
+    /// Terminal surface for the new frame
+    pub fn surface(&mut self) -> TerminalSurface<'_> {
         self.front.as_mut()
     }
 
     /// Generate frame, that is issue terminal command to reconcile
     /// back (old) and front (new) buffers.
     #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
-    pub fn frame_v2<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+    pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // First pass
         //
         // - Replace glyphs with images in the front buffer
@@ -268,7 +261,8 @@ impl TerminalRenderer {
                 new.kind = CellKind::Image(image);
             }
 
-            // skip cells that have not changed
+            // skip cells that have not changed, go over ignored items too as they
+            // might remove old images.
             if old == new && self.marks.get(pos.row, pos.col) != Some(&CellMark::Damaged) {
                 continue;
             }
@@ -285,19 +279,24 @@ impl TerminalRenderer {
                     .fill(CellMark::Damaged);
             }
 
-            // record image to be rendered
+            // record image to be rendered, and mark area under the image to be ignored
             if let CellKind::Image(image) = &new.kind {
                 self.images.push((pos, new.face, image.clone()));
+                let size = image.size_cells(self.size.pixels_per_cell());
+                self.marks
+                    .view_mut(
+                        pos.row..pos.row + size.height,
+                        pos.col..pos.col + size.width,
+                    )
+                    .fill(CellMark::Ignored);
             }
         }
 
         // Second pass
         //
         // Render or characters
-        let mut face = Face::default();
-        term.execute(TerminalCommand::Face(face))?;
-        let mut cursor = Position::origin();
-        term.execute(TerminalCommand::CursorTo(cursor))?;
+        let mut face = Face::default().with_bg(Some(RGBA::new(1, 2, 3, 255)));
+        let mut cursor = Position::new(123_456, 654_123);
 
         let mut pos = Position::origin();
         while pos.row < self.front.height() {
@@ -324,13 +323,13 @@ impl TerminalRenderer {
                 }
 
                 // update face and cursor
-                if cursor != pos {
-                    cursor = pos;
-                    term.execute(TerminalCommand::CursorTo(cursor))?;
-                }
                 if face != new.face {
                     face = new.face;
                     term.execute(TerminalCommand::Face(face))?;
+                }
+                if cursor != pos {
+                    cursor = pos;
+                    term.execute(TerminalCommand::CursorTo(cursor))?;
                 }
 
                 if matches!(character, ' ') {
@@ -362,12 +361,12 @@ impl TerminalRenderer {
                     pos.col += character_width;
                 }
             }
+            pos.col = 0;
             pos.row += 1;
         }
 
         // Render images
         for (pos, face, image) in self.images.drain(..) {
-            term.execute(TerminalCommand::CursorTo(pos))?;
             // Erase area under image, which makes sure are under image
             // has the same face as image cells.
             term.execute(TerminalCommand::Face(face))?;
@@ -384,198 +383,11 @@ impl TerminalRenderer {
 
         // Flip and clear buffers
         self.frame_count += 1;
-        self.marks.fill(CellMark::Empty);
+        std::mem::swap(&mut self.front, &mut self.back);
+        self.front.clear();
         self.images.clear();
-        std::mem::swap(&mut self.front, &mut self.back);
-        self.front.clear();
-
-        Ok(())
-    }
-
-    /// Render the current frame
-    #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
-    pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
-        // replace all glyphs with rendered images
-        self.glyphs_reasterize(term.size()?);
-
-        // Erase changed images
-        //
-        // - Images can overlap and newly rendered image might be erased by erase
-        //   command addressed to images of the previous frame. That is why we
-        //   are erasing all changed images of the previous frame before rendering
-        //   new images.
-        // - Mark erased areas as damaged, as they will need to be redrawn
-        for ((pos, old), new) in self.back.iter().with_position().zip(self.front.iter()) {
-            if old == new {
-                continue;
-            }
-            let CellKind::Image(image) = &old.kind else { continue };
-            term.execute(TerminalCommand::ImageErase(image.clone(), Some(pos)))?;
-            let size = image.size_cells(self.size.pixels_per_cell());
-            self.marks
-                .view_mut(
-                    pos.row..pos.row + size.height,
-                    pos.col..pos.col + size.width,
-                )
-                .fill_with(|row, col, _| {
-                    if row != 0 || col != 0 {
-                        CellMark::Damaged
-                    } else {
-                        CellMark::Empty
-                    }
-                });
-        }
-
-        // Ignores cell covered by new images
-        //
-        // We need to ignore cells covered by images but not containing image itself
-        // otherwise they might show up in the diff and overwrite part of the image
-        // (in case of sixel)
-        for (pos, cell) in self.front.iter().with_position() {
-            if let CellKind::Image(image) = &cell.kind {
-                let size = image.size_cells(self.size.pixels_per_cell());
-                self.marks
-                    .view_mut(
-                        pos.row..pos.row + size.height,
-                        pos.col..pos.col + size.width,
-                    )
-                    .fill_with(|row, col, _| {
-                        if row != 0 || col != 0 {
-                            CellMark::Ignored
-                        } else {
-                            CellMark::Empty
-                        }
-                    });
-            }
-        }
-
-        for row in 0..self.back.height() {
-            let mut col = 0;
-            while col < self.back.width() {
-                let (front, back) = match (self.front.get(row, col), self.back.get(row, col)) {
-                    (Some(front), Some(back)) => (front, back),
-                    _ => break,
-                };
-                let mark = self.marks.get(row, col).copied().unwrap_or(CellMark::Empty);
-                if mark != CellMark::Damaged && (mark == CellMark::Ignored || front == back) {
-                    col += 1;
-                    continue;
-                }
-
-                // update face
-                if front.face != self.face {
-                    term.execute(TerminalCommand::Face(front.face))?;
-                    self.face = front.face;
-                }
-
-                match front.kind.clone() {
-                    CellKind::Image(image) => {
-                        // erase area under image, needed for images with transparency
-                        let size = image.size_cells(self.size.pixels_per_cell());
-                        let pos = Position::new(row, col);
-                        self.term_set_cursor(term.dyn_ref(), pos)?;
-                        for row in 0..size.height {
-                            self.term_set_cursor(
-                                term.dyn_ref(),
-                                Position {
-                                    row: pos.row + row,
-                                    ..pos
-                                },
-                            )?;
-                            self.term_erase(term.dyn_ref(), size.width)?;
-                        }
-
-                        // issue render command
-                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        term.execute(TerminalCommand::Image(image, Position::new(row, col)))?;
-
-                        // set position large enough so it would trigger position update
-                        self.cursor = Position::new(1_000_000, 1_000_000);
-
-                        col += 1;
-                    }
-                    CellKind::Char(chr) => {
-                        self.term_set_cursor(term.dyn_ref(), Position::new(row, col))?;
-                        if chr == ' ' {
-                            let repeats = self.find_repeats(row, col);
-                            col += repeats;
-                            self.term_erase(term.dyn_ref(), repeats)?;
-                        } else {
-                            term.execute(TerminalCommand::Char(chr))?;
-                            self.cursor.col += 1;
-                            col += 1;
-                        }
-                    }
-                    _ => col += 1,
-                }
-            }
-        }
-        // swap buffers
-        self.frame_count += 1;
         self.marks.fill(CellMark::Empty);
-        std::mem::swap(&mut self.front, &mut self.back);
-        self.front.clear();
-        Ok(())
-    }
 
-    /// Rasterize all glyphs in the front surface
-    ///
-    /// All glyphs are replaced with rasterized image
-    fn glyphs_reasterize(&mut self, term_size: TerminalSize) {
-        for cell in self.front.iter_mut() {
-            if let CellKind::Glyph(glyph) = &cell.kind {
-                let image = match self.glyph_cache.get(cell) {
-                    Some(image) => image.clone(),
-                    None => {
-                        let image = glyph.rasterize(cell.face, term_size);
-                        self.glyph_cache.insert(cell.clone(), image.clone());
-                        image
-                    }
-                };
-                cell.kind = CellKind::Image(image);
-            }
-        }
-    }
-
-    /// Find how many identical cells is located starting from provided coordinate
-    fn find_repeats(&self, row: usize, col: usize) -> usize {
-        let first = self.front.get(row, col);
-        if first.is_none() {
-            return 0;
-        }
-        let mut repeats = 1;
-        loop {
-            let src = self.front.get(row, col + repeats);
-            let dst = self.back.get(row, col + repeats);
-            if first == src && src != dst {
-                repeats += 1;
-            } else {
-                break;
-            }
-        }
-        repeats
-    }
-
-    fn term_set_cursor(&mut self, term: &mut dyn Terminal, pos: Position) -> Result<(), Error> {
-        if self.cursor != pos {
-            self.cursor = pos;
-            term.execute(TerminalCommand::CursorTo(self.cursor))?;
-        }
-        Ok(())
-    }
-
-    fn term_erase(&mut self, term: &mut dyn Terminal, count: usize) -> Result<(), Error> {
-        if count > 4 {
-            // NOTE:
-            //   - only use erase command when it is more efficient
-            //   - erase is not moving cursor
-            term.execute(TerminalCommand::EraseChars(count))?;
-        } else {
-            self.cursor.col += count;
-            for _ in 0..count {
-                term.execute(TerminalCommand::Char(' '))?;
-            }
-        }
         Ok(())
     }
 }
@@ -783,7 +595,8 @@ pub struct TerminalSurfaceDebug<'a> {
 }
 
 impl<'a> TerminalSurfaceDebug<'a> {
-    fn as_bytes(&self) -> Result<Vec<u8>, Error> {
+    /// Write rendered surface to the output
+    fn save<W: Write + Send>(&self, output: W) -> Result<W, Error> {
         // init capabilities
         let capabilities = TerminalCaps {
             depth: crate::encoder::ColorDepth::TrueColor,
@@ -810,78 +623,85 @@ impl<'a> TerminalSurfaceDebug<'a> {
             },
             encoder: TTYEncoder::new(capabilities.clone()),
             image_handler: KittyImageHandler::new().quiet(),
-            output: Vec::new(),
+            output,
             capabilities,
             face: Default::default(),
         };
 
-        // reserve space for the hight of the terminal
-        for _ in 0..size.height {
-            writeln!(term)?;
-        }
         // move to origin an save cursor position
-        term.execute(TerminalCommand::CursorMove {
-            row: -(size.height as i32),
-            col: 0,
-        })?;
-        term.execute(TerminalCommand::CursorSave)?;
+        let scroll = size.height as i32;
+        term.execute_many([
+            TerminalCommand::Scroll(scroll),
+            TerminalCommand::CursorMove {
+                row: -scroll,
+                col: 0,
+            },
+            TerminalCommand::CursorSave,
+        ])?;
 
         // create renderer
         let mut renderer = TerminalRenderer::new(&mut term, true)?;
-        let mut view = renderer.view();
+        let mut surf = renderer.surface();
 
         // draw frame an pattern
-        view.draw_box(Some("fg=#665c54".parse()?));
+        surf.draw_box(Some("fg=#665c54".parse()?));
         write!(
-            view.view_mut(0, 2..-1).writer(&ctx),
+            surf.view_mut(0, 2..-1).writer(&ctx),
             "{}x{}",
             size.height - 2,
             size.width - 2,
         )?;
 
         // render frame
-        view.view_mut(1..-1, 1..-1)
+        surf.view_mut(1..-1, 1..-1)
             .iter_mut()
             .zip(self.surf.iter())
             .for_each(|(dst, src)| *dst = src.clone());
         renderer.frame(&mut term)?;
-        write!(&mut term, "\x1b[m")?;
+
+        // move to the end
+        term.execute_many([
+            TerminalCommand::Face(Face::default()),
+            TerminalCommand::CursorRestore,
+            TerminalCommand::CursorMove {
+                row: size.height as i32,
+                col: 0,
+            },
+        ])?;
 
         Ok(term.output)
     }
 
     /// Write rendered surface to a file
-    pub fn dump(&self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
-        let mut file = BufWriter::new(std::fs::File::create(path)?);
-        file.write_all(self.as_bytes()?.as_slice())?;
-        writeln!(file)?;
+    pub fn save_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
+        let file = BufWriter::new(std::fs::File::create(path)?);
+        self.save(file)?;
         Ok(())
     }
 }
 
 impl<'a> Debug for TerminalSurfaceDebug<'a> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut cur = std::io::Cursor::new(self.as_bytes().map_err(|_| std::fmt::Error)?);
+        let mut cur = std::io::Cursor::new(self.save(Vec::new()).map_err(|_| std::fmt::Error)?);
         let mut decoder = crate::decoder::Utf8Decoder::new();
         writeln!(fmt)?;
         while let Some(chr) = decoder.decode(&mut cur).map_err(|_| std::fmt::Error)? {
             write!(fmt, "{}", chr)?;
         }
-        writeln!(fmt)?;
         Ok(())
     }
 }
 
-struct TerminalDebug {
+struct TerminalDebug<W> {
     size: TerminalSize,
     encoder: TTYEncoder,
     image_handler: KittyImageHandler,
     capabilities: TerminalCaps,
-    output: Vec<u8>,
+    output: W,
     face: Face,
 }
 
-impl Terminal for TerminalDebug {
+impl<W: Write + Send> Terminal for TerminalDebug<W> {
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         use TerminalCommand::*;
         match cmd {
@@ -942,7 +762,7 @@ impl Terminal for TerminalDebug {
     }
 }
 
-impl Write for TerminalDebug {
+impl<W: Write> Write for TerminalDebug<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.output.write(buf)
     }
@@ -1040,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render() -> Result<(), Error> {
+    fn test_render_commands() -> Result<(), Error> {
         use TerminalCommand::*;
 
         let purple = "bg=#d3869b".parse()?;
@@ -1050,20 +870,22 @@ mod tests {
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let ctx = ViewContext::new(&term)?;
 
-        let mut view = render.view().view_owned(.., 1..);
+        let mut view = render.surface().view_owned(.., 1..);
         let mut writer = view.writer(&ctx).with_face(purple);
         writer.set_cursor(Position::new(0, 4));
 
+        // write with offset
         assert_eq!(writer.cursor(), Position::new(0, 4));
         write!(writer, "TEST")?;
         assert_eq!(writer.cursor(), Position::new(1, 2));
-        print!("[render] writer with offset: {:?}", render.view().debug());
+        print!(
+            "[render] writer with offset: {:?}",
+            render.surface().debug()
+        );
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
             vec![
-                Face(Default::default()),
-                CursorTo(Position::new(0, 0)),
                 Face(purple),
                 CursorTo(Position::new(0, 5)),
                 Char('T'),
@@ -1075,12 +897,12 @@ mod tests {
         );
         term.clear();
 
+        // erase
         render
-            .view()
+            .surface()
             .view_owned(1..2, 1..-1)
             .fill(Cell::new_char(red, ' '));
-        print!("[render] erase: {:?}", render.view().debug());
-        // render.view().debug().dump("/tmp/frame.txt")?;
+        print!("[render] erase: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1098,6 +920,7 @@ mod tests {
         );
         term.clear();
 
+        // ascii image
         let mut image_surf = SurfaceOwned::new(3, 3);
         let purple_color = "#d3869b".parse()?;
         let green_color = "#b8bb26".parse()?;
@@ -1110,15 +933,16 @@ mod tests {
         });
         let image_ascii = crate::Image::new(image_surf).ascii_view();
         render
-            .view()
+            .surface()
             .view_mut(1.., 2..)
             .draw_view(&ctx, image_ascii)?;
-        print!("[render] ascii image: {:?}", render.view().debug());
+        print!("[render] ascii image: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
             vec![
                 Face(Default::default()),
+                CursorTo(Position { row: 1, col: 1 }),
                 Char(' '),
                 Face("fg=#d3869b, bg=#b8bb26".parse()?),
                 Char('▀'),
@@ -1127,6 +951,7 @@ mod tests {
                 Face("fg=#d3869b, bg=#b8bb26".parse()?),
                 Char('▀'),
                 Face(Default::default()),
+                Char(' '),
                 Char(' '),
                 Face("fg=#d3869b".parse()?),
                 CursorTo(Position { row: 2, col: 2 }),
@@ -1139,19 +964,18 @@ mod tests {
         );
         term.clear();
 
+        // new line
         let mut render = TerminalRenderer::new(&mut term, false)?;
-        let mut view = render.view().view_owned(.., 1..-1);
+        let mut view = render.surface().view_owned(.., 1..-1);
         let mut writer = view.writer(&ctx).with_face(purple);
         assert_eq!(writer.cursor(), Position::new(0, 0));
         write!(&mut writer, "one\ntwo")?;
         assert_eq!(writer.cursor(), Position::new(1, 3));
-        print!("[render] writer new line: {:?}", render.view().debug());
+        print!("[render] writer new line: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
             vec![
-                Face(Default::default()),
-                CursorTo(Position::new(0, 0)),
                 Face(purple),
                 CursorTo(Position::new(0, 1)),
                 Char('o'),
@@ -1165,20 +989,19 @@ mod tests {
         );
         term.clear();
 
+        // new line at the end of line
         let mut render = TerminalRenderer::new(&mut term, false)?;
-        let mut view = render.view().view_owned(.., 1..-1);
+        let mut view = render.surface().view_owned(.., 1..-1);
         let mut writer = view.writer(&ctx).with_face(purple);
         write!(&mut writer, "  one\ntwo")?;
         print!(
             "[render] writer new line at the end of line: {:?}",
-            render.view().debug()
+            render.surface().debug()
         );
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
             vec![
-                Face(Default::default()),
-                CursorTo(Position::new(0, 0)),
                 Face(purple),
                 CursorTo(Position::new(0, 1)),
                 Char(' '),
@@ -1190,6 +1013,40 @@ mod tests {
                 Char('t'),
                 Char('w'),
                 Char('o'),
+            ]
+        );
+        term.clear();
+
+        // double with characters
+        let gray = "bg=#504945".parse()?;
+        let mut render = TerminalRenderer::new(&mut term, false)?;
+        let mut view = render.surface().view_owned(.., 1..);
+        let mut writer = view.writer(&ctx).with_face(gray);
+        write!(&mut writer, "🤩 awesome 😻|")?;
+        print!(
+            "[render] double with characters: {:?}",
+            render.surface().debug()
+        );
+        render.frame(&mut term)?;
+        assert_eq!(
+            term.cmds,
+            vec![
+                Face(gray),
+                CursorTo(Position::new(0, 1)),
+                Char('🤩'),
+                Char(' '),
+                Char('a'),
+                Char('w'),
+                Char('e'),
+                CursorTo(Position::new(1, 1)),
+                Char('s'),
+                Char('o'),
+                Char('m'),
+                Char('e'),
+                Char(' '),
+                CursorTo(Position::new(2, 1)),
+                Char('😻'),
+                Char('|')
             ]
         );
         term.clear();
@@ -1208,15 +1065,16 @@ mod tests {
             "path": "M10,17L5,12L6.41,10.58L10,14.17L17.59,6.58L19,8M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"
         }
         "#;
-        let face = "bg=#504945,fg=#fb4935".parse()?;
+        let face = "bg=#665c54,fg=#b8bb26".parse()?;
         let icon = Cell::new_glyph(face, serde_json::from_str(ICON)?);
 
-        let mut term = DummyTerminal::new(10, 20);
+        let mut term = DummyTerminal::new(5, 10);
         let mut render = TerminalRenderer::new(&mut term, false)?;
         term.clear();
 
-        let mut view = render.view();
+        let mut view = render.surface();
         view.set(1, 2, icon.clone());
+        print!("[render] image: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         let img = render
             .glyph_cache
@@ -1237,8 +1095,9 @@ mod tests {
         );
         term.clear();
 
-        let mut view = render.view();
+        let mut view = render.surface();
         view.set(2, 3, icon.clone());
+        print!("[render] image move: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         assert_eq!(
             term.cmds,
@@ -1247,15 +1106,12 @@ mod tests {
                 ImageErase(img.clone(), Some(Position::new(1, 2))),
                 Face(crate::Face::default()),
                 CursorTo(Position::new(1, 2)),
-                Char(' '),
-                Char(' '),
-                Char(' '),
-                Char(' '),
-                Char(' '),
+                EraseChars(8),
                 CursorTo(Position::new(2, 2)),
                 Char(' '),
                 // draw new image
                 Face(face),
+                CursorTo(Position::new(2, 3)),
                 EraseChars(5),
                 CursorTo(Position::new(3, 3)),
                 EraseChars(5),
@@ -1382,12 +1238,12 @@ mod tests {
         let ctx = ViewContext::new(&term)?;
 
         {
-            let mut view = render.view().view_owned(1.., 0).transpose();
+            let mut view = render.surface().view_owned(1.., 0).transpose();
             let mut writer = view.writer(&ctx).with_face(guide_face);
             write!(writer, "012345678901234567890123456789")?;
         }
 
-        let mut view = render.view().view_owned(.., 1..);
+        let mut view = render.surface().view_owned(.., 1..);
         let mut writer = view.writer(&ctx).with_face(guide_face);
         write!(writer, "01234567890123456789\n")?;
         writer.set_face(Face::default());
@@ -1402,7 +1258,7 @@ mod tests {
             cols.push(writer.cursor().col);
             writer.put_char('\n', Face::default());
         }
-        print!("[render] tab writer: {:?}", render.view().debug());
+        print!("[render] tab writer: {:?}", render.surface().debug());
         for (line, col) in cols.into_iter().enumerate() {
             assert_eq!((col - 1) % 8, 0, "column {} % 8 != 0 at line {}", col, line);
         }

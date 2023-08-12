@@ -125,7 +125,7 @@ fn main() -> Result<(), Error> {
     // rendering
     let pos = term.position()?;
     let mut render = TerminalRenderer::new(&mut term, false)?;
-    let mut surf = render.view();
+    let mut surf = render.surface();
     {
         // render sub-surface
         let ctx = ViewContext::new(term.dyn_ref())?;
