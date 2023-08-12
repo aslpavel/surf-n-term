@@ -1,6 +1,7 @@
 use crate::{
-    Color, Error, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSize,
-    RGBA,
+    view::{BoxConstraint, Layout, Tree, View, ViewContext},
+    Cell, Color, Error, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned,
+    TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use rasterize::{
     ActiveEdgeRasterizer, Align, Image as _, Point, Rasterizer, Scalar, Scene, Transform,
@@ -9,6 +10,7 @@ pub use rasterize::{BBox, FillRule, Path};
 use serde::{de, Deserialize, Serialize};
 use std::{
     hash::{Hash, Hasher},
+    io::Write,
     str::FromStr,
     sync::Arc,
 };
@@ -161,6 +163,34 @@ impl Eq for Glyph {}
 impl Hash for Glyph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Arc::as_ptr(&self.inner).hash(state);
+    }
+}
+
+impl View for Glyph {
+    fn render<'a>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        let mut surf = layout.apply_to(surf);
+        if ctx.has_glyphs() {
+            if let Some(cell) = surf.get_mut(layout.pos().row, layout.pos().col) {
+                cell.overlay(Cell::new_glyph(Face::default(), self.clone()));
+            }
+        } else {
+            let mut writer = surf.writer(ctx);
+            write!(&mut writer, "{}", self.fallback_str())?;
+        }
+        Ok(())
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        if ctx.has_glyphs() {
+            Tree::leaf(Layout::new().with_size(ct.clamp(self.size())))
+        } else {
+            self.fallback_str().layout(ctx, ct)
+        }
     }
 }
 

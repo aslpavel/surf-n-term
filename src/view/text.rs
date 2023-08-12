@@ -1,7 +1,7 @@
 use super::{BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{
-    render::CellKind, surface::ViewBounds, Cell, Error, Face, Glyph, Position, Size,
-    TerminalSurface, TerminalSurfaceExt,
+    surface::ViewBounds, Cell, Error, Face, Glyph, Position, Size, TerminalSurface,
+    TerminalSurfaceExt,
 };
 use std::fmt::Write as _;
 
@@ -25,12 +25,7 @@ impl View for str {
         let mut cursor = Position::origin();
         let face = Face::default();
         self.chars().for_each(|c| {
-            Cell::new_char(face, c).layout(
-                ct.max.width,
-                ctx.pixels_per_cell,
-                &mut size,
-                &mut cursor,
-            );
+            Cell::new_char(face, c).layout(ctx, ct.max.width, &mut size, &mut cursor);
         });
         Tree::leaf(Layout::new().with_size(ct.clamp(size)))
     }
@@ -193,22 +188,9 @@ impl View for Text {
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         let mut writer = surf.writer(ctx);
-        if ctx.has_glyphs {
-            self.cells.iter().for_each(|cell| {
-                writer.put(cell.clone());
-            });
-        } else {
-            self.cells.iter().for_each(|cell| {
-                if let CellKind::Glyph(glyph) = cell.kind() {
-                    let face = cell.face();
-                    glyph.fallback_str().chars().for_each(|c| {
-                        writer.put_char(c, face);
-                    });
-                } else {
-                    writer.put(cell.clone());
-                }
-            });
-        }
+        self.cells.iter().for_each(|cell| {
+            writer.put(cell.clone());
+        });
         Ok(())
     }
 
@@ -216,7 +198,7 @@ impl View for Text {
         let mut size = Size::empty();
         let mut cursor = Position::origin();
         self.cells.iter().for_each(|cell| {
-            cell.layout(ct.max.width, ctx.pixels_per_cell, &mut size, &mut cursor);
+            cell.layout(ctx, ct.max.width, &mut size, &mut cursor);
         });
         Tree::leaf(Layout::new().with_size(ct.clamp(size)))
     }

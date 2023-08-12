@@ -170,9 +170,9 @@ impl<V: View> IntoView for V {
 
 #[derive(Debug, Clone)]
 pub struct ViewContext {
-    pixels_per_cell: Size,
-    has_glyphs: bool,
-    color_depth: ColorDepth,
+    pub(crate) pixels_per_cell: Size,
+    pub(crate) has_glyphs: bool,
+    pub(crate) color_depth: ColorDepth,
 }
 
 impl ViewContext {
