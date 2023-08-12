@@ -6,7 +6,7 @@ use crate::{
     Face, FaceAttrs, Key, KeyMod, KeyName, Position, TerminalCommand, RGBA,
 };
 use lazy_static::lazy_static;
-use std::{collections::BTreeMap, convert::TryInto, fmt, io::BufRead};
+use std::{collections::BTreeMap, fmt, io::BufRead};
 
 /// Decoder interface
 pub trait Decoder {
@@ -980,10 +980,20 @@ fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
         }
         2 => {
             // true color
-            let r = number_decode(cmds.next()?)?.try_into().ok()?;
-            let g = number_decode(cmds.next()?)?.try_into().ok()?;
-            let b = number_decode(cmds.next()?)?.try_into().ok()?;
-            Some(RGBA::new(r, g, b, 255))
+            //
+            // It can container either three or four components
+            // in the case of four first component is ignored
+            match [
+                cmds.next().and_then(number_decode),
+                cmds.next().and_then(number_decode),
+                cmds.next().and_then(number_decode),
+                cmds.next().and_then(number_decode),
+            ] {
+                [Some(r), Some(g), Some(b), None] | [_, Some(r), Some(g), Some(b)] => {
+                    Some(RGBA::new(r as u8, g as u8, b as u8, 255))
+                }
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -1499,12 +1509,21 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         let mut decoder = TTYDecoder::new();
 
-        write!(cursor.get_mut(), "\x1bP1$r48:2:1:2:3m\x1b\\")?;
+        write!(
+            cursor.get_mut(),
+            "\x1bP1$r48:2:1:2:3m\x1b\\\x1bP1$r0;48:2::6:5:4m\x1b\\"
+        )?;
 
         let mut result = Vec::new();
         decoder.decode_into(&mut cursor, &mut result)?;
 
-        assert_eq!(result, vec![TerminalEvent::FaceGet("bg=#010203".parse()?)],);
+        assert_eq!(
+            result,
+            vec![
+                TerminalEvent::FaceGet("bg=#010203".parse()?),
+                TerminalEvent::FaceGet("bg=#060504".parse()?)
+            ],
+        );
 
         Ok(())
     }

@@ -279,7 +279,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // detect true color support https://github.com/termstandard/colors
     let face_expected = "bg=#010203".parse()?;
     write!(term, "\x1b[00;48;2;1;2;3m")?; // change background
-    write!(term, "\x1bP$qm\x1b\\")?; // DECRQSS with `m` descriptor
+    write!(term, "\x1bP$qm\x1b\\")?; // FaceGet (DECRQSS with `m` descriptor)
     write!(term, "\x1b[00m")?; // reset current face
 
     // Detect terminal size
