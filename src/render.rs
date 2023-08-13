@@ -555,6 +555,7 @@ impl<'a> TerminalWriter<'a> {
     /// Put cell
     pub fn put(&mut self, cell: Cell) -> bool {
         if !self.ctx.has_glyphs() {
+            // glyph string fallback
             if let CellKind::Glyph(glyph) = &cell.kind {
                 return glyph
                     .fallback_str()
@@ -563,20 +564,44 @@ impl<'a> TerminalWriter<'a> {
             }
         }
 
-        let face = self.face.overlay(&cell.face);
-        let cell = cell.with_face(face);
+        // layout cell
+        let cursor_start = self.cursor;
         let pos = cell.layout(
             &self.ctx,
             self.size().width,
             &mut self.size,
             &mut self.cursor,
         );
-        let Some(pos) = pos else { return true };
-        if let Some(cell_ref) = self.surf.get_mut(pos.row, pos.col) {
-            cell_ref.overlay(cell);
-            true
+
+        let face = self.face.overlay(&cell.face);
+        if let Some(pos) = pos {
+            // normal cell
+            if let Some(cell_ref) = self.surf.get_mut(pos.row, pos.col) {
+                cell_ref.overlay(cell.with_face(face));
+                true
+            } else {
+                false
+            }
         } else {
-            false
+            if cursor_start != self.cursor {
+                // cursor advanced: '\t', '\n'
+                let shape = self.surf.shape();
+                let data = self.surf.data_mut();
+
+                let start = shape.offset(cursor_start.row, cursor_start.col);
+                let end = shape.offset(self.cursor.row, self.cursor.col);
+
+                let blank = Cell::new_char(face, ' ');
+                for row in cursor_start.row..=self.cursor.row {
+                    for col in 0..shape.width {
+                        let offset = shape.offset(row, col);
+                        if (start..end).contains(&offset) {
+                            data[offset].overlay(blank.clone());
+                        }
+                    }
+                }
+            }
+            true
         }
     }
 
@@ -665,7 +690,7 @@ impl<'a> TerminalSurfaceDebug<'a> {
         let mut renderer = TerminalRenderer::new(&mut term, true)?;
         let mut surf = renderer.surface();
 
-        // draw frame an pattern
+        // draw frame
         surf.draw_box(Some("fg=#665c54".parse()?));
         write!(
             surf.view_mut(0, 2..-1).writer(&ctx),
@@ -1004,6 +1029,8 @@ mod tests {
                 Char('o'),
                 Char('n'),
                 Char('e'),
+                Char(' '),
+                Char(' '),
                 CursorTo(Position::new(1, 1)),
                 Char('t'),
                 Char('w'),

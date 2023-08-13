@@ -389,6 +389,8 @@ pub enum DecMode {
     VisibleCursor = 25,
     /// Wrapping of the text when it reaches end of the line
     AutoWrap = 7,
+    /// Sixel scrolling
+    SixelScrolling = 80,
     /// Enable/Disable mouse reporting
     MouseReport = 1000,
     /// Report mouse motion events if `MouseReport` is enabled
@@ -429,6 +431,7 @@ impl DecMode {
         for mode in [
             VisibleCursor,
             AutoWrap,
+            SixelScrolling,
             MouseReport,
             MouseMotions,
             MouseSGR,
