@@ -593,7 +593,7 @@ impl<'a> TerminalWriter<'a> {
                 let end = shape.offset(self.cursor);
 
                 let blank = Cell::new_char(face, ' ');
-                for row in cursor_start.row..=self.cursor.row {
+                for row in cursor_start.row..min(self.cursor.row + 1, shape.height) {
                     for col in 0..shape.width {
                         let offset = shape.offset(Position::new(row, col));
                         if (start..end).contains(&offset) {
