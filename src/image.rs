@@ -70,7 +70,7 @@ impl Image {
     ) -> Option<(ColorPalette, SurfaceOwned<usize>)> {
         let bg = bg.unwrap_or_else(|| RGBA::new(0, 0, 0, 255));
         let palette = ColorPalette::from_image(self, palette_size, bg)?;
-        let mut qimg = SurfaceOwned::new(self.height(), self.width());
+        let mut qimg = SurfaceOwned::new(self.size());
 
         // quantize and dither
         let mut errors: Vec<ColorError> = Vec::new();
@@ -88,7 +88,8 @@ impl Image {
             }
             // quantize and spread the error
             for col in 0..self.width() {
-                let mut color = *self.get(row, col)?;
+                let pos = Position::new(row, col);
+                let mut color = *self.get(pos)?;
                 if color.to_rgba()[3] < 255 {
                     color = bg.blend_over(color);
                 }
@@ -96,7 +97,7 @@ impl Image {
                     color = errors[col + 1].add(color); // account for error
                 }
                 let (qindex, qcolor) = palette.find(color);
-                qimg.set(row, col, qindex);
+                qimg.set(pos, qindex);
                 if dither {
                     // spread the error according to Floyd–Steinberg dithering matrix:
                     // [[0   , X   , 7/16],
@@ -193,7 +194,7 @@ impl View for Image {
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        if let Some(cell) = surf.get_mut(layout.pos().row, layout.pos().col) {
+        if let Some(cell) = surf.get_mut(layout.pos()) {
             *cell = Cell::new_image(self.clone()).with_face(cell.face());
         }
         Ok(())
@@ -218,9 +219,12 @@ impl View for ImageAsciiView {
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        surf.fill_with(|row, col, _| {
-            let fg = self.image.get(row * 2, col).copied();
-            let bg = self.image.get(row * 2 + 1, col).copied();
+        surf.fill_with(|pos, _| {
+            let fg = self.image.get(Position::new(pos.row * 2, pos.col)).copied();
+            let bg = self
+                .image
+                .get(Position::new(pos.row * 2 + 1, pos.col))
+                .copied();
             let face = Face::new(fg, bg, FaceAttrs::EMPTY);
             Cell::new_char(face, '\u{2580}')
         });
@@ -656,7 +660,7 @@ impl ImageHandler for SixelImageHandler {
         let height = (img.height() / 6) * 6;
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
         // quantization, it will produce smaller or/and better palette for this color depth
-        let dimg = Image::new(img.view(..height, ..).map(|_, _, color| {
+        let dimg = Image::new(img.view(..height, ..).map(|_, color| {
             let [red, green, blue, alpha] = color.to_rgba();
             let red = ((red as f32 / 2.55).round() * 2.55) as u8;
             let green = ((green as f32 / 2.55).round() * 2.55) as u8;
@@ -691,7 +695,7 @@ impl ImageHandler for SixelImageHandler {
                 // extract sixel
                 let mut sixel = [0usize; 6];
                 for (i, s) in sixel.iter_mut().enumerate() {
-                    if let Some(index) = qimg.get(row + i, col) {
+                    if let Some(index) = qimg.get(Position::new(row + i, col)) {
                         *s = *index;
                     }
                 }

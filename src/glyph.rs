@@ -1,6 +1,6 @@
 use crate::{
     view::{BoxConstraint, Layout, Tree, View, ViewContext},
-    Cell, Color, Error, Face, Image, LinColor, Size, Surface, SurfaceMut, SurfaceOwned,
+    Cell, Color, Error, Face, Image, LinColor, Position, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use rasterize::{
@@ -93,13 +93,20 @@ impl Glyph {
 
         let _ = debug_span!("glyph rasterize", path=?self, ?face, ?size).enter();
         let rasterizer = ActiveEdgeRasterizer::default();
-        let mut surf = SurfaceOwned::new_with(size.height, size.width, |_, _| bg_rgba);
+        let mut surf = SurfaceOwned::new_with(
+            Size {
+                height: size.height,
+                width: size.width,
+            },
+            |_| bg_rgba,
+        );
         let shape = surf.shape();
         let data = surf.data_mut();
         match &self.inner.scene {
             GlyphScene::Symbol { path, fill_rule } => {
                 for pixel in rasterizer.mask_iter(path, tr, size, *fill_rule) {
-                    data[shape.offset(pixel.y, pixel.x)] = bg.lerp(fg, pixel.alpha as f32).into();
+                    let pos = Position::new(pixel.y, pixel.x);
+                    data[shape.offset(pos)] = bg.lerp(fg, pixel.alpha as f32).into();
                 }
             }
             GlyphScene::Scene(scene) => {
@@ -116,8 +123,9 @@ impl Glyph {
                 let image_shape = image.shape();
                 for row in 0..image.height() {
                     for col in 0..image.width() {
-                        let pixel = image_data[image_shape.offset(row, col)];
-                        data[shape.offset(row, col)] = bg.lerp(pixel, pixel.alpha()).into();
+                        let pos = Position::new(row, col);
+                        let pixel = image_data[image_shape.offset(pos.row, pos.col)];
+                        data[shape.offset(pos)] = bg.lerp(pixel, pixel.alpha()).into();
                     }
                 }
             }
@@ -175,7 +183,7 @@ impl View for Glyph {
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         if ctx.has_glyphs() {
-            if let Some(cell) = surf.get_mut(layout.pos().row, layout.pos().col) {
+            if let Some(cell) = surf.get_mut(layout.pos()) {
                 cell.overlay(Cell::new_glyph(Face::default(), self.clone()));
             }
         } else {

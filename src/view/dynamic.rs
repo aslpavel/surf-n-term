@@ -48,7 +48,7 @@ mod tests {
     use super::*;
     use crate::{
         view::{tests::render, Align, Container},
-        Size, Surface, RGBA,
+        Position, Size, Surface, RGBA,
     };
 
     #[test]
@@ -70,12 +70,12 @@ mod tests {
         let green_size = Size::new(4, 10);
         println!("{:?}", view.debug(green_size));
         let surf = render(ctx, view, green_size)?;
-        assert_eq!(surf.get(0, 0).unwrap().face().bg, Some(green));
+        assert_eq!(surf.get(Position::origin()).unwrap().face().bg, Some(green));
 
         let red_size = Size::new(6, 10);
         println!("{:?}", view.debug(red_size));
         let surf = render(ctx, view, red_size)?;
-        assert_eq!(surf.get(0, 0).unwrap().face().bg, Some(red));
+        assert_eq!(surf.get(Position::origin()).unwrap().face().bg, Some(red));
 
         Ok(())
     }

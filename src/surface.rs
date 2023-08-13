@@ -33,26 +33,35 @@ pub struct Shape {
 impl Shape {
     /// Convert row and col to offset.
     #[inline]
-    pub fn offset(&self, row: usize, col: usize) -> usize {
-        self.start + row * self.row_stride + col * self.col_stride
+    pub fn offset(&self, pos: Position) -> usize {
+        self.start + pos.row * self.row_stride + pos.col * self.col_stride
     }
 
     /// Get current index of the in row-major order corresponding
     /// to provided row and column.
     #[inline]
-    pub fn index(&self, row: usize, col: usize) -> usize {
-        row * self.width + col
+    pub fn index(&self, pos: Position) -> usize {
+        pos.row * self.width + pos.col
     }
 
     /// Get row and column corresponding to nth element in row-major order
     #[inline]
-    pub fn nth(&self, n: usize) -> Option<(usize, usize)> {
+    pub fn nth(&self, n: usize) -> Option<Position> {
         if self.width == 0 {
             return None;
         }
         let row = n / self.width;
         let col = n - row * self.width;
-        (row < self.height).then_some((row, col))
+        (row < self.height).then_some(Position { row, col })
+    }
+
+    /// Get surface size
+    #[inline]
+    pub fn size(&self) -> Size {
+        Size {
+            width: self.width,
+            height: self.height,
+        }
     }
 }
 
@@ -87,10 +96,7 @@ pub trait Surface {
 
     /// Size of the surface
     fn size(&self) -> Size {
-        Size {
-            width: self.width(),
-            height: self.height(),
-        }
+        self.shape().size()
     }
 
     fn hash(&self) -> u64
@@ -107,13 +113,12 @@ pub trait Surface {
     }
 
     /// Get immutable reference to the element specified by row and column
-    fn get(&self, row: usize, col: usize) -> Option<&Self::Item> {
+    fn get(&self, pos: Position) -> Option<&Self::Item> {
         let shape = self.shape();
-        if row >= shape.height || col >= shape.width {
+        if pos.row >= shape.height || pos.col >= shape.width {
             None
         } else {
-            let data = self.data();
-            data.get(shape.offset(row, col))
+            self.data().get(shape.offset(pos))
         }
     }
 
@@ -178,14 +183,12 @@ pub trait Surface {
     // Create new owned surface (allocates) by mapping all elements with the function.
     fn map<F, T>(&self, mut f: F) -> SurfaceOwned<T>
     where
-        F: FnMut(usize, usize, &Self::Item) -> T,
+        F: FnMut(Position, &Self::Item) -> T,
         Self: Sized,
     {
         let shape = self.shape();
         let data = self.data();
-        SurfaceOwned::new_with(shape.height, shape.width, |row, col| {
-            f(row, col, &data[shape.offset(row, col)])
-        })
+        SurfaceOwned::new_with(shape.size(), |pos| f(pos, &data[shape.offset(pos)]))
     }
 
     /// Create owned copy of the surface
@@ -195,9 +198,7 @@ pub trait Surface {
     {
         let shape = self.shape();
         let data = self.data();
-        SurfaceOwned::new_with(shape.height, shape.width, |row, col| {
-            data[shape.offset(row, col)].clone()
-        })
+        SurfaceOwned::new_with(shape.size(), |pos| data[shape.offset(pos)].clone())
     }
 }
 
@@ -207,32 +208,31 @@ pub trait SurfaceMut: Surface {
     fn data_mut(&mut self) -> &mut [Self::Item];
 
     /// Get mutable reference to the element specified by row and column
-    fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut Self::Item> {
+    fn get_mut(&mut self, pos: Position) -> Option<&mut Self::Item> {
         let shape = self.shape();
-        if row >= shape.height || col >= shape.width {
+        if pos.row >= shape.height || pos.col >= shape.width {
             None
         } else {
-            let data = self.data_mut();
-            data.get_mut(shape.offset(row, col))
+            self.data_mut().get_mut(shape.offset(pos))
         }
     }
 
     /// Set value at row and column
-    fn set(&mut self, row: usize, col: usize, item: Self::Item) -> Self::Item {
+    fn set(&mut self, pos: Position, item: Self::Item) -> Self::Item {
         let shape = self.shape();
         debug_assert!(
-            row < shape.height,
+            pos.row < shape.height,
             "row {} is out of bound (height {})",
-            row,
+            pos.row,
             shape.height
         );
         debug_assert!(
-            col < shape.width,
+            pos.col < shape.width,
             "column {} is out of bound (width {})",
-            col,
+            pos.col,
             shape.width
         );
-        std::mem::replace(&mut self.data_mut()[shape.offset(row, col)], item)
+        std::mem::replace(&mut self.data_mut()[shape.offset(pos)], item)
     }
 
     /// Iterator over mutable references to the items of the view in the row-major order
@@ -273,7 +273,7 @@ pub trait SurfaceMut: Surface {
         let data = self.data_mut();
         for row in 0..shape.height {
             for col in 0..shape.width {
-                data[shape.offset(row, col)] = item.clone();
+                data[shape.offset(Position::new(row, col))] = item.clone();
             }
         }
     }
@@ -283,7 +283,7 @@ pub trait SurfaceMut: Surface {
     /// Function is called it row, column and the current item value as its arguments.
     fn fill_with<F>(&mut self, mut fill: F)
     where
-        F: FnMut(usize, usize, Self::Item) -> Self::Item,
+        F: FnMut(Position, Self::Item) -> Self::Item,
         Self::Item: Default,
         Self: Sized,
     {
@@ -292,9 +292,10 @@ pub trait SurfaceMut: Surface {
         let mut tmp = Self::Item::default();
         for row in 0..shape.height {
             for col in 0..shape.width {
-                let offset = shape.offset(row, col);
+                let pos = Position::new(row, col);
+                let offset = shape.offset(pos);
                 let item = std::mem::replace(&mut data[offset], tmp);
-                tmp = std::mem::replace(&mut data[offset], fill(row, col, item));
+                tmp = std::mem::replace(&mut data[offset], fill(pos, item));
             }
         }
     }
@@ -308,18 +309,18 @@ pub trait SurfaceMut: Surface {
         let data = self.data_mut();
         for row in 0..shape.height {
             for col in 0..shape.width {
-                data[shape.offset(row, col)] = Default::default();
+                data[shape.offset(Position::new(row, col))] = Default::default();
             }
         }
     }
 
     /// Insert items starting with the specified row and column.
-    fn insert<IS>(&mut self, row: usize, col: usize, items: IS)
+    fn insert<IS>(&mut self, pos: Position, items: IS)
     where
         IS: IntoIterator<Item = Self::Item>,
         Self: Sized,
     {
-        let index = row * self.width() + col;
+        let index = pos.row * self.width() + pos.col;
         let mut iter = self.iter_mut();
         if index > 0 {
             iter.nth(index - 1);
@@ -340,8 +341,9 @@ pub struct SurfaceIter<'a, T> {
 impl<'a, T> SurfaceIter<'a, T> {
     /// Position of the element that will be yielded next
     pub fn position(&self) -> Position {
-        let (row, col) = self.shape.nth(self.index).unwrap_or((self.shape.height, 0));
-        Position { row, col }
+        self.shape
+            .nth(self.index)
+            .unwrap_or_else(|| Position::new(self.shape.height, 0))
     }
 
     /// Augment iterator with position
@@ -369,8 +371,8 @@ impl<'a, T: 'a> Iterator for SurfaceIter<'a, T> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.index += n + 1;
-        let (row, col) = self.shape.nth(self.index - 1)?;
-        self.data.get(self.shape.offset(row, col))
+        let pos = self.shape.nth(self.index - 1)?;
+        self.data.get(self.shape.offset(pos))
     }
 }
 
@@ -397,8 +399,9 @@ pub struct SurfaceMutIter<'a, T> {
 impl<'a, T> SurfaceMutIter<'a, T> {
     /// Position of the element that will be yielded next
     pub fn position(&self) -> Position {
-        let (row, col) = self.shape.nth(self.index).unwrap_or((self.shape.height, 0));
-        Position { row, col }
+        self.shape
+            .nth(self.index)
+            .unwrap_or_else(|| Position::new(self.shape.height, 0))
     }
 
     /// Augment iterator with position
@@ -425,8 +428,8 @@ impl<'a, T: 'a> Iterator for SurfaceMutIter<'a, T> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.index += n + 1;
-        let (row, col) = self.shape.nth(self.index - 1)?;
-        let offset = self.shape.offset(row, col);
+        let pos = self.shape.nth(self.index - 1)?;
+        let offset = self.shape.offset(pos);
 
         if offset >= self.data.len() {
             None
@@ -532,28 +535,28 @@ pub struct SurfaceMutView<'a, T> {
 }
 
 impl<T> SurfaceOwned<T> {
-    pub fn new(height: usize, width: usize) -> Self
+    pub fn new(size: Size) -> Self
     where
         T: Default,
     {
-        Self::new_with(height, width, |_, _| Default::default())
+        Self::new_with(size, |_| Default::default())
     }
 
-    pub fn new_with<F>(height: usize, width: usize, mut f: F) -> Self
+    pub fn new_with<F>(size: Size, mut f: F) -> Self
     where
-        F: FnMut(usize, usize) -> T,
+        F: FnMut(Position) -> T,
     {
-        let mut data = Vec::with_capacity(height * width);
-        for row in 0..height {
-            for col in 0..width {
-                data.push(f(row, col));
+        let mut data = Vec::with_capacity(size.height * size.width);
+        for row in 0..size.height {
+            for col in 0..size.width {
+                data.push(f(Position { row, col }));
             }
         }
         let shape = Shape {
-            row_stride: width,
+            row_stride: size.width,
             col_stride: 1,
-            height,
-            width,
+            height: size.height,
+            width: size.width,
             start: 0,
             end: data.len(),
         };
@@ -561,13 +564,13 @@ impl<T> SurfaceOwned<T> {
     }
 
     /// Create owned surface from vector and sizes.
-    pub fn from_vec(height: usize, width: usize, data: Vec<T>) -> Self {
-        assert_eq!(height * width, data.len());
+    pub fn from_vec(size: Size, data: Vec<T>) -> Self {
+        assert_eq!(size.height * size.width, data.len());
         let shape = Shape {
-            row_stride: width,
+            row_stride: size.width,
             col_stride: 1,
-            height,
-            width,
+            height: size.height,
+            width: size.width,
             start: 0,
             end: data.len(),
         };
@@ -793,8 +796,8 @@ where
         (Some((col_start, col_end)), Some((row_start, row_end))) => {
             let width = col_end - col_start;
             let height = row_end - row_start;
-            let start = shape.offset(row_start, col_start);
-            let end = shape.offset(row_end - 1, col_end);
+            let start = shape.offset(Position::new(row_start, col_start));
+            let end = shape.offset(Position::new(row_end - 1, col_end));
             Shape {
                 width,
                 height,
@@ -839,10 +842,10 @@ mod tests {
 
     #[test]
     fn test_surface() {
-        let mut surf = SurfaceOwned::new(3, 4);
+        let mut surf = SurfaceOwned::new(Size::new(3, 4));
         assert!(!surf.is_empty());
-        assert_eq!(surf.get(2, 3), Some(&0u8));
-        assert_eq!(surf.get(2, 4), None);
+        assert_eq!(surf.get(Position::new(2, 3)), Some(&0u8));
+        assert_eq!(surf.get(Position::new(2, 4)), None);
 
         surf.view_mut(.., ..1).fill(1);
         surf.view_mut(1..2, ..).fill(2);
@@ -855,23 +858,23 @@ mod tests {
         assert_eq!(surf.iter().copied().collect::<Vec<_>>(), reference);
 
         let view = surf.view(..2, ..2);
-        assert!(view.get(0, 3).is_none());
-        assert!(view.get(2, 0).is_none());
+        assert!(view.get(Position::new(0, 3)).is_none());
+        assert!(view.get(Position::new(2, 0)).is_none());
 
         let mut view = surf.view_mut(..2, ..2);
-        assert!(view.get_mut(0, 3).is_none());
-        assert!(view.get_mut(2, 0).is_none());
+        assert!(view.get_mut(Position::new(0, 3)).is_none());
+        assert!(view.get_mut(Position::new(2, 0)).is_none());
 
         let view = surf.view(3..3, ..);
         assert!(view.is_empty());
-        assert_eq!(view.get(0, 0), None);
+        assert_eq!(view.get(Position::new(0, 0)), None);
 
         let view = surf.view(1..2, 1..3);
         assert_eq!(view.width(), 2);
         assert_eq!(view.height(), 1);
         assert_eq!(view.iter().count(), 2);
-        assert_eq!(view.get(0, 1), Some(&2u8));
-        assert_eq!(view.get(0, 2), None);
+        assert_eq!(view.get(Position::new(0, 1)), Some(&2u8));
+        assert_eq!(view.get(Position::new(0, 2)), None);
     }
 
     #[test]
@@ -904,8 +907,8 @@ mod tests {
         ];
         assert_eq!(surf.data, reference);
 
-        let mut surf = SurfaceOwned::new(3, 7);
-        surf.fill_with(|row, col, _| (row * 7 + col) % 10);
+        let mut surf = SurfaceOwned::new(Size::new(3, 7));
+        surf.fill_with(|pos, _| (pos.row * 7 + pos.col) % 10);
         // 0 1 | 2 3 4 5 | 6
         // 7 8 | 9 0 1 2 | 3
         // 4 5 | 6 7 8 9 | 0
@@ -935,8 +938,8 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut surf = SurfaceOwned::new(2, 2);
-        surf.fill_with(|r, c, _| r * 2 + c + 1);
+        let mut surf = SurfaceOwned::new(Size::new(2, 2));
+        surf.fill_with(|pos, _| pos.row * 2 + pos.col + 1);
         assert_eq!(surf.data(), &[1, 2, 3, 4]);
         surf.view_mut(.., 1..).clear();
         assert_eq!(surf.data(), &[1, 0, 3, 0]);
@@ -944,10 +947,10 @@ mod tests {
 
     #[test]
     fn test_chains() {
-        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(10, 10);
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(Size::new(10, 10));
         let mut view = (&mut surf).view_owned(.., ..).view_owned(1..-1, ..);
         let mut view = view.view_mut(.., 1..-1);
-        view.get_mut(1, 1);
+        view.get_mut(Position::new(1, 1));
         assert_eq!(
             view.shape(),
             Shape {
@@ -968,14 +971,22 @@ mod tests {
 
     #[test]
     fn test_empty_surface() {
-        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(0, 0);
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(Size::new(0, 0));
+        assert!(surf.iter().next().is_none());
+        assert!(surf.iter_mut().next().is_none());
+
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(Size::new(0, 5));
+        assert!(surf.iter().next().is_none());
+        assert!(surf.iter_mut().next().is_none());
+
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(Size::new(5, 0));
         assert!(surf.iter().next().is_none());
         assert!(surf.iter_mut().next().is_none());
     }
 
     #[test]
     fn test_references() {
-        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(3, 3);
+        let mut surf: SurfaceOwned<()> = SurfaceOwned::new(Size::new(3, 3));
 
         fn view<S: Surface>(s: S) {
             let _ = s.view(.., ..);

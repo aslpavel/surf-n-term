@@ -113,7 +113,7 @@ pub struct ViewDebug<V> {
 impl<V: View> std::fmt::Debug for ViewDebug<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ctx = ViewContext::dummy();
-        let mut surf = SurfaceOwned::new(self.size.height, self.size.width);
+        let mut surf = SurfaceOwned::new(self.size);
         surf.draw_check_pattern(
             "fg=#282828,bg=#3c3836"
                 .parse()
@@ -692,7 +692,7 @@ mod tests {
         size: Size,
     ) -> Result<SurfaceOwned<Cell>, Error> {
         let layout = view.layout(ctx, BoxConstraint::loose(size));
-        let mut surf = SurfaceOwned::new(size.height, size.width);
+        let mut surf = SurfaceOwned::new(size);
         view.render(ctx, &mut surf.view_mut(.., ..), &layout)?;
         Ok(surf)
     }

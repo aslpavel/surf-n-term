@@ -221,9 +221,9 @@ impl TerminalRenderer {
         };
         Ok(Self {
             size,
-            front: SurfaceOwned::new(size.cells.height, size.cells.width),
-            back: SurfaceOwned::new(size.cells.height, size.cells.width),
-            marks: SurfaceOwned::new_with(size.cells.height, size.cells.width, |_, _| mark),
+            front: SurfaceOwned::new(size.cells),
+            back: SurfaceOwned::new(size.cells),
+            marks: SurfaceOwned::new_with(size.cells, |_| mark),
             images: Vec::new(),
             glyph_cache: HashMap::new(),
             frame_count: 0,
@@ -276,7 +276,7 @@ impl TerminalRenderer {
 
             // skip cells that have not changed, go over ignored items too as they
             // might remove old images.
-            if old == new && self.marks.get(pos.row, pos.col) != Some(&CellMark::Damaged) {
+            if old == new && self.marks.get(pos) != Some(&CellMark::Damaged) {
                 continue;
             }
 
@@ -315,7 +315,7 @@ impl TerminalRenderer {
         while pos.row < self.front.height() {
             while pos.col < self.front.width() {
                 // fetch buffers
-                let offset = self.front.shape().offset(pos.row, pos.col);
+                let offset = self.front.shape().offset(pos);
                 let new = &self.front.data()[offset];
                 let old = &self.back.data()[offset];
                 let mark = self.marks.data()[offset];
@@ -349,8 +349,9 @@ impl TerminalRenderer {
                     // find repeated empty cells
                     let mut repeats = 1;
                     for col in pos.col + 1..self.front.width() {
-                        let Some(next) = self.front.get(pos.row, col) else { break };
-                        let next_mark = self.marks.get(pos.row, col).copied().unwrap_or_default();
+                        let pos = Position::new(pos.row, col);
+                        let Some(next) = self.front.get(pos) else { break };
+                        let next_mark = self.marks.get(pos).copied().unwrap_or_default();
                         if next == new && next_mark != CellMark::Ignored {
                             repeats += 1;
                         } else {
@@ -453,10 +454,10 @@ where
 
     /// Fill surface with check pattern
     fn draw_check_pattern(&mut self, face: Face) {
-        self.fill_with(|_, col, _| {
+        self.fill_with(|pos, _| {
             Cell::new_char(
                 face,
-                if col & 1 == 1 {
+                if pos.col & 1 == 1 {
                     '\u{2580}' // upper half block
                 } else {
                     '\u{2584}' // lower half block
@@ -475,7 +476,7 @@ where
 
     /// Replace all cells with empty character and provided face
     fn erase(&mut self, face: Face) {
-        self.fill_with(|_row, _col, cell| Cell::new_char(cell.face.overlay(&face), ' '));
+        self.fill_with(|_, cell| Cell::new_char(cell.face.overlay(&face), ' '));
     }
 
     /// Crete writable wrapper around the terminal surface
@@ -576,7 +577,7 @@ impl<'a> TerminalWriter<'a> {
         let face = self.face.overlay(&cell.face);
         if let Some(pos) = pos {
             // normal cell
-            if let Some(cell_ref) = self.surf.get_mut(pos.row, pos.col) {
+            if let Some(cell_ref) = self.surf.get_mut(pos) {
                 cell_ref.overlay(cell.with_face(face));
                 true
             } else {
@@ -588,13 +589,13 @@ impl<'a> TerminalWriter<'a> {
                 let shape = self.surf.shape();
                 let data = self.surf.data_mut();
 
-                let start = shape.offset(cursor_start.row, cursor_start.col);
-                let end = shape.offset(self.cursor.row, self.cursor.col);
+                let start = shape.offset(cursor_start);
+                let end = shape.offset(self.cursor);
 
                 let blank = Cell::new_char(face, ' ');
                 for row in cursor_start.row..=self.cursor.row {
                     for col in 0..shape.width {
-                        let offset = shape.offset(row, col);
+                        let offset = shape.offset(Position::new(row, col));
                         if (start..end).contains(&offset) {
                             data[offset].overlay(blank.clone());
                         }
@@ -969,11 +970,11 @@ mod tests {
         term.clear();
 
         // ascii image
-        let mut image_surf = SurfaceOwned::new(3, 3);
+        let mut image_surf = SurfaceOwned::new(Size::new(3, 3));
         let purple_color = "#d3869b".parse()?;
         let green_color = "#b8bb26".parse()?;
-        image_surf.fill_with(|r, c, _| {
-            if (r + c) % 2 == 0 {
+        image_surf.fill_with(|pos, _| {
+            if (pos.row + pos.col) % 2 == 0 {
                 purple_color
             } else {
                 green_color
@@ -1123,7 +1124,7 @@ mod tests {
         term.clear();
 
         let mut view = render.surface();
-        view.set(1, 2, icon.clone());
+        view.set(Position::new(1, 2), icon.clone());
         print!("[render] image: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         let img = render
@@ -1146,7 +1147,7 @@ mod tests {
         term.clear();
 
         let mut view = render.surface();
-        view.set(2, 3, icon.clone());
+        view.set(Position::new(2, 3), icon.clone());
         print!("[render] image move: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         assert_eq!(
@@ -1256,7 +1257,7 @@ mod tests {
         assert_eq!(size, Size::new(4, 9));
 
         // image
-        let image = Image::new(SurfaceOwned::new(14, 30));
+        let image = Image::new(SurfaceOwned::new(Size::new(14, 30)));
         let image_cell = Cell::new_image(image);
         assert_eq!(image_cell.size(ctx), Size::new(2, 3));
         let pos = image_cell.layout(ctx, max_width, &mut size, &mut cursor);

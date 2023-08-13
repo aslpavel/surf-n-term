@@ -79,13 +79,12 @@ fn main() -> Result<(), Error> {
     let color3: RGBA = "#fb4934".parse()?;
     let cutoff = img_size.height / 6 * 6;
     let img = Image::new(SurfaceOwned::new_with(
-        img_size.height + 6,
-        img_size.width,
-        |r, c| {
-            if r >= cutoff {
+        Size::new(img_size.height + 6, img_size.width),
+        |pos| {
+            if pos.row >= cutoff {
                 color3
             } else {
-                if ((r / 6) + (c / 6)) % 2 == 0 {
+                if ((pos.row / 6) + (pos.col / 6)) % 2 == 0 {
                     color1
                 } else {
                     color2
@@ -137,7 +136,7 @@ fn main() -> Result<(), Error> {
             }
         };
 
-        if let Some(cell) = surf.get_mut(pos.row, pos.col) {
+        if let Some(cell) = surf.get_mut(pos) {
             *cell = glyph.clone(); // Cell::new_image(img.clone());
         }
         Ok(TerminalAction::Wait)

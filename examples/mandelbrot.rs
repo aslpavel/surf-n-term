@@ -97,9 +97,9 @@ impl ColorMap {
 fn mandelbrot(xs: Range<f64>, ys: Range<f64>, size: Size, max_iter: usize) -> SurfaceOwned<usize> {
     let height = (size.height - 1) as f64;
     let width = (size.width - 1) as f64;
-    SurfaceOwned::new_with(size.height, size.width, |row, col| {
-        let x = lerp(&xs, (col as f64 + 0.5) / width);
-        let y = lerp(&ys, (row as f64 + 0.5) / height);
+    SurfaceOwned::new_with(size, |pos| {
+        let x = lerp(&xs, (pos.col as f64 + 0.5) / width);
+        let y = lerp(&ys, (pos.row as f64 + 0.5) / height);
         mandelbrot_at(Complex { x, y }, max_iter)
     })
 }
@@ -111,8 +111,8 @@ fn mandlebrot_imgs(
 ) -> Vec<Image> {
     let mut imgs = Vec::new();
     for iter in 0..count {
-        let surf = SurfaceOwned::new_with(mand.height(), mand.width(), |row, col| {
-            let ratio = min(*mand.get(row, col).unwrap(), iter) as f64 / count as f64;
+        let surf = SurfaceOwned::new_with(mand.size(), |pos| {
+            let ratio = min(*mand.get(pos).unwrap(), iter) as f64 / count as f64;
             colormap.lookup(ratio).into()
         });
         imgs.push(Image::new(surf));

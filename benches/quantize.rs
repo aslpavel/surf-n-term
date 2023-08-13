@@ -8,7 +8,7 @@ use std::{
 };
 use surf_n_term::{
     common::{clamp, Random},
-    Color, LinColor,
+    Color, LinColor, Size,
 };
 use surf_n_term::{ColorPalette, Image, Surface, SurfaceOwned, RGBA};
 
@@ -32,7 +32,10 @@ fn load_ppm(path: impl AsRef<Path>) -> Result<Image, Box<dyn std::error::Error>>
         let [r, g, b] = color;
         colors.push(RGBA::new(r, g, b, 255));
     }
-    Ok(Image::new(SurfaceOwned::from_vec(height, width, colors)))
+    Ok(Image::new(SurfaceOwned::from_vec(
+        Size::new(height, width),
+        colors,
+    )))
 }
 
 fn palette_benchmark(c: &mut Criterion) {

@@ -165,7 +165,7 @@ impl<V: View> View for Frame<V> {
             for row in 0..surf.height() {
                 let xi = fragment_index(col, surf.width());
                 let yi = fragment_index(row, surf.height());
-                if let Some(cell) = surf.get_mut(row, col) {
+                if let Some(cell) = surf.get_mut(Position::new(row, col)) {
                     if xi == 1 && yi == 1 {
                         *cell = empty.clone();
                     } else {
@@ -208,7 +208,13 @@ impl<V: View> View for Frame<V> {
 /// Convert rasterized image into an Image
 fn rimage_to_image(image: impl RImage<Pixel = LinColor>) -> Image {
     let data: Vec<RGBA> = image.iter().map(|c| RGBA::from(*c)).collect();
-    Image::new(SurfaceOwned::from_vec(image.height(), image.width(), data))
+    Image::new(SurfaceOwned::from_vec(
+        Size {
+            height: image.height(),
+            width: image.width(),
+        },
+        data,
+    ))
 }
 
 /// Find an index given the size of the dimension and the offset
