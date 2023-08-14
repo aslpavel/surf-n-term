@@ -1,9 +1,11 @@
 //! Type describing foreground/background/style-attrs of the terminal cell
-use serde::{Deserialize, Serialize};
+use rasterize::SVG_COLORS;
+use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use crate::{Color, Error, RGBA};
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fmt,
     ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign},
     str::FromStr,
@@ -184,12 +186,8 @@ impl Face {
         };
         Face { fg, bg, attrs }
     }
-}
 
-impl FromStr for Face {
-    type Err = Error;
-
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
+    pub fn from_str_named(string: &str, colors: &HashMap<String, RGBA>) -> Result<Face, Error> {
         string
             .split(',')
             .try_fold(Face::default(), |mut face, attrs| {
@@ -197,8 +195,8 @@ impl FromStr for Face {
                 let key = iter.next().unwrap_or_default().trim();
                 let value = iter.next().unwrap_or_default().trim();
                 match key {
-                    "fg" => face.fg = Some(value.parse()?),
-                    "bg" => face.bg = Some(value.parse()?),
+                    "fg" => face.fg = Some(RGBA::from_str_named(value, colors)?),
+                    "bg" => face.bg = Some(RGBA::from_str_named(value, colors)?),
                     "bold" => face.attrs |= FaceAttrs::BOLD,
                     "italic" => face.attrs |= FaceAttrs::ITALIC,
                     "underline" => face.attrs |= FaceAttrs::UNDERLINE,
@@ -210,6 +208,14 @@ impl FromStr for Face {
                 }
                 Ok(face)
             })
+    }
+}
+
+impl FromStr for Face {
+    type Err = Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        Self::from_str_named(string, &SVG_COLORS)
     }
 }
 
@@ -265,6 +271,22 @@ impl<'de> Deserialize<'de> for Face {
     }
 }
 
+pub struct FaceDeserializer<'a> {
+    pub colors: &'a HashMap<String, RGBA>,
+}
+
+impl<'de, 'a> DeserializeSeed<'de> for FaceDeserializer<'a> {
+    type Value = Face;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let color = std::borrow::Cow::<'de, str>::deserialize(deserializer)?;
+        Face::from_str_named(color.as_ref(), self.colors).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +303,27 @@ mod tests {
 
         let face_str: Face = face.to_string().parse()?;
         assert_eq!(face, face_str);
+
+        assert_eq!(
+            "fg=#b22222,bg=#f0f8ff".parse::<Face>()?,
+            "fg=firebrick,bg=aliceblue".parse()?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_serde() -> Result<(), Box<dyn std::error::Error>> {
+        use serde_json::de::StrRead;
+
+        let mut colors = HashMap::new();
+        colors.insert("purple".to_owned(), "#b16286".parse()?);
+
+        let face_str = r#""bg=purple/.3,fg=#282828""#;
+
+        let mut deserializer = serde_json::Deserializer::new(StrRead::new(face_str));
+        let color = FaceDeserializer { colors: &colors }.deserialize(&mut deserializer)?;
+        assert_eq!(color, "bg=#b16286/.3,fg=#282828".parse()?);
 
         Ok(())
     }

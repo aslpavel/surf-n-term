@@ -8,7 +8,7 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.10.1"
+version = "0.10.2"
 
 [dependencies]
 flate2 = "^1.0"
@@ -27,7 +27,7 @@ signal-hook = "^0.3"
 tracing = "^0.1"
 unicode-width = "^0.1"
 
-rasterize = "^0.3.5"
+rasterize = "^0.3.6"
 # rasterize = { path = "../rasterize" }
 
 [dev-dependencies]

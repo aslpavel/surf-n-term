@@ -52,7 +52,7 @@ mod unix;
 pub mod view;
 
 pub use error::Error;
-pub use face::{Face, FaceAttrs};
+pub use face::{Face, FaceAttrs, FaceDeserializer};
 pub use glyph::{BBox, FillRule, Glyph, Path};
 pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImageHandler};
 pub use keys::{Key, KeyMap, KeyMod, KeyName};
