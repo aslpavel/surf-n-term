@@ -271,6 +271,7 @@ impl<'de> Deserialize<'de> for Face {
     }
 }
 
+#[derive(Clone)]
 pub struct FaceDeserializer<'a> {
     pub colors: &'a HashMap<String, RGBA>,
 }
