@@ -234,7 +234,13 @@ impl TTYDecoder {
                         TTYTag::Event(event) => event.clone(),
                         TTYTag::Matcher(index) => self.matchers[*index]
                             .decode(&self.buffer)
-                            .unwrap_or_else(|| TerminalEvent::Raw(self.buffer.clone())),
+                            .unwrap_or_else(|| {
+                                tracing::info!(
+                                    "[TTYDecoder.decode] unhandled: {}",
+                                    String::from_utf8_lossy(&self.buffer)
+                                );
+                                TerminalEvent::Raw(self.buffer.clone())
+                            }),
                     };
 
                     self.possible.replace((event, self.buffer.len()));
@@ -249,7 +255,12 @@ impl TTYDecoder {
                     self.rescheduled.push(byte); // schedule current by for parsing
                     self.state = self.automata.start();
                     self.buffer.pop();
-                    TerminalEvent::Raw(std::mem::take(&mut self.buffer))
+                    let raw = std::mem::take(&mut self.buffer);
+                    tracing::info!(
+                        "[TTYDecoder.decode] unhandled: {}",
+                        String::from_utf8_lossy(&raw)
+                    );
+                    TerminalEvent::Raw(raw)
                 });
                 Some(event)
             }
@@ -575,7 +586,10 @@ impl TTYMatcher for ReportSettingMatcher {
             sgr_face(&mut face, cmds);
             Some(TerminalEvent::FaceGet(face))
         } else {
-            tracing::info!("unhandled DECRPSS: {:?}", payload);
+            tracing::info!(
+                "[ReportSettingMatcher.decode] unhandled DECRPSS: {:?}",
+                payload
+            );
             None
         }
     }

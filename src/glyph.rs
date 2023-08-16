@@ -14,7 +14,6 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
-use tracing::debug_span;
 
 #[derive(Clone, Debug)]
 pub enum GlyphScene {
@@ -91,7 +90,7 @@ impl Glyph {
             .unwrap_or_else(|| RGBA::new(255, 255, 255, 255))
             .into();
 
-        let _ = debug_span!("glyph rasterize", path=?self, ?face, ?size).enter();
+        let _ = tracing::debug_span!("[Glyph.rasterize]", path=?self, ?face, ?size).enter();
         let rasterizer = ActiveEdgeRasterizer::default();
         let mut surf = SurfaceOwned::new_with(
             Size {

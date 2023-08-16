@@ -29,7 +29,6 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
-use tracing::{debug, error, info, instrument, warn};
 
 mod nix {
     pub use libc::{winsize, TIOCGWINSZ};
@@ -73,8 +72,10 @@ impl UnixTerminal {
             Ok(tty_fd) => tty_fd,
             Err(error) => {
                 // LLDB is not creating /dev/tty for child processes
-                error!("failed to open terminal at /dev/tty with error {error:?}");
-                error!("trying to fallback back to /dev/stdin");
+                tracing::error!(
+                    "[UnixTerminal.new] failed to open terminal at /dev/tty with error {error:?}"
+                );
+                tracing::error!("[UnixTerminal.new] trying to fallback back to /dev/stdin");
                 nix::open("/dev/stdin", nix::OFlag::O_RDWR, nix::Mode::empty())?
             }
         };
@@ -254,7 +255,7 @@ const GET_TERM_SIZE: &[u8] = b"\x1b[18t\x1b[14t";
 fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     if let Ok("linux") | Ok("dumb") = std::env::var("TERM").as_deref() {
         // do not try to query anything on dumb terminals
-        warn!("[detected] dump terminal");
+        tracing::warn!("[capabilities_detected] dump terminal");
         term.capabilities.depth = ColorDepth::Gray;
         term.encoder = TTYEncoder::new(term.capabilities.clone());
         return Ok(());
@@ -301,23 +302,23 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     loop {
         match term.poll(Some(Duration::from_secs(1)))? {
             Some(TerminalEvent::KittyImage { .. }) => {
-                debug!("[detected] kitty image protocol");
+                tracing::debug!("[capabilities_detected] kitty image protocol");
                 image_handlers.insert(ImageHandlerKind::Kitty);
             }
             Some(TerminalEvent::Color { color, .. }) => {
-                debug!("[detected] background color: {:?}", color);
+                tracing::debug!("[capabilities_detected] background color: {:?}", color);
                 bg.replace(color);
             }
             Some(TerminalEvent::FaceGet(face)) => {
                 if face == face_expected {
-                    debug!("[detected] true color support");
+                    tracing::debug!("[capabilities_detected] true color support");
                     caps.depth = ColorDepth::TrueColor;
                 }
             }
             Some(TerminalEvent::DeviceAttrs(attrs)) => {
                 // 4 - attribute indicates sixel support
                 if attrs.contains(&4) {
-                    debug!("[detected] sixel image protocol");
+                    tracing::debug!("[capabilities_detected] sixel image protocol");
                     image_handlers.insert(ImageHandlerKind::Sixel);
                 }
                 break; // this is last "sync" event
@@ -326,11 +327,11 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
                 size_escape = size;
             }
             Some(TerminalEvent::KeyboardLevel(_)) => {
-                debug!("[detected] kitty keyboard protocol");
+                tracing::debug!("[capabilities_detected] kitty keyboard protocol");
                 caps.kitty_keyboard = true;
             }
             Some(event) => {
-                warn!("unexpected event during detection: {:?}", event);
+                tracing::warn!("[capabilities_detected] unexpected event: {:?}", event);
                 continue;
             }
             None => break,
@@ -348,7 +349,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // term size interface
     let size_ioctl = term.size_ioctl()?;
     if size_ioctl.pixels.is_empty() && !size_escape.pixels.is_empty() {
-        warn!("[detect] fallback to escape sequence for term size detection");
+        tracing::warn!("[capabilities_detected] fallback to escape sequence for term size");
         term.size = Some(size_escape);
     }
 
@@ -366,7 +367,7 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     ) && !term.size()?.pixels.is_empty();
 
     // update terminal
-    info!("capabilities: {:?}", caps);
+    tracing::info!("[capabilities_detected] {:?}", caps);
     term.encoder = TTYEncoder::new(caps.clone());
     term.image_handler = image_handler;
     term.capabilities = caps;
@@ -391,7 +392,7 @@ impl Write for UnixTerminal {
 }
 
 impl Terminal for UnixTerminal {
-    #[instrument(level="debug", skip_all, fields(?timeout))]
+    #[tracing::instrument(name="[UnixTerminal.poll]", level="debug", skip_all, fields(?timeout))]
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error> {
         // NOTE:
         // Only `select` reliably works with /dev/tty on MacOS, `poll` for example
@@ -438,7 +439,7 @@ impl Terminal for UnixTerminal {
             match select {
                 Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => return Ok(None),
                 Err(error) => return Err(error.into()),
-                Ok(count) => tracing::trace!(%count, "select events"),
+                Ok(count) => tracing::trace!(%count, "[UnixTerminal.poll] events"),
             };
 
             // process pending output
@@ -488,7 +489,7 @@ impl Terminal for UnixTerminal {
                 tracing::trace!(
                     size = %recv,
                     data = format!("\"{}\"", buf[..recv].escape_ascii()),
-                    "received"
+                    "[UnixTerminal.poll] received"
                 );
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);
@@ -513,7 +514,7 @@ impl Terminal for UnixTerminal {
     }
 
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
-        tracing::trace!(?cmd, "execute");
+        tracing::trace!(?cmd, "[UnixTerminal.execute]");
         match cmd {
             TerminalCommand::Image(img, pos) => {
                 self.image_handler.draw(&mut self.write_queue, &img, pos)

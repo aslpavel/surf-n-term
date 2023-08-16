@@ -253,7 +253,7 @@ impl TerminalRenderer {
 
     /// Generate frame, that is issue terminal command to reconcile
     /// back (old) and front (new) buffers.
-    #[tracing::instrument(level="trace", skip_all, fields(frame_count = %self.frame_count))]
+    #[tracing::instrument(name = "[TerminalRenderer.frame]", level="trace", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
         // First pass
         //

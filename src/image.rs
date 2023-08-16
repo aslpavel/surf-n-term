@@ -61,7 +61,7 @@ impl Image {
     /// Quantize image
     ///
     /// Perform palette extraction and Floyd–Steinberg dithering.
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(name = "[Image.quantize]", level = "debug")]
     pub fn quantize(
         &self,
         palette_size: usize,
@@ -491,7 +491,12 @@ impl ImageHandler for KittyImageHandler {
     }
 
     fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
-        tracing::trace!(image_handler = "kitty", ?pos, ?img, "draw image");
+        tracing::trace!(
+            image_handler = "kitty",
+            ?pos,
+            ?img,
+            "[KittyImageHandler.draw]"
+        );
         let img_id = kitty_image_id(img);
 
         // q   - suppress response from the terminal 1 - OK only, 2 - All.
@@ -499,8 +504,13 @@ impl ImageHandler for KittyImageHandler {
 
         // transfer image if it has not been transferred yet
         if let Entry::Vacant(entry) = self.imgs.entry(img_id) {
-            let _ =
-                tracing::debug_span!("transfer image", image_handler = "kitty", ?pos, ?img).enter();
+            let _ = tracing::debug_span!(
+                "[KittyImageHandler.render]",
+                image_handler = "kitty",
+                ?pos,
+                ?img
+            )
+            .enter();
             // zlib compressed and base64 encoded RGBA image data
             let mut payload_write =
                 ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
@@ -564,7 +574,7 @@ impl ImageHandler for KittyImageHandler {
             img_id,
             placement_id,
             suppress,
-            "draw image command"
+            "[KittyImageHandler.draw] command"
         );
         Ok(())
     }
@@ -575,7 +585,12 @@ impl ImageHandler for KittyImageHandler {
         img: &Image,
         pos: Option<Position>,
     ) -> Result<(), Error> {
-        tracing::trace!(image_handler = "kitty", ?pos, ?img, "erase image");
+        tracing::trace!(
+            image_handler = "kitty",
+            ?pos,
+            ?img,
+            "[KittyImageHandler.erase]"
+        );
         // Delete image by image id and placement id
         // a=d - action delete image
         // d=i - delete by image and placement id without freeing data
@@ -602,7 +617,7 @@ impl ImageHandler for KittyImageHandler {
             } => {
                 if error.is_some() {
                     let pos = placement.map(kitty_placement_to_pos);
-                    tracing::warn!(id, ?pos, "kitty image error: {:?}", error);
+                    tracing::warn!(id, ?pos, "[KittyImageHandler.error]: {:?}", error);
                     if let (Some(img), Some(pos)) = (self.imgs.remove(id), pos) {
                         let mut encoder = TTYEncoder::default();
                         encoder.encode(&mut out, TerminalCommand::CursorSave)?;
@@ -650,12 +665,17 @@ impl ImageHandler for SixelImageHandler {
     }
 
     fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
-        tracing::debug!(image_handler = "sixel", ?pos, ?img, "draw image");
+        tracing::debug!(
+            image_handler = "sixel",
+            ?pos,
+            ?img,
+            "[SixelImageHandler.draw]"
+        );
         if let Some(sixel_image) = self.imgs.get(&img.hash()) {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
         }
-        let _ = tracing::debug_span!("encode image", image_handler = "sixel");
+        let _ = tracing::debug_span!("[SixelImageHandler.render]", image_handler = "sixel");
         // make sure height is always dividable by 6
         let height = (img.height() / 6) * 6;
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
