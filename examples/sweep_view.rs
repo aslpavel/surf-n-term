@@ -112,9 +112,7 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     Ok(Frame::new(result, bg, accent, 0.2, 0.9))
 }
 
-fn main() -> Result<(), Error> {
-    let mut term = SystemTerminal::new()?;
-
+fn render(term: &mut dyn Terminal) -> Result<(), Error> {
     // reserve space, sweep uses more sophisticated method with scroll
     term.execute(TerminalCommand::Scroll(HIGHT as i32))?;
     term.execute(TerminalCommand::CursorMove {
@@ -124,7 +122,7 @@ fn main() -> Result<(), Error> {
 
     // rendering
     let pos = term.position()?;
-    let mut render = TerminalRenderer::new(&mut term, false)?;
+    let mut render = TerminalRenderer::new(term, false)?;
     let mut surf = render.surface();
     {
         // render sub-surface
@@ -144,7 +142,7 @@ fn main() -> Result<(), Error> {
             ])?,
         )?;
     }
-    render.frame(&mut term)?;
+    render.frame(term)?;
 
     // move below view
     term.execute(TerminalCommand::CursorTo(Position {
@@ -152,6 +150,13 @@ fn main() -> Result<(), Error> {
         col: 0,
     }))?;
     term.poll(Some(Duration::from_millis(100)))?;
+
+    Ok(())
+}
+
+fn main() -> Result<(), Error> {
+    let mut term = SystemTerminal::new()?;
+    render(&mut term)?;
 
     Ok(())
 }

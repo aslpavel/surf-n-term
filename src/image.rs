@@ -47,15 +47,10 @@ impl Image {
         if pixels_per_cell.width == 0 || pixels_per_cell.height == 0 {
             return Size::new(0, 0);
         }
-        let mut height = self.height() / pixels_per_cell.height;
-        if self.height() % pixels_per_cell.height != 0 {
-            height += 1;
+        Size {
+            height: self.height() / pixels_per_cell.height,
+            width: self.width() / pixels_per_cell.width,
         }
-        let mut width = self.width() / pixels_per_cell.width;
-        if self.width() % pixels_per_cell.width != 0 {
-            width += 1;
-        }
-        Size { height, width }
     }
 
     /// Quantize image
@@ -793,7 +788,9 @@ impl ImageHandler for SixelImageHandler {
         self.size += sixel_image.len();
         self.imgs.put(img.hash(), sixel_image);
         while self.size > IMAGE_CACHE_SIZE {
-            let Some((_, lru_image)) = self.imgs.pop_lru() else { break };
+            let Some((_, lru_image)) = self.imgs.pop_lru() else {
+                break;
+            };
             self.size -= lru_image.len();
         }
 

@@ -18,12 +18,13 @@ use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
 };
+use std::os::fd::{BorrowedFd, FromRawFd, OwnedFd};
 use std::{
     collections::{HashSet, VecDeque},
     fs::File,
     io::{BufWriter, Cursor, Read, Write},
     os::unix::{
-        io::{AsRawFd, RawFd},
+        io::{AsFd, AsRawFd, RawFd},
         net::UnixStream,
     },
     path::Path,
@@ -47,7 +48,7 @@ mod nix {
 }
 
 pub struct UnixTerminal {
-    tty_handle: IOHandle,
+    tty: Tty,
     encoder: TTYEncoder,
     write_queue: IOQueue,
     decoder: TTYDecoder,
@@ -68,8 +69,8 @@ pub struct UnixTerminal {
 impl UnixTerminal {
     /// Create new terminal by opening `/dev/tty` device.
     pub fn new() -> Result<Self, Error> {
-        let tty_fd = match nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty()) {
-            Ok(tty_fd) => tty_fd,
+        let tty_raw_fd = match nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty()) {
+            Ok(tty_raw_fd) => tty_raw_fd,
             Err(error) => {
                 // LLDB is not creating /dev/tty for child processes
                 tracing::error!(
@@ -79,29 +80,37 @@ impl UnixTerminal {
                 nix::open("/dev/stdin", nix::OFlag::O_RDWR, nix::Mode::empty())?
             }
         };
+        let tty_fd = unsafe {
+            // Safety: opened here with open syscall
+            OwnedFd::from_raw_fd(tty_raw_fd)
+        };
         Self::new_from_fd(tty_fd)
     }
 
     /// Open terminal by a given device path
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let tty_fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
+        let tty_raw_fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
+        let tty_fd = unsafe {
+            // Safety: opened here with open syscall
+            OwnedFd::from_raw_fd(tty_raw_fd)
+        };
         Self::new_from_fd(tty_fd)
     }
 
     /// Create new terminal from raw file descriptor pointing to a tty.
-    pub fn new_from_fd(tty_fd: RawFd) -> Result<Self, Error> {
-        let tty_handle = IOHandle::new(tty_fd);
-        tty_handle.set_blocking(false)?;
-        if !nix::isatty(tty_fd)? {
+    pub fn new_from_fd(tty_fd: OwnedFd) -> Result<Self, Error> {
+        let tty = Tty::new(tty_fd);
+        tty.set_nonblocking(true)?;
+        if !nix::isatty(tty.as_raw_fd())? {
             return Err(Error::NotATTY);
         }
 
         // switching terminal into a raw mode
         // [Entering Raw Mode](https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html)
-        let termios_saved = nix::tcgetattr(tty_fd)?;
+        let termios_saved = nix::tcgetattr(&tty)?;
         let mut termios = termios_saved.clone();
         nix::cfmakeraw(&mut termios);
-        nix::tcsetattr(tty_fd, nix::SetArg::TCSAFLUSH, &termios)?;
+        nix::tcsetattr(&tty, nix::SetArg::TCSAFLUSH, &termios)?;
 
         // signal delivery
         let (signal_read, signal_write) = UnixStream::pair()?;
@@ -114,7 +123,8 @@ impl UnixTerminal {
 
         // self-pipe trick to implement waker
         let (waker_read, waker_write) = UnixStream::pair()?;
-        set_blocking(waker_write.as_raw_fd(), false)?;
+        waker_write.set_nonblocking(true)?;
+        waker_read.set_nonblocking(true)?;
         let waker = TerminalWaker::new(move || {
             const WAKE: &[u8] = b"\x00";
             // use write syscall instead of locking so it would be safe to use in a signal handler
@@ -123,11 +133,10 @@ impl UnixTerminal {
                 Err(error) => Err(error.into()),
             }
         });
-        set_blocking(waker_read.as_raw_fd(), false)?;
 
         let capabilities = TerminalCaps::default();
         let mut term = Self {
-            tty_handle,
+            tty,
             encoder: TTYEncoder::new(capabilities.clone()),
             write_queue: Default::default(),
             decoder: TTYDecoder::new(),
@@ -174,7 +183,7 @@ impl UnixTerminal {
     fn size_ioctl(&self) -> Result<TerminalSize, Error> {
         unsafe {
             let mut winsize: nix::winsize = std::mem::zeroed();
-            if libc::ioctl(self.tty_handle.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
+            if libc::ioctl(self.tty.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
                 return Err(nix::Error::last().into());
             }
             Ok(TerminalSize {
@@ -193,9 +202,6 @@ impl UnixTerminal {
     /// Close all descriptors free all the resources
     fn dispose(&mut self) -> Result<(), Error> {
         self.frames_drop();
-
-        // revert descriptor to blocking mode
-        self.tty_handle.set_blocking(true)?;
 
         // flush currently queued output and submit the epilogue
         self.execute_many([
@@ -237,11 +243,7 @@ impl UnixTerminal {
         self.signal_delivery.handle().close();
 
         // restore terminal settings
-        nix::tcsetattr(
-            self.tty_handle.as_raw_fd(),
-            nix::SetArg::TCSAFLUSH,
-            &self.termios_saved,
-        )?;
+        nix::tcsetattr(&self.tty, nix::SetArg::TCSAFLUSH, &self.termios_saved)?;
 
         Ok(())
     }
@@ -394,35 +396,18 @@ impl Write for UnixTerminal {
 impl Terminal for UnixTerminal {
     #[tracing::instrument(name="[UnixTerminal.poll]", level="debug", skip_all, fields(?timeout))]
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error> {
-        // NOTE:
-        // Only `select` reliably works with /dev/tty on MacOS, `poll` for example
-        // always returns POLLNVAL.
         self.write_queue.flush()?;
-        let mut read_set = nix::FdSet::new();
-        let mut write_set = nix::FdSet::new();
-        let tty_fd = self.tty_handle.as_raw_fd();
-        let signal_fd = self.signal_delivery.get_read().as_raw_fd();
-        let waker_fd = self.waker_read.as_raw_fd();
 
+        let mut first_loop = true;
         let timeout_instant = timeout.map(|dur| Instant::now() + dur);
-        let mut first_loop = true; // execute first loop even if timeout is 0
         while !self.write_queue.is_empty() || self.events_queue.is_empty() {
-            // update descriptors sets
-            read_set.clear();
-            read_set.insert(tty_fd);
-            read_set.insert(signal_fd);
-            read_set.insert(waker_fd);
-            write_set.clear();
-            if !self.write_queue.is_empty() {
-                write_set.insert(tty_fd);
-            }
-
             // process timeout
             let mut delay = match timeout_instant {
                 Some(timeout_instant) => {
                     let now = Instant::now();
-                    if timeout_instant < Instant::now() {
+                    if timeout_instant < now {
                         if first_loop {
+                            // execute first loop even if timeout is 0
                             Some(timeval_from_duration(Duration::new(0, 0)))
                         } else {
                             break;
@@ -434,26 +419,50 @@ impl Terminal for UnixTerminal {
                 None => None,
             };
 
-            // wait for descriptors
-            let select = nix::select(None, &mut read_set, &mut write_set, None, &mut delay);
-            match select {
-                Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => return Ok(None),
-                Err(error) => return Err(error.into()),
-                Ok(count) => tracing::trace!(%count, "[UnixTerminal.poll] events"),
+            // We have to use [nix::select] here as under MacOS the only way to poll
+            // `/dev/tty` is to use select. [nix::poll] for example would return POLLNVAL
+            let (waker_readable, signal_readable, tty_readable, tty_writable) = {
+                let signal_read = self.signal_delivery.get_read();
+
+                // update descriptors sets
+                let mut read_set = nix::FdSet::new();
+                read_set.insert(&self.tty);
+                read_set.insert(&signal_read);
+                read_set.insert(&self.waker_read);
+                let mut write_set = nix::FdSet::new();
+                if !self.write_queue.is_empty() {
+                    write_set.insert(&self.tty);
+                }
+
+                // wait for descriptors
+                let select = nix::select(None, &mut read_set, &mut write_set, None, &mut delay);
+                match select {
+                    Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => continue,
+                    Err(error) => return Err(error.into()),
+                    Ok(count) => tracing::trace!(%count, "[UnixTerminal.poll] events"),
+                };
+
+                (
+                    read_set.contains(&self.waker_read),
+                    read_set.contains(&signal_read),
+                    read_set.contains(&self.tty),
+                    write_set.contains(&self.tty),
+                )
             };
 
             // process pending output
-            if write_set.contains(tty_fd) {
+            if tty_writable {
                 let tee = self.tee.as_mut();
                 let send = self.write_queue.consume_with(|slice| {
-                    let size = guard_io(self.tty_handle.write(slice), 0)?;
+                    let size = guard_io(self.tty.write(slice), 0)?;
                     tee.map(|tee| tee.write(&slice[..size])).transpose()?;
                     Ok::<_, Error>(size)
                 })?;
                 self.stats.send += send;
             }
+
             // process signals
-            if read_set.contains(signal_fd) {
+            if signal_readable {
                 for signal in self.signal_delivery.pending() {
                     match signal {
                         SIGWINCH => {
@@ -471,17 +480,19 @@ impl Terminal for UnixTerminal {
                     }
                 }
             }
+
             // process waker
-            if read_set.contains(waker_fd) {
+            if waker_readable {
                 let mut buf = [0u8; 1024];
                 if guard_io(self.waker_read.read(&mut buf), 0)? != 0 {
                     self.events_queue.push_back(TerminalEvent::Wake);
                 }
             }
+
             // process pending input
-            if read_set.contains(tty_fd) {
+            if tty_readable {
                 let mut buf = [0u8; 1024];
-                let recv = guard_io(self.tty_handle.read(&mut buf), 0)?;
+                let recv = guard_io(self.tty.read(&mut buf), 0)?;
                 if recv == 0 {
                     return Err(Error::Quit);
                 }
@@ -510,6 +521,7 @@ impl Terminal for UnixTerminal {
             // indicate that first loop was executed
             first_loop = false;
         }
+
         Ok(self.events_queue.pop_front())
     }
 
@@ -533,7 +545,7 @@ impl Terminal for UnixTerminal {
         }
     }
 
-    fn position(&mut self) -> Result<crate::Position, Error> {
+    fn position(&mut self) -> Result<Position, Error> {
         let mut queue = Vec::new();
         self.execute(TerminalCommand::CursorGet)?;
         self.execute(TerminalCommand::DeviceAttrs)?; // sync event
@@ -582,48 +594,46 @@ fn guard_io<T>(result: Result<T, std::io::Error>, otherwise: T) -> Result<T, std
     }
 }
 
-/// Enable/disable blocking io for the provided file descriptor.
-fn set_blocking(fd: RawFd, blocking: bool) -> Result<(), nix::Error> {
-    let mut flags = nix::OFlag::from_bits_truncate(nix::fcntl(fd, nix::FcntlArg::F_GETFL)?);
-    flags.set(nix::OFlag::O_NONBLOCK, !blocking);
-    nix::fcntl(fd, nix::FcntlArg::F_SETFL(flags))?;
-    Ok(())
-}
-
 fn timeval_from_duration(dur: Duration) -> nix::TimeVal {
     use ::nix::sys::time::TimeValLike;
     nix::TimeVal::milliseconds(dur.as_millis() as i64)
 }
 
-struct IOHandle {
-    fd: RawFd,
+/// TTY Handle
+struct Tty {
+    fd: OwnedFd,
 }
 
-impl IOHandle {
-    pub fn new(fd: RawFd) -> Self {
+impl Tty {
+    pub fn new(fd: OwnedFd) -> Self {
         Self { fd }
     }
 
-    pub fn set_blocking(&self, blocking: bool) -> Result<(), nix::Error> {
-        set_blocking(self.fd, blocking)
+    pub fn set_nonblocking(&self, nonblocking: bool) -> Result<(), nix::Error> {
+        let fd = self.as_raw_fd();
+        let mut flags = nix::OFlag::from_bits_truncate(nix::fcntl(fd, nix::FcntlArg::F_GETFL)?);
+        flags.set(nix::OFlag::O_NONBLOCK, nonblocking);
+        nix::fcntl(fd, nix::FcntlArg::F_SETFL(flags))?;
+        Ok(())
     }
 }
 
-impl Drop for IOHandle {
-    fn drop(&mut self) {
-        let _ = nix::close(self.fd);
-    }
-}
-
-impl AsRawFd for IOHandle {
+impl AsRawFd for Tty {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd
+        self.fd.as_raw_fd()
     }
 }
 
-impl Write for IOHandle {
+impl AsFd for Tty {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+}
+
+impl Write for Tty {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        nix::write(self.fd, buf).map_err(|err| std::io::Error::from_raw_os_error(err as i32))
+        nix::write(self.as_raw_fd(), buf)
+            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -631,8 +641,9 @@ impl Write for IOHandle {
     }
 }
 
-impl Read for IOHandle {
+impl Read for Tty {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        nix::read(self.fd, buf).map_err(|err| std::io::Error::from_raw_os_error(err as i32))
+        nix::read(self.as_raw_fd(), buf)
+            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
     }
 }

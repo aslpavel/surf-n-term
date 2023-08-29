@@ -327,7 +327,7 @@ impl TerminalRenderer {
                 }
                 let CellKind::Char(character) = &new.kind else {
                     pos.col += 1;
-                    continue
+                    continue;
                 };
                 let character_width = character.width().unwrap_or(0);
                 if character_width == 0 {
@@ -350,7 +350,9 @@ impl TerminalRenderer {
                     let mut repeats = 1;
                     for col in pos.col + 1..self.front.width() {
                         let pos = Position::new(pos.row, col);
-                        let Some(next) = self.front.get(pos) else { break };
+                        let Some(next) = self.front.get(pos) else {
+                            break;
+                        };
                         let next_mark = self.marks.get(pos).copied().unwrap_or_default();
                         if next == new && next_mark != CellMark::Ignored {
                             repeats += 1;
@@ -837,13 +839,13 @@ mod tests {
     }
 
     impl DummyTerminal {
-        fn new(height: usize, width: usize) -> Self {
+        fn new(size: Size) -> Self {
             Self {
                 size: TerminalSize {
-                    cells: Size { height, width },
+                    cells: size,
                     pixels: Size {
-                        height: height * 20,
-                        width: width * 10,
+                        height: size.height * 20,
+                        width: size.width * 10,
                     },
                 },
                 cmds: Default::default(),
@@ -915,7 +917,7 @@ mod tests {
         let purple = "bg=#d3869b".parse()?;
         let red = "bg=#fb4934".parse()?;
 
-        let mut term = DummyTerminal::new(3, 7);
+        let mut term = DummyTerminal::new(Size::new(3, 7));
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let ctx = ViewContext::new(&term)?;
 
@@ -1119,7 +1121,7 @@ mod tests {
         let face = "bg=#665c54,fg=#b8bb26".parse()?;
         let icon = Cell::new_glyph(face, serde_json::from_str(ICON)?);
 
-        let mut term = DummyTerminal::new(5, 10);
+        let mut term = DummyTerminal::new(Size::new(5, 10));
         let mut render = TerminalRenderer::new(&mut term, false)?;
         term.clear();
 
@@ -1257,7 +1259,7 @@ mod tests {
         assert_eq!(size, Size::new(4, 9));
 
         // image
-        let image = Image::new(SurfaceOwned::new(Size::new(14, 30)));
+        let image = Image::new(SurfaceOwned::new(Size::new(20, 30)));
         let image_cell = Cell::new_image(image);
         assert_eq!(image_cell.size(ctx), Size::new(2, 3));
         let pos = image_cell.layout(ctx, max_width, &mut size, &mut cursor);
@@ -1279,7 +1281,7 @@ mod tests {
         let tab_face = "bg=#458588,fg=#fbf1c7".parse()?;
         let mark_face = "bg=#b16286,fg=#fbf1c7".parse()?;
 
-        let mut term = DummyTerminal::new(30, 21);
+        let mut term = DummyTerminal::new(Size::new(30, 21));
         let mut render = TerminalRenderer::new(&mut term, false)?;
         let ctx = ViewContext::new(&term)?;
 
