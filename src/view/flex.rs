@@ -1,5 +1,9 @@
-use super::{Align, AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
+use super::{
+    Align, AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext,
+    ViewDeserializer,
+};
 use crate::{Error, Face, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt};
+use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{cmp::max, fmt};
 
 struct Child<'a> {
@@ -19,13 +23,19 @@ impl<'a> fmt::Debug for Child<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum Justify {
+    #[serde(rename = "start")]
     Start,
+    #[serde(rename = "center")]
     Center,
+    #[serde(rename = "end")]
     End,
+    #[serde(rename = "space-between")]
     SpaceBetween,
+    #[serde(rename = "space-around")]
     SpaceAround,
+    #[serde(rename = "space-evenly")]
     SpaceEvenly,
 }
 
@@ -102,6 +112,72 @@ impl<'a> Flex<'a> {
     pub fn add_flex_child(mut self, flex: f64, child: impl IntoView + 'a) -> Self {
         self.push_flex_child(flex, child);
         self
+    }
+
+    /// Construct [Flex] object from JSON value
+    pub(super) fn from_json_value(
+        seed: &ViewDeserializer<'_>,
+        value: &serde_json::Value,
+    ) -> Result<Self, Error> {
+        let direction = match value.get("direction") {
+            None => Axis::Horizontal,
+            Some(axis) => Axis::deserialize(axis)?,
+        };
+        let justify = match value.get("justify") {
+            None => Justify::Start,
+            Some(justify) => Justify::deserialize(justify)?,
+        };
+        let children = match value.get("children") {
+            None => Vec::new(),
+            Some(serde_json::Value::Array(values)) => {
+                let mut children = Vec::with_capacity(values.len());
+                for value in values {
+                    if value.get("type").is_some() {
+                        children.push(Child {
+                            view: seed.deserialize(value)?.boxed(),
+                            flex: None,
+                            face: None,
+                            align: Align::default(),
+                        })
+                    } else {
+                        let flex = value.get("flex").map(f64::deserialize).transpose()?;
+                        let align = value
+                            .get("align")
+                            .map(Align::deserialize)
+                            .transpose()?
+                            .unwrap_or_default();
+                        let face = value
+                            .get("face")
+                            .map(|value| seed.face(value))
+                            .transpose()?;
+                        let view = value.get("view").ok_or_else(|| {
+                            Error::ParseError(
+                                "Flex",
+                                "child must include view attribute".to_owned(),
+                            )
+                        })?;
+                        children.push(Child {
+                            view: seed.deserialize(view)?,
+                            flex,
+                            face,
+                            align,
+                        })
+                    }
+                }
+                children
+            }
+            _ => {
+                return Err(Error::ParseError(
+                    "Flex",
+                    "children must be an array".to_owned(),
+                ))
+            }
+        };
+        Ok(Flex {
+            direction,
+            justify,
+            children,
+        })
     }
 }
 

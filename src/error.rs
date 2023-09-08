@@ -15,6 +15,7 @@ pub enum Error {
     SvgParseError(SvgParserError),
     ColorError(ColorError),
     InvalidLayout,
+    Json(serde_json::Error),
 }
 
 impl fmt::Display for Error {
@@ -38,6 +39,7 @@ impl std::error::Error for Error {
             FeatureNotSupported => None,
             Other(..) => None,
             InvalidLayout => None,
+            Json(ref error) => Some(error),
         }
     }
 }
@@ -69,6 +71,12 @@ impl From<SvgParserError> for Error {
 impl From<ColorError> for Error {
     fn from(error: ColorError) -> Self {
         Self::ColorError(error)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Json(value)
     }
 }
 

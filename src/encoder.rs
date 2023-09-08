@@ -179,22 +179,28 @@ const BASE64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 /// Writable object which encodes input to base64 and writes it in underlying stream
 pub struct Base64Encoder<W> {
     inner: W,
-    buffer: Vec<u8>,
+    buffer: [u8; 3],
+    size: usize,
 }
 
 impl<W: Write> Base64Encoder<W> {
     pub fn new(inner: W) -> Self {
         Self {
             inner,
-            buffer: Vec::with_capacity(3),
+            buffer: [0u8; 3],
+            size: 0,
         }
     }
 
     /// finalize base64 stream, returning underlying stream
     pub fn finish(self) -> std::io::Result<W> {
-        let Self { mut inner, buffer } = self;
+        let Self {
+            mut inner,
+            buffer,
+            size,
+        } = self;
         let mut dst = [b'='; 4];
-        let mut iter = buffer.into_iter();
+        let mut iter = buffer[..size].into_iter();
         if let Some(s0) = iter.next() {
             dst[0] = BASE64[(s0 >> 2) as usize];
             if let Some(s1) = iter.next() {
@@ -217,20 +223,17 @@ impl<W: Write> Base64Encoder<W> {
 impl<W: Write> Write for Base64Encoder<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         for b in buf.iter().copied() {
-            self.buffer.push(b);
-            if self.buffer.len() == 3 {
-                match self.buffer.as_slice() {
-                    [s0, s1, s2] => {
-                        let mut dst = [b'='; 4];
-                        dst[0] = BASE64[(s0 >> 2) as usize];
-                        dst[1] = BASE64[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
-                        dst[2] = BASE64[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
-                        dst[3] = BASE64[(s2 & 0x3f) as usize];
-                        self.inner.write_all(&dst)?;
-                    }
-                    _ => unreachable!(),
-                }
-                self.buffer.clear();
+            self.buffer[self.size] = b;
+            self.size += 1;
+            if self.size == 3 {
+                let [s0, s1, s2] = self.buffer;
+                let mut dst = [b'='; 4];
+                dst[0] = BASE64[(s0 >> 2) as usize];
+                dst[1] = BASE64[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
+                dst[2] = BASE64[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
+                dst[3] = BASE64[(s2 & 0x3f) as usize];
+                self.inner.write_all(&dst)?;
+                self.size = 0;
             }
         }
         Ok(buf.len())

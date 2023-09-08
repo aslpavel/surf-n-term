@@ -2,31 +2,31 @@ use std::time::Duration;
 use surf_n_term::{
     render::TerminalRenderer,
     view::{Align, Axis, Container, Flex, Frame, ScrollBar, Text, View, ViewContext},
-    BBox, Color, Error, Face, FaceAttrs, FillRule, Glyph, Path, Position, Size, SurfaceMut,
-    SystemTerminal, Terminal, TerminalCommand, TerminalSurfaceExt, RGBA,
+    Color, Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal, TerminalCommand,
+    TerminalSurfaceExt, RGBA,
 };
 
 const HIGHT: usize = 10;
+const ICON: &str = "
+{
+    \"path\": \"M19.873 3.49a.75.75 0 1 0-.246-1.48l-6 1a.75.75 0 0 0-.613.593L12.736\\n\
+    5H5.75a.75.75 0 0 0-.75.75v4a3.25 3.25 0 0 0 3 3.24v.51c0 1.953 1.4 3.579\\n\
+    3.25 3.93v3.07h-2.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-2.5v-3.07A4.001\\n\
+    4.001 0 0 0 16 13.5v-.51a3.25 3.25 0 0 0 3-3.24v-4a.75.75 0 0 0-.75-.75h-3.985\\n\
+    l.119-.595 5.49-.915ZM17.5 8h-3.835l.3-1.5H17.5V8Zm-4.135 1.5H17.5v.25a1.75\\n\
+    1.75 0 0 1-1.75 1.75h-.5a.75.75 0 0 0-.75.75v1.25a2.5 2.5 0 0 1-5 0v-1.25\\n\
+    a.75.75 0 0 0-.75-.75h-.5A1.75 1.75 0 0 1 6.5 9.75V9.5h5.335l-.82 4.103a.75\\n\
+    .75 0 1 0 1.47.294l.88-4.397ZM12.135 8H6.5V6.5h5.935l-.3 1.5Z\",
+    \"view\": [0, 0, 24, 24],
+    \"size\": [1, 3]
+}
+";
 
 fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View + 'a, Error> {
     let fg: RGBA = "#ebdbb2".parse()?;
     let bg: RGBA = "#282828".parse()?;
     let accent: RGBA = "#d3869b".parse()?;
-    let icon = Glyph::new(
-        "M19.873 3.49a.75.75 0 1 0-.246-1.48l-6 1a.75.75 0 0 0-.613.593L12.736
-        5H5.75a.75.75 0 0 0-.75.75v4a3.25 3.25 0 0 0 3 3.24v.51c0 1.953 1.4 3.579
-        3.25 3.93v3.07h-2.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-2.5v-3.07A4.001
-        4.001 0 0 0 16 13.5v-.51a3.25 3.25 0 0 0 3-3.24v-4a.75.75 0 0 0-.75-.75h-3.985
-        l.119-.595 5.49-.915ZM17.5 8h-3.835l.3-1.5H17.5V8Zm-4.135 1.5H17.5v.25a1.75
-        1.75 0 0 1-1.75 1.75h-.5a.75.75 0 0 0-.75.75v1.25a2.5 2.5 0 0 1-5 0v-1.25
-        a.75.75 0 0 0-.75-.75h-.5A1.75 1.75 0 0 1 6.5 9.75V9.5h5.335l-.82 4.103a.75
-        .75 0 1 0 1.47.294l.88-4.397ZM12.135 8H6.5V6.5h5.935l-.3 1.5Z"
-            .parse::<Path>()?,
-        FillRule::NonZero,
-        Some(BBox::new((0.0, 0.0), (24.0, 24.0))),
-        Size::new(1, 3),
-        String::new(),
-    );
+    let icon = serde_json::from_str(ICON)?;
 
     let input_face = Face::new(Some(fg), Some(bg), FaceAttrs::EMPTY);
     let list_default_face = Face::new(

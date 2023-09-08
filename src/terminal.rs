@@ -533,7 +533,9 @@ pub enum TerminalEvent {
 }
 
 /// Size
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
@@ -565,25 +567,6 @@ impl Size {
             height: self.height.clamp(min.height, max.height),
             width: self.width.clamp(min.width, max.width),
         }
-    }
-}
-
-impl Serialize for Size {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        (self.height, self.width).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Size {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let (height, width) = Deserialize::deserialize(deserializer)?;
-        Ok(Size::new(height, width))
     }
 }
 

@@ -6,7 +6,11 @@ use crate::{
     Face, FaceAttrs, Key, KeyMod, KeyName, Position, TerminalCommand, RGBA,
 };
 use lazy_static::lazy_static;
-use std::{collections::BTreeMap, fmt, io::BufRead};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    io::{BufRead, Read},
+};
 
 /// Decoder interface
 pub trait Decoder {
@@ -1112,6 +1116,106 @@ pub fn hex_decode(slice: &[u8]) -> impl Iterator<Item = u8> + '_ {
         .flatten()
 }
 
+pub struct Base64Decoder<R> {
+    read: R,
+    output: [u8; 3],
+    offset: usize,
+    size: usize,
+}
+
+impl<R: Read> Base64Decoder<R> {
+    pub fn new(read: R) -> Self {
+        Self {
+            read,
+            output: [0u8; 3],
+            offset: 0,
+            size: 0,
+        }
+    }
+}
+
+impl<R: Read> Read for Base64Decoder<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut offset = 0;
+        'outer: loop {
+            if self.offset >= self.size {
+                self.offset = 0;
+                self.size = 0;
+
+                let mut input = [0u8; 4];
+                let size = self.read.read(&mut input)?;
+                if size == 0 {
+                    break;
+                } else if size != 4 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        Error::ParseError(
+                            "Base64Decoder",
+                            format!("input length is not divadable by 4"),
+                        ),
+                    ));
+                }
+
+                for (index, byte) in input.iter().enumerate() {
+                    // decode value
+                    let value = match byte {
+                        b'A'..=b'Z' => byte - b'A',
+                        b'a'..=b'z' => byte - b'a' + 26,
+                        b'0'..=b'9' => byte - b'0' + 52,
+                        b'+' => 62,
+                        b'/' => 63,
+                        b'=' => break,
+                        _ => {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                Error::ParseError(
+                                    "Base64Decoder",
+                                    format!("unexpected byte: {byte}"),
+                                ),
+                            ))
+                        }
+                    };
+
+                    // updates output
+                    match index {
+                        0 => {
+                            self.output[0] = value << 2; // 0b__012345
+                            self.size = 1;
+                        }
+                        1 => {
+                            self.output[0] |= value >> 4; // 0b45______
+                            self.output[1] = value << 4; // 0b____0123
+                            self.size = 1;
+                        }
+                        2 => {
+                            self.output[1] |= value >> 2; // 0b2345____
+                            self.output[2] = value << 6; // 0b______01
+                            self.size = 2;
+                        }
+                        3 => {
+                            self.output[2] |= value; //0b012345__
+                            self.size = 3;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            if self.offset >= self.size {
+                break;
+            }
+            for index in self.offset..self.size {
+                if offset >= buf.len() {
+                    break 'outer;
+                }
+                buf[offset] = self.output[index];
+                offset += 1;
+                self.offset += 1;
+            }
+        }
+        Ok(offset)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1189,27 +1293,17 @@ mod tests {
 
     #[test]
     fn test_cursor_position() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(cursor.get_mut(), "\x1b[97;15R")?;
-
         assert_eq!(
-            decoder.decode(&mut cursor)?,
+            TTYDecoder::new().decode(Cursor::new("\x1b[97;15R"))?,
             Some(TerminalEvent::CursorPosition(Position { row: 96, col: 14 })),
         );
-
         Ok(())
     }
 
     #[test]
     fn test_terminal_size() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(cursor.get_mut(), "\x1b[8;101;202t\x1b[4;3104;1482t")?;
         assert_eq!(
-            decoder.decode(&mut cursor)?,
+            TTYDecoder::new().decode(Cursor::new("\x1b[8;101;202t\x1b[4;3104;1482t"))?,
             Some(TerminalEvent::Size(TerminalSize {
                 cells: Size {
                     width: 202,
@@ -1221,7 +1315,6 @@ mod tests {
                 }
             })),
         );
-
         Ok(())
     }
 
@@ -1265,16 +1358,10 @@ mod tests {
 
     #[test]
     fn test_char() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(cursor.get_mut(), "\u{1F431}")?;
-
         assert_eq!(
-            decoder.decode(&mut cursor)?,
+            TTYDecoder::new().decode(Cursor::new("\u{1F431}"))?,
             Some(TerminalEvent::Key(KeyName::Char('🐱').into())),
         );
-
         Ok(())
     }
 
@@ -1286,7 +1373,6 @@ mod tests {
         let mut decoder = TTYDecoder::new();
 
         write!(cursor.get_mut(), "\x1b[?1000;1$y")?;
-
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::DecMode {
@@ -1296,7 +1382,6 @@ mod tests {
         );
 
         write!(cursor.get_mut(), "\x1b[?2026;0$y")?;
-
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::DecMode {
@@ -1438,13 +1523,8 @@ mod tests {
 
     #[test]
     fn test_da1() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(cursor.get_mut(), "\x1b[?62;c\x1b[?64;4c")?;
-
         let mut result = Vec::new();
-        decoder.decode_into(&mut cursor, &mut result)?;
+        TTYDecoder::new().decode_into(Cursor::new("\x1b[?62;c\x1b[?64;4c"), &mut result)?;
         assert_eq!(
             result,
             vec![
@@ -1458,16 +1538,11 @@ mod tests {
 
     #[test]
     fn test_osc() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(
-            cursor.get_mut(),
-            "\x1b]4;1;rgb:cc/24/1d\x1b\\\x1b]10;#ebdbb2\x07"
-        )?;
-
         let mut result = Vec::new();
-        decoder.decode_into(&mut cursor, &mut result)?;
+        TTYDecoder::new().decode_into(
+            Cursor::new("\x1b]4;1;rgb:cc/24/1d\x1b\\\x1b]10;#ebdbb2\x07"),
+            &mut result,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -1487,16 +1562,13 @@ mod tests {
 
     #[test]
     fn test_sgr() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(
-            cursor.get_mut(),
-            "\x1b[48;5;150m\x1b[1m\x1b[38:2:255:128:64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m"
-        )?;
-
         let mut result = Vec::new();
-        decoder.decode_into(&mut cursor, &mut result)?;
+        TTYDecoder::new().decode_into(
+            Cursor::new(
+                "\x1b[48;5;150m\x1b[1m\x1b[38:2:255:128:64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m",
+            ),
+            &mut result,
+        )?;
         let face = |string: &str| -> Result<_, Error> {
             Ok(TerminalEvent::Command(TerminalCommand::Face(
                 string.parse()?,
@@ -1520,16 +1592,11 @@ mod tests {
 
     #[test]
     fn test_report_setting() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(
-            cursor.get_mut(),
-            "\x1bP1$r48:2:1:2:3m\x1b\\\x1bP1$r0;48:2::6:5:4m\x1b\\"
-        )?;
-
         let mut result = Vec::new();
-        decoder.decode_into(&mut cursor, &mut result)?;
+        TTYDecoder::new().decode_into(
+            Cursor::new("\x1bP1$r48:2:1:2:3m\x1b\\\x1bP1$r0;48:2::6:5:4m\x1b\\"),
+            &mut result,
+        )?;
 
         assert_eq!(
             result,
@@ -1572,14 +1639,26 @@ mod tests {
 
     #[test]
     fn test_bracketed_paste() -> Result<(), Error> {
-        let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
-
-        write!(cursor.get_mut(), "\x1b[200~some awesome text\x1b[201~")?;
         assert_eq!(
-            decoder.decode(&mut cursor)?,
+            TTYDecoder::new().decode(Cursor::new("\x1b[200~some awesome text\x1b[201~"))?,
             Some(TerminalEvent::Paste("some awesome text".to_string())),
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_base64() -> Result<(), Error> {
+        for (base64, reference) in [
+            ("TWFu", "Man"),
+            ("bGlnaHQgd29yay4=", "light work."),
+            ("bGlnaHQgd29yaw==", "light work"),
+            ("bGlnaHQgd29y", "light wor"),
+            ("bWFnZ290", "maggot"),
+        ] {
+            let mut result = String::new();
+            Base64Decoder::new(Cursor::new(base64)).read_to_string(&mut result)?;
+            assert_eq!(result, reference);
+        }
 
         Ok(())
     }

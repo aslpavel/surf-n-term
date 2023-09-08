@@ -1,9 +1,15 @@
+use rasterize::RGBA;
+use serde::{
+    de::{self, DeserializeSeed},
+    Deserialize, Deserializer,
+};
+
 use super::{BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{
-    surface::ViewBounds, Cell, Error, Face, Glyph, Position, Size, TerminalSurface,
-    TerminalSurfaceExt,
+    surface::ViewBounds, Cell, Error, Face, FaceDeserializer, Glyph, Position, Size,
+    TerminalSurface, TerminalSurfaceExt,
 };
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
 impl View for str {
     fn render<'b>(
@@ -204,8 +210,73 @@ impl View for Text {
     }
 }
 
+/// Deserializer for [Text]
+///
+/// Text deserialized from the following recursive definition:
+/// `Text = String | [Text] | { face: Face, text: Text, glyph: Glyph }`
+pub struct TextDeserializer<'a> {
+    pub colors: &'a HashMap<String, RGBA>,
+}
+
+impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
+    type Value = Text;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde_json::Value;
+
+        fn collect_rec(
+            text: &mut Text,
+            colors: &HashMap<String, RGBA>,
+            value: &Value,
+        ) -> Result<(), Error> {
+            match value {
+                Value::String(string) => {
+                    text.push_str(&string, None);
+                }
+                Value::Object(map) => {
+                    let face = match map.get("face") {
+                        Some(face) => FaceDeserializer { colors }.deserialize(face)?,
+                        None => Face::default(),
+                    };
+                    let face_old = text.face;
+                    text.set_face(face_old.overlay(&face));
+                    if let Some(glyph) = map.get("glyph") {
+                        text.put_glyph(Glyph::deserialize(glyph)?);
+                    } else {
+                        if let Some(text_value) = map.get("text") {
+                            collect_rec(text, colors, text_value)?;
+                        }
+                    }
+                    text.face = face_old;
+                }
+                Value::Array(text_values) => {
+                    for text_value in text_values {
+                        collect_rec(text, colors, text_value)?;
+                    }
+                }
+                _ => {
+                    return Err(Error::ParseError(
+                        "Text",
+                        "expected: {map|list|str}".to_owned(),
+                    ))
+                }
+            }
+            Ok(())
+        }
+        let mut text = Text::new();
+        collect_rec(&mut text, self.colors, &Value::deserialize(deserializer)?)
+            .map_err(de::Error::custom)?;
+        Ok(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use rasterize::SVG_COLORS;
+
     use super::*;
 
     #[test]
@@ -290,6 +361,47 @@ mod tests {
         print!("{tag} 16 chars: {:?}", text.debug(size));
         let layout = text.layout(&ctx, BoxConstraint::loose(size));
         assert_eq!(layout.size, Size::new(6, 20));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_text_serde() -> Result<(), Error> {
+        use serde_json::json;
+
+        let face0_str = "fg=black,bg=#ff0000";
+        let face1_str = "fg=black,bg=#00ff00/.5";
+        let text_json = json!({
+            "face": face0_str,
+            "text": [
+                "a",
+                {
+                    "text": "b",
+                    "face": face1_str, // overlay
+                },
+                "c" // face must be restored
+            ]
+        });
+
+        let text = TextDeserializer {
+            colors: &SVG_COLORS,
+        }
+        .deserialize(text_json)?;
+        print!(
+            "[text serde] nested text and faces: {:?}",
+            text.debug(Size::new(1, 3))
+        );
+
+        let face0 = face0_str.parse()?;
+        let face1 = face1_str.parse()?;
+        assert_eq!(
+            text.cells,
+            vec![
+                Cell::new_char(face0, 'a'),
+                Cell::new_char(face0.overlay(&face1), 'b'),
+                Cell::new_char(face0, 'c'),
+            ]
+        );
 
         Ok(())
     }

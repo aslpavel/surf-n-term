@@ -1,26 +1,34 @@
 //! [Container] view can specify the size and alignment for its child view
 use std::ops::Add;
 
-use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext};
+use serde::{de::DeserializeSeed, Deserialize, Serialize};
+
+use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext, ViewDeserializer};
 use crate::{
     Error, Face, FaceAttrs, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 
 /// Alignment of a child view
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Align {
     /// Align to the smallest value along the axis
+    #[serde(rename = "start")]
     Start,
     /// Align to the center along the axis
+    #[serde(rename = "center")]
     Center,
     /// Align to the end along the axis
+    #[serde(rename = "end")]
     End,
     /// Take all available space along the axis
+    #[serde(rename = "expand")]
     Expand,
     /// Try to shrink container to match the size of the child
+    #[serde(rename = "shrink")]
     Shrink,
     /// Place  the view at the specified offset, negative means offset is from
     /// the maximum value
+    #[serde(rename = "offset")]
     Offset(i32),
 }
 
@@ -48,11 +56,15 @@ impl Default for Align {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Margins {
+    #[serde(default)]
     pub left: usize,
+    #[serde(default)]
     pub right: usize,
+    #[serde(default)]
     pub top: usize,
+    #[serde(default)]
     pub bottom: usize,
 }
 
@@ -233,6 +245,49 @@ impl<V: View> View for Container<V> {
         // layout tree
         Tree::new(Layout::new().with_size(container_size), vec![child_layout])
     }
+}
+
+/// Construct [Container] object from JSON value
+pub(super) fn from_json_value(
+    seed: &ViewDeserializer<'_>,
+    value: &serde_json::Value,
+) -> Result<Container<Box<dyn View>>, Error> {
+    let face = value
+        .get("face")
+        .map(|value| seed.face(value))
+        .transpose()?
+        .unwrap_or_default();
+    let align_vertical = value
+        .get("vertical")
+        .map(Align::deserialize)
+        .transpose()?
+        .unwrap_or_default();
+    let align_horizontal = value
+        .get("horizontal")
+        .map(Align::deserialize)
+        .transpose()?
+        .unwrap_or_default();
+    let margins = value
+        .get("marins")
+        .map(Margins::deserialize)
+        .transpose()?
+        .unwrap_or_default();
+    let size = value
+        .get("size")
+        .map(Size::deserialize)
+        .transpose()?
+        .unwrap_or_default();
+    let view = value
+        .get("child")
+        .ok_or_else(|| Error::ParseError("Container", "must include child attribute".to_owned()))?;
+    Ok(Container {
+        child: seed.deserialize(view)?,
+        face,
+        align_vertical,
+        align_horizontal,
+        margins,
+        size,
+    })
 }
 
 #[cfg(test)]

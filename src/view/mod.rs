@@ -7,9 +7,11 @@ mod flex;
 pub use flex::{Flex, Justify};
 
 mod scrollbar;
+use rasterize::{RGBADeserializer, SVG_COLORS};
 pub use scrollbar::ScrollBar;
 
 mod text;
+use serde_json::Value;
 pub use text::Text;
 
 mod dynamic;
@@ -19,14 +21,22 @@ mod frame;
 pub use frame::Frame;
 
 use crate::{
-    encoder::ColorDepth, Cell, Error, Face, FaceAttrs, Position, Size, SurfaceMut, SurfaceOwned,
-    Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
+    encoder::ColorDepth, image::ImageAsciiView, Cell, Error, Face, FaceAttrs, FaceDeserializer,
+    Glyph, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal, TerminalSurface,
+    TerminalSurfaceExt, RGBA,
+};
+use serde::{
+    de::{self, DeserializeSeed},
+    Deserialize, Deserializer, Serialize,
 };
 use std::{
     any::Any,
+    collections::HashMap,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
 };
+
+use self::text::TextDeserializer;
 
 /// View is anything that can be layed out and rendered to the terminal
 pub trait View {
@@ -476,9 +486,11 @@ impl<'a> Iterator for FindPath<'a> {
 }
 
 /// Major axis of the [Flex] and [ScrollBar] views
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Axis {
+    #[serde(rename = "horizontal")]
     Horizontal,
+    #[serde(rename = "vertical")]
     Vertical,
 }
 
@@ -631,6 +643,19 @@ impl<T: Clone + Any, V: View> Tag<T, V> {
     }
 }
 
+fn tag_from_json_value(
+    seed: &ViewDeserializer<'_>,
+    value: &serde_json::Value,
+) -> Result<Tag<serde_json::Value, Box<dyn View>>, Error> {
+    let view = value
+        .get("view")
+        .ok_or_else(|| Error::ParseError("Tag", "must include view attribute".to_owned()))?;
+    let tag = value
+        .get("tag")
+        .ok_or_else(|| Error::ParseError("Tag", "must include tag attribute".to_owned()))?;
+    Ok(Tag::new(tag.clone(), seed.deserialize(view)?))
+}
+
 impl<T: Clone + Any, V: View> View for Tag<T, V> {
     fn render<'a>(
         &self,
@@ -679,6 +704,92 @@ impl View for RGBA {
 
     fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         Tree::leaf(Layout::new().with_size(ct.max()))
+    }
+}
+
+/// View deserializer
+pub struct ViewDeserializer<'a> {
+    colors: &'a HashMap<String, RGBA>,
+    handlers: HashMap<
+        String,
+        Box<dyn for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> Box<dyn View>>,
+    >,
+}
+
+impl<'a> ViewDeserializer<'a> {
+    pub fn new(colors: Option<&'a HashMap<String, RGBA>>) -> Self {
+        Self {
+            colors: colors.unwrap_or(&SVG_COLORS),
+            handlers: HashMap::default(),
+        }
+    }
+
+    pub fn face<'de, D>(&self, deserializer: D) -> Result<Face, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        FaceDeserializer {
+            colors: self.colors,
+        }
+        .deserialize(deserializer)
+    }
+
+    pub fn register<H>(&mut self, name: impl Into<String>, handler: H)
+    where
+        H: for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> Box<dyn View> + 'static,
+    {
+        self.handlers.insert(name.into(), Box::new(handler));
+    }
+}
+
+impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
+    type Value = Box<dyn View>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let Some(view_type) = value.get("type").and_then(Value::as_str) else {
+            return Err(de::Error::custom("map expected with \"type\" attribute"));
+        };
+        let view = match view_type {
+            "text" => TextDeserializer {
+                colors: self.colors,
+            }
+            .deserialize(&value)
+            .map_err(de::Error::custom)?
+            .boxed(),
+            "flex" => Flex::from_json_value(&self, &value)
+                .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
+                .boxed(),
+            "container" => container::from_json_value(&self, &value)
+                .map_err(|err| de::Error::custom(format!("[Container] {err}")))?
+                .boxed(),
+            "glyph" => Glyph::deserialize(value)
+                .map_err(|err| de::Error::custom(format!("[Glyph] {err}")))?
+                .boxed(),
+            "image" => Image::deserialize(value)
+                .map_err(|err| de::Error::custom(format!("[Image] {err}")))?
+                .boxed(),
+            "image_ascii" => ImageAsciiView::deserialize(value)
+                .map_err(|err| de::Error::custom(format!("[ImageAscii] {err}")))?
+                .boxed(),
+            "color" => RGBADeserializer {
+                colors: self.colors,
+            }
+            .deserialize(value)
+            .map_err(|err| de::Error::custom(format!("[RGBA] {err}")))?
+            .boxed(),
+            "tag" => tag_from_json_value(self, &value)
+                .map_err(|err| de::Error::custom(format!("[Tag] {err}")))?
+                .boxed(),
+            name => match self.handlers.get(name) {
+                None => return Err(de::Error::custom(format!("unknown view type: {name}"))),
+                Some(handler) => handler(self, &value),
+            },
+        };
+        Ok(view)
     }
 }
 
@@ -766,5 +877,79 @@ mod tests {
                     .with_size(Size::new(3, 4)),
             ]
         );
+    }
+
+    #[test]
+    fn test_view_deserialize() -> Result<(), Error> {
+        let view_value = serde_json::json!({
+            "type": "flex",
+            "direction": "vertical",
+            "justify": "center",
+            "children": [
+                {
+                    "face": "bg=#ff0000/.2",
+                    "view": {
+                        "type": "container",
+                        "horizontal": "center",
+                        "child": {
+                            "type": "text",
+                            "text": {
+                                "face": "bg=white,fg=black,bold",
+                                "text": [
+                                    {
+                                        "glyph": {
+                                            "size": [1, 3],
+                                            "view_box": [0, 0, 128, 128],
+                                            "path": "M20.33 68.63L20.33 68.63L107.67 68.63Q107.26 73.17 106.02 77.49L106.02 77.49L72.86 77.49L72.86 86.35L86.04 86.35L86.04 95.00L77.18 95.00L77.18 103.86L66.27 103.86L66.27 108.18L64 108.18Q52.88 108.18 43.20 102.93Q33.51 97.68 27.44 88.72Q21.36 79.76 20.33 68.63ZM107.67 59.98L107.67 59.98L20.33 59.98Q21.36 48.86 27.44 39.90Q33.51 30.94 43.20 25.69Q52.88 20.43 64 20.43L64 20.43Q74.51 20.43 83.77 25.17L83.77 25.17L83.77 33.62L92.63 33.62L92.63 42.27L99.22 42.27L99.22 51.13L106.02 51.13Q107.26 55.45 107.67 59.98ZM64 41.24L64 41.24Q64 36.71 60.81 33.51Q57.61 30.32 53.08 30.32Q48.55 30.32 45.26 33.51Q41.96 36.71 41.96 41.24Q41.96 45.77 45.26 48.96Q48.55 52.16 53.08 52.16Q57.61 52.16 60.81 48.96Q64 45.77 64 41.24Z",
+                                        }
+                                    },
+                                    "Space Invaders "
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "align": "center",
+                    "face": "bg=#00ff00/.05",
+                    "view": {
+                        "type": "image_ascii",
+                        "data": "eJxjYEAF/5FICA1nQwCUDeIygHn/EQCkGMaEcKCmIOliQAcA3jAt0w==",
+                        "channels": 1,
+                        "size": [10, 13],
+                    }
+                }
+            ]
+        });
+
+        let view = ViewDeserializer::new(None).deserialize(view_value)?;
+        let size = Size::new(10, 20);
+        println!("[view] deserialize: {:?}", view.debug(size));
+        let layout = view.layout(&ViewContext::dummy(), BoxConstraint::loose(size));
+        assert_eq!(
+            layout,
+            Tree::new(
+                Layout::new().with_size(Size::new(8, 20)),
+                vec![
+                    Tree::new(
+                        Layout::new()
+                            .with_position(Position::new(2, 0))
+                            .with_size(Size::new(1, 20)),
+                        vec![Tree::leaf(
+                            Layout::new()
+                                .with_position(Position::new(0, 1))
+                                .with_size(Size::new(1, 18))
+                        )]
+                    ),
+                    Tree::leaf(
+                        Layout::new()
+                            .with_position(Position::new(3, 3))
+                            .with_size(Size::new(5, 13))
+                    )
+                ]
+            )
+        );
+
+        Ok(())
     }
 }

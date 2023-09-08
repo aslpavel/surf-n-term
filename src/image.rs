@@ -6,18 +6,24 @@
 //!  - Quantization and dithering
 use crate::{
     common::{clamp, Rnd},
+    decoder::Base64Decoder,
     encoder::{Base64Encoder, Encoder, TTYEncoder},
     view::{BoxConstraint, Layout, Tree, View, ViewContext},
     Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
 };
-use flate2::{write::ZlibEncoder, Compression};
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use serde::{
+    de,
+    ser::{self, SerializeStruct},
+    Deserialize, Serialize, Serializer,
+};
 use std::{
     borrow::Cow,
-    cmp::Ordering,
+    cmp::{max, Ordering},
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
-    io::Write,
+    io::{Cursor, Read, Write},
     iter::FromIterator,
     ops::{Add, AddAssign, Mul},
     str::FromStr,
@@ -44,12 +50,12 @@ impl Image {
 
     /// Size in cells
     pub fn size_cells(&self, pixels_per_cell: Size) -> Size {
-        if pixels_per_cell.width == 0 || pixels_per_cell.height == 0 {
+        if pixels_per_cell.is_empty() || self.size().is_empty() {
             return Size::new(0, 0);
         }
         Size {
-            height: self.height() / pixels_per_cell.height,
-            width: self.width() / pixels_per_cell.width,
+            height: max(1, self.height() / pixels_per_cell.height),
+            width: max(1, self.width() / pixels_per_cell.width),
         }
     }
 
@@ -189,7 +195,7 @@ impl View for Image {
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        if let Some(cell) = surf.get_mut(layout.pos()) {
+        if let Some(cell) = surf.get_mut(Position::new(0, 0)) {
             *cell = Cell::new_image(self.clone()).with_face(cell.face());
         }
         Ok(())
@@ -201,7 +207,130 @@ impl View for Image {
     }
 }
 
+/// [Image] deserializer encoding is `{ data: base64(deflate(image)), size: Size, channels: u8 }`
+impl<'de> Deserialize<'de> for Image {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        struct ImageVistor;
+
+        impl<'de> de::Visitor<'de> for ImageVistor {
+            type Value = Image;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(
+                    formatter,
+                    "Map with data and size attributes, where data is `base64(deflate(RGBA)))`"
+                )
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut size: Option<Size> = None;
+                let mut data = Vec::new();
+                let mut channels = 3;
+                while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                    match key.as_ref() {
+                        "data" => {
+                            let data_raw = map.next_value::<Cow<'de, str>>()?;
+                            ZlibDecoder::new(Base64Decoder::new(Cursor::new(data_raw.as_bytes())))
+                                .read_to_end(&mut data)
+                                .map_err(de::Error::custom)?;
+                        }
+                        "channels" => {
+                            channels = map.next_value()?;
+                            if !matches!(channels, 1 | 3 | 4) {
+                                return Err(de::Error::custom(Error::ParseError(
+                                    "Image",
+                                    format!("not supported channels value {channels} expected {{1,3,4}}")
+                                )));
+                            }
+                        }
+                        "size" => {
+                            size.replace(map.next_value()?);
+                        }
+                        _ => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                let Some(size) = size else {
+                    return Err(de::Error::custom(Error::ParseError(
+                        "Image",
+                        "missing size".to_owned(),
+                    )));
+                };
+                let expected_size = channels * size.height * size.width;
+                let data_size = data.len();
+                if data_size != expected_size {
+                    return Err(de::Error::custom(Error::ParseError(
+                        "Image",
+                        format!(
+                            "data field has incorrect size {data_size} exepcted {expected_size}"
+                        ),
+                    )));
+                }
+                let surf = match channels {
+                    4 => SurfaceOwned::new_with(size, |pos| {
+                        let offset = 4 * (pos.row * size.width + pos.col);
+                        let r = data[offset];
+                        let g = data[offset + 1];
+                        let b = data[offset + 2];
+                        let a = data[offset + 3];
+                        RGBA::new(r, g, b, a)
+                    }),
+                    3 => SurfaceOwned::new_with(size, |pos| {
+                        let offset = 3 * (pos.row * size.width + pos.col);
+                        let r = data[offset];
+                        let g = data[offset + 1];
+                        let b = data[offset + 2];
+                        RGBA::new(r, g, b, 255)
+                    }),
+                    1 => SurfaceOwned::new_with(size, |pos| {
+                        let v = data[pos.row * size.width + pos.col];
+                        RGBA::new(v, v, v, 255)
+                    }),
+                    _ => unreachable!(),
+                };
+                Ok(Image::new(surf))
+            }
+        }
+
+        deserializer.deserialize_map(ImageVistor)
+    }
+}
+
+impl Serialize for Image {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut writer = ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
+        for pixel in self.iter() {
+            writer.write_all(&pixel.to_rgba()).map_err(|err| {
+                ser::Error::custom(format!("[Image] faield to serialize data: {err}"))
+            })?;
+        }
+        let data = writer.finish().and_then(|w| w.finish()).map_err(|err| {
+            ser::Error::custom(format!("[Image] faield to serialize data: {err}"))
+        })?;
+        let mut image = serializer.serialize_struct("Image", 3)?;
+        image.serialize_field("size", &self.size())?;
+        image.serialize_field("channels", &4)?;
+        image.serialize_field(
+            "data",
+            std::str::from_utf8(&data).expect("base64 contains non utf8"),
+        )?;
+        image.end()
+    }
+}
+
 /// Draw image with ASCII blocks
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ImageAsciiView {
     image: Image,
 }
@@ -1712,5 +1841,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_image_serde() -> Result<(), Error> {
+        let image_value = serde_json::json!({
+            "data": "eJxjYEAF/5FICA1nQwCUDeIygHn/EQCkGMaEcKCmIOliQAcA3jAt0w==",
+            "channels": 1,
+            "size": [10, 13],
+        });
+
+        let image = Image::deserialize(image_value)?;
+        println!(
+            "[image] space invader: {:?}",
+            image.ascii_view().debug(Size::new(5, 13))
+        );
+
+        let image_str = serde_json::to_string(&image)?;
+        let image_serde: Image = serde_json::from_str(&image_str)?;
+        println!(
+            "[image] serde invader: {:?}",
+            image_serde.ascii_view().debug(Size::new(5, 13))
+        );
+
+        assert_eq!(image, image_serde);
+
+        Ok(())
     }
 }
