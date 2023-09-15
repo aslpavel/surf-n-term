@@ -34,12 +34,16 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
+    sync::Arc,
 };
 
 use self::text::TextDeserializer;
 
+pub type BoxView<'a> = Box<dyn View + 'a>;
+pub type ArcView<'a> = Arc<dyn View + 'a>;
+
 /// View is anything that can be layed out and rendered to the terminal
-pub trait View {
+pub trait View: Send + Sync {
     /// Render view into a given surface with the provided layout
     fn render<'a>(
         &self,
@@ -52,9 +56,9 @@ pub trait View {
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout>;
 
     /// Convert into boxed view
-    fn boxed<'a>(self) -> Box<dyn View + 'a>
+    fn boxed<'a>(self) -> BoxView<'a>
     where
-        Self: Sized + 'a,
+        Self: Sized + Send + Sync + 'a,
     {
         Box::new(self)
     }
@@ -93,7 +97,7 @@ impl<'a, V: View + ?Sized> View for &'a V {
     }
 }
 
-impl<'a> View for Box<dyn View + 'a> {
+impl<T: View + ?Sized> View for Box<T> {
     fn render<'b>(
         &self,
         ctx: &ViewContext,
@@ -106,12 +110,20 @@ impl<'a> View for Box<dyn View + 'a> {
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
         (**self).layout(ctx, ct)
     }
+}
 
-    fn boxed<'b>(self) -> Box<dyn View + 'b>
-    where
-        Self: Sized + 'b,
-    {
-        self
+impl<T: View + ?Sized> View for Arc<T> {
+    fn render<'b>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'b mut TerminalSurface<'b>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        (**self).render(ctx, surf, layout)
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        (**self).layout(ctx, ct)
     }
 }
 
@@ -143,7 +155,7 @@ pub struct TraceLayout<V, T> {
 impl<V, S> View for TraceLayout<V, S>
 where
     V: View,
-    S: Fn(&BoxConstraint, &Tree<Layout>),
+    S: Fn(&BoxConstraint, &Tree<Layout>) + Send + Sync,
 {
     fn render<'a>(
         &self,
@@ -646,7 +658,7 @@ impl<T: Clone + Any, V: View> Tag<T, V> {
 fn tag_from_json_value(
     seed: &ViewDeserializer<'_>,
     value: &serde_json::Value,
-) -> Result<Tag<serde_json::Value, Box<dyn View>>, Error> {
+) -> Result<Tag<serde_json::Value, BoxView<'static>>, Error> {
     let view = value
         .get("view")
         .ok_or_else(|| Error::ParseError("Tag", "must include view attribute".to_owned()))?;
@@ -656,7 +668,11 @@ fn tag_from_json_value(
     Ok(Tag::new(tag.clone(), seed.deserialize(view)?))
 }
 
-impl<T: Clone + Any, V: View> View for Tag<T, V> {
+impl<T, V> View for Tag<T, V>
+where
+    T: Clone + Any + Send + Sync,
+    V: View,
+{
     fn render<'a>(
         &self,
         ctx: &ViewContext,
@@ -712,7 +728,7 @@ pub struct ViewDeserializer<'a> {
     colors: &'a HashMap<String, RGBA>,
     handlers: HashMap<
         String,
-        Box<dyn for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> Box<dyn View>>,
+        Box<dyn for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> BoxView<'static>>,
     >,
 }
 
@@ -736,14 +752,15 @@ impl<'a> ViewDeserializer<'a> {
 
     pub fn register<H>(&mut self, name: impl Into<String>, handler: H)
     where
-        H: for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> Box<dyn View> + 'static,
+        H: for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> BoxView<'static>
+            + 'static,
     {
         self.handlers.insert(name.into(), Box::new(handler));
     }
 }
 
 impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
-    type Value = Box<dyn View>;
+    type Value = BoxView<'static>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -815,12 +832,15 @@ mod tests {
         }
         let color = "#ff0000".parse::<RGBA>()?;
         let color_boxed = color.boxed();
+        let color_arc: ArcView<'static> = Arc::new(color);
 
         witness(color);
         witness(&color);
         witness(&color as &dyn View);
         witness(&color_boxed);
         witness(color_boxed);
+        witness(&color_arc);
+        witness(color_arc);
 
         Ok(())
     }

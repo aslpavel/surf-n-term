@@ -11,7 +11,7 @@ pub struct Dynamic<B> {
 
 impl<B, V> Dynamic<B>
 where
-    B: Fn(&ViewContext, BoxConstraint) -> V,
+    B: Fn(&ViewContext, BoxConstraint) -> V + Send + Sync,
     V: View + 'static,
 {
     pub fn new(build: B) -> Self {
@@ -21,7 +21,7 @@ where
 
 impl<B, V> View for Dynamic<B>
 where
-    B: Fn(&ViewContext, BoxConstraint) -> V,
+    B: Fn(&ViewContext, BoxConstraint) -> V + Send + Sync,
     V: View + 'static,
 {
     fn render<'a>(
