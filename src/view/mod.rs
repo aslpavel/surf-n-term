@@ -20,6 +20,8 @@ pub use dynamic::Dynamic;
 mod frame;
 pub use frame::Frame;
 
+pub use either::{self, Either};
+
 use crate::{
     encoder::ColorDepth, image::ImageAsciiView, Cell, Error, Face, FaceAttrs, FaceDeserializer,
     Glyph, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal, TerminalSurface,
@@ -636,6 +638,25 @@ impl Axis {
                 },
             ),
         }
+    }
+}
+
+impl<L, R> View for either::Either<L, R>
+where
+    L: View,
+    R: View,
+{
+    fn render<'a>(
+        &self,
+        ctx: &ViewContext,
+        surf: &'a mut TerminalSurface<'a>,
+        layout: &Tree<Layout>,
+    ) -> Result<(), Error> {
+        either::for_both!(self, view => view.render(ctx, surf, layout))
+    }
+
+    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        either::for_both!(self, view => view.layout(ctx, ct))
     }
 }
 
