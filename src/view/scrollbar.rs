@@ -19,7 +19,7 @@ impl ScrollBar {
             direction,
             face,
             total,
-            offset: min(total, offset),
+            offset: min(total.saturating_sub(visible), offset),
             visible: min(total, visible),
         }
     }
@@ -44,8 +44,8 @@ impl View for ScrollBar {
                 let offset = self.offset as f64;
                 let visible = self.visible as f64;
                 let size = (major * visible / total).clamp(1.0, major).round();
-                let offset = ((major - size) * offset / (total - 1.0)).round();
-                (size as usize, offset as usize)
+                let offset = ((major - size) * offset / (total - visible - 1.0).max(1.0)).round();
+                (size as usize, offset.min(major - size) as usize)
             }
             Ordering::Equal => (major, 0),
             Ordering::Less => (0, 0),
@@ -101,15 +101,15 @@ mod tests {
         print!("{:?}", bar.debug(size));
 
         let surf = render(ctx, &bar, size)?;
-        surf.view(0u32, 0..3u32)
+        surf.view(0u32, 0..4u32)
             .iter()
             .enumerate()
             .for_each(|(index, cell)| assert_eq!(cell.face().bg, bg, "at {index}"));
-        surf.view(0u32, 3..9u32)
+        surf.view(0u32, 4..10u32)
             .iter()
             .enumerate()
             .for_each(|(index, cell)| assert_eq!(cell.face().bg, fg, "at {index}"));
-        surf.view(0u32, 9..size.width)
+        surf.view(0u32, 10..size.width)
             .iter()
             .enumerate()
             .for_each(|(index, cell)| assert_eq!(cell.face().bg, bg, "at {index}"));
