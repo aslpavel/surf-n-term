@@ -1116,108 +1116,109 @@ pub fn hex_decode(slice: &[u8]) -> impl Iterator<Item = u8> + '_ {
         .flatten()
 }
 
+const BASE64_DECODE: &[u8; 256] = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00>\x00\x00\x00?456789:;<=\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x00\x00\x00\x00\x00\x00\x1a\x1b\x1c\x1d\x1e\x1f !\x22#$%&\'()*+,-./0123\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+
 pub struct Base64Decoder<R> {
     read: R,
-    output: [u8; 3],
-    offset: usize,
-    size: usize,
+    buffer: [u8; 64],
+    buffer_offset: usize,
+    buffer_size: usize,
 }
 
 impl<R: Read> Base64Decoder<R> {
     pub fn new(read: R) -> Self {
         Self {
             read,
-            output: [0u8; 3],
-            offset: 0,
-            size: 0,
+            buffer: [0u8; 64],
+            buffer_offset: 0,
+            buffer_size: 0,
         }
+    }
+
+    /// Decode 4 base64 bytes into 3 bytes
+    #[inline]
+    pub fn decode_u8x4(chunk: [u8; 4]) -> [u8; 3] {
+        let [i0, i1, i2, i3] = chunk;
+        let o0 = BASE64_DECODE[i0 as usize];
+        let o1 = BASE64_DECODE[i1 as usize];
+        let o2 = BASE64_DECODE[i2 as usize];
+        let o3 = BASE64_DECODE[i3 as usize];
+        let b0 = (o0 << 2) | (o1 >> 4);
+        let b1 = (o1 << 4) | (o2 >> 2);
+        let b2 = (o2 << 6) | o3;
+        return [b0, b1, b2];
+    }
+
+    /// Decode number of encoded bytes based on the padding symbol
+    #[inline]
+    pub fn decode_size(chunk: [u8; 4]) -> usize {
+        let [_, _, i2, i3] = chunk;
+        if i2 == b'=' {
+            1
+        } else if i3 == b'=' {
+            2
+        } else {
+            3
+        }
+    }
+
+    fn buffer(&self) -> &[u8] {
+        &self.buffer[self.buffer_offset..self.buffer_size]
+    }
+
+    fn buffer_fill(&mut self) -> std::io::Result<()> {
+        if self.buffer_offset == self.buffer_size {
+            self.buffer_offset = 0;
+            self.buffer_size = 0;
+        }
+        while self.buffer_size + 3 <= self.buffer.len() {
+            let mut input = [0u8; 4];
+            let size = self.read.read(&mut input)?;
+            if size == 0 {
+                break;
+            } else if size != 4 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    Error::ParseError(
+                        "Base64Decoder",
+                        format!("input length is not dividable by 4"),
+                    ),
+                ));
+            }
+            let out = Self::decode_u8x4(input);
+            let out_size = Self::decode_size(input);
+            self.buffer[self.buffer_size..self.buffer_size + out_size]
+                .copy_from_slice(&out[..out_size]);
+            self.buffer_size += out_size;
+        }
+        Ok(())
     }
 }
 
 impl<R: Read> Read for Base64Decoder<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let mut offset = 0;
-        'outer: loop {
-            if self.offset >= self.size {
-                self.offset = 0;
-                self.size = 0;
-
-                let mut input = [0u8; 4];
-                let size = self.read.read(&mut input)?;
-                if size == 0 {
-                    break;
-                } else if size != 4 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        Error::ParseError(
-                            "Base64Decoder",
-                            format!("input length is not divadable by 4"),
-                        ),
-                    ));
-                }
-
-                for (index, byte) in input.iter().enumerate() {
-                    // decode value
-                    let value = match byte {
-                        b'A'..=b'Z' => byte - b'A',
-                        b'a'..=b'z' => byte - b'a' + 26,
-                        b'0'..=b'9' => byte - b'0' + 52,
-                        b'+' => 62,
-                        b'/' => 63,
-                        b'=' => break,
-                        _ => {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                Error::ParseError(
-                                    "Base64Decoder",
-                                    format!("unexpected byte: {byte}"),
-                                ),
-                            ))
-                        }
-                    };
-
-                    // updates output
-                    match index {
-                        0 => {
-                            self.output[0] = value << 2; // 0b__012345
-                            self.size = 1;
-                        }
-                        1 => {
-                            self.output[0] |= value >> 4; // 0b45______
-                            self.output[1] = value << 4; // 0b____0123
-                            self.size = 1;
-                        }
-                        2 => {
-                            self.output[1] |= value >> 2; // 0b2345____
-                            self.output[2] = value << 6; // 0b______01
-                            self.size = 2;
-                        }
-                        3 => {
-                            self.output[2] |= value; //0b012345__
-                            self.size = 3;
-                        }
-                        _ => unreachable!(),
-                    }
-                }
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let mut out_offset = 0;
+        while out_offset < out.len() {
+            if self.buffer().is_empty() {
+                self.buffer_fill()?;
             }
-            if self.offset >= self.size {
+            let buffer = self.buffer();
+            if buffer.is_empty() {
                 break;
             }
-            for index in self.offset..self.size {
-                if offset >= buf.len() {
-                    break 'outer;
-                }
-                buf[offset] = self.output[index];
-                offset += 1;
-                self.offset += 1;
-            }
+            let size = buffer.len().min(out.len() - out_offset);
+            out[out_offset..out_offset + size].copy_from_slice(&buffer[..size]);
+            out_offset += size;
+            self.buffer_offset += size;
         }
-        Ok(offset)
+        Ok(out_offset)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::{common::Rnd, encoder::Base64Encoder};
+
     use super::*;
     use std::io::{Cursor, Write};
 
@@ -1660,6 +1661,28 @@ mod tests {
             assert_eq!(result, reference);
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_base64_encode_decode() -> Result<(), Error> {
+        const SIZE: usize = 4096;
+
+        let mut rnd = Rnd::new();
+        let mut data = Vec::new();
+        while data.len() < SIZE {
+            data.write_all(&rnd.next_u8x4())?
+        }
+
+        let mut encoder = Base64Encoder::new(Vec::new());
+        encoder.write_all(&data)?;
+        let encoded = encoder.finish()?;
+
+        let mut decoded = Vec::new();
+        let mut decoder = Base64Decoder::new(encoded.as_slice());
+        decoder.read_to_end(&mut decoded)?;
+
+        assert_eq!(decoded, data);
         Ok(())
     }
 }

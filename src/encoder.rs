@@ -174,7 +174,7 @@ impl Encoder for TTYEncoder {
     }
 }
 
-const BASE64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_ENCODE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Writable object which encodes input to base64 and writes it in underlying stream
 pub struct Base64Encoder<W> {
@@ -202,17 +202,17 @@ impl<W: Write> Base64Encoder<W> {
         let mut dst = [b'='; 4];
         let mut iter = buffer[..size].into_iter();
         if let Some(s0) = iter.next() {
-            dst[0] = BASE64[(s0 >> 2) as usize];
+            dst[0] = BASE64_ENCODE[(s0 >> 2) as usize];
             if let Some(s1) = iter.next() {
-                dst[1] = BASE64[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
+                dst[1] = BASE64_ENCODE[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
                 if let Some(s2) = iter.next() {
-                    dst[2] = BASE64[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
-                    dst[3] = BASE64[(s2 & 0x3f) as usize];
+                    dst[2] = BASE64_ENCODE[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
+                    dst[3] = BASE64_ENCODE[(s2 & 0x3f) as usize];
                 } else {
-                    dst[2] = BASE64[((s1 << 2) & 0x3f) as usize];
+                    dst[2] = BASE64_ENCODE[((s1 << 2) & 0x3f) as usize];
                 }
             } else {
-                dst[1] = BASE64[((s0 << 4) & 0x3f) as usize];
+                dst[1] = BASE64_ENCODE[((s0 << 4) & 0x3f) as usize];
             }
             inner.write_all(&dst)?;
         }
@@ -228,10 +228,10 @@ impl<W: Write> Write for Base64Encoder<W> {
             if self.size == 3 {
                 let [s0, s1, s2] = self.buffer;
                 let mut dst = [b'='; 4];
-                dst[0] = BASE64[(s0 >> 2) as usize];
-                dst[1] = BASE64[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
-                dst[2] = BASE64[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
-                dst[3] = BASE64[(s2 & 0x3f) as usize];
+                dst[0] = BASE64_ENCODE[(s0 >> 2) as usize];
+                dst[1] = BASE64_ENCODE[((s0 << 4 | s1 >> 4) & 0x3f) as usize];
+                dst[2] = BASE64_ENCODE[((s1 << 2 | s2 >> 6) & 0x3f) as usize];
+                dst[3] = BASE64_ENCODE[(s2 & 0x3f) as usize];
                 self.inner.write_all(&dst)?;
                 self.size = 0;
             }

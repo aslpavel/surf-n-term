@@ -203,6 +203,16 @@ impl Rnd {
         (self.step() & 0xffff) << 16 | (self.step() & 0xffff)
     }
 
+    pub fn next_u8x4(&mut self) -> [u8; 4] {
+        let value = self.next_u32();
+        [
+            (value & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            ((value >> 16) & 0xff) as u8,
+            ((value >> 24) & 0xff) as u8,
+        ]
+    }
+
     /// Generate random u64 value
     pub fn next_u64(&mut self) -> u64 {
         ((self.next_u32() as u64) << 32) | (self.next_u32() as u64)
@@ -220,13 +230,8 @@ pub trait Random: Sized {
 
 impl Random for RGBA {
     fn random(rnd: &mut Rnd) -> Self {
-        let value = rnd.next_u32();
-        RGBA::new(
-            (value & 0xff) as u8,
-            ((value >> 8) & 0xff) as u8,
-            ((value >> 16) & 0xff) as u8,
-            255,
-        )
+        let [r, g, b, _] = rnd.next_u8x4();
+        RGBA::new(r, g, b, 255)
     }
 }
 
