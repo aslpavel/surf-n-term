@@ -1,7 +1,6 @@
 use super::{BoxConstraint, Layout, Tree, View, ViewContext};
 use crate::{
-    Cell, Error, Face, Image, Position, Size, Surface, SurfaceMut, SurfaceOwned, TerminalSurface,
-    RGBA,
+    Cell, Error, Face, Image, Position, Shape, Size, Surface, SurfaceMut, TerminalSurface, RGBA,
 };
 use rasterize::{
     BBox, Color, FillRule, Image as RImage, LinColor, LineCap, LineJoin, PathBuilder, Point,
@@ -207,14 +206,14 @@ impl<V: View> View for Frame<V> {
 
 /// Convert rasterized image into an Image
 fn rimage_to_image(image: impl RImage<Pixel = LinColor>) -> Image {
-    let data: Vec<RGBA> = image.iter().map(|c| RGBA::from(*c)).collect();
-    Image::new(SurfaceOwned::from_vec(
-        Size {
+    let data: Arc<[RGBA]> = image.iter().map(|c| RGBA::from(*c)).collect();
+    Image::from_parts(
+        data,
+        Shape::from(Size {
             height: image.height(),
             width: image.width(),
-        },
-        data,
-    ))
+        }),
+    )
 }
 
 /// Find an index given the size of the dimension and the offset

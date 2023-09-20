@@ -130,7 +130,7 @@ impl Glyph {
             }
         }
 
-        Image::new(surf)
+        Image::from(surf)
     }
 
     /// Size of the glyph in cells
@@ -245,7 +245,10 @@ impl FromStr for Glyph {
         )?;
 
         let Some(path) = attrs.path else {
-            return Err(Error::ParseError("Glyph", format!("path is requred: {}",string)))
+            return Err(Error::ParseError(
+                "Glyph",
+                format!("path is requred: {}", string),
+            ));
         };
         Ok(Glyph::new(
             path,

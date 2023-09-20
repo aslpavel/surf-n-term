@@ -115,7 +115,7 @@ fn mandlebrot_imgs(
             let ratio = min(*mand.get(pos).unwrap(), iter) as f64 / count as f64;
             colormap.lookup(ratio).into()
         });
-        imgs.push(Image::new(surf));
+        imgs.push(Image::from(surf));
     }
     imgs
 }

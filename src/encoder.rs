@@ -200,7 +200,7 @@ impl<W: Write> Base64Encoder<W> {
             size,
         } = self;
         let mut dst = [b'='; 4];
-        let mut iter = buffer[..size].into_iter();
+        let mut iter = buffer[..size].iter();
         if let Some(s0) = iter.next() {
             dst[0] = BASE64_ENCODE[(s0 >> 2) as usize];
             if let Some(s1) = iter.next() {

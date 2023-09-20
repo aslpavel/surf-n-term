@@ -8,11 +8,11 @@ use std::{
 };
 use surf_n_term::{
     common::{clamp, Random},
-    Color, LinColor, Size,
+    Color, LinColor, Shape, Size,
 };
-use surf_n_term::{ColorPalette, Image, Surface, SurfaceOwned, RGBA};
+use surf_n_term::{ColorPalette, Image, Surface, RGBA};
 
-/// This not really a ppm loader it is not doing proper validation or anything
+/// This not really a ppm loader it is not doing proper validation of anything
 fn load_ppm(path: impl AsRef<Path>) -> Result<Image, Box<dyn std::error::Error>> {
     let mut file = BufReader::new(File::open(path)?);
 
@@ -32,10 +32,10 @@ fn load_ppm(path: impl AsRef<Path>) -> Result<Image, Box<dyn std::error::Error>>
         let [r, g, b] = color;
         colors.push(RGBA::new(r, g, b, 255));
     }
-    Ok(Image::new(SurfaceOwned::from_vec(
-        Size::new(height, width),
-        colors,
-    )))
+    Ok(Image::from_parts(
+        colors.into(),
+        Shape::from(Size::new(height, width)),
+    ))
 }
 
 fn palette_benchmark(c: &mut Criterion) {
@@ -123,27 +123,46 @@ fn srgb_and_linear_benchmark(c: &mut Criterion) {
     }
 
     let mut group = c.benchmark_group("srgb_and_linear");
-    group.sampling_mode(SamplingMode::Flat);
-    group.throughput(Throughput::Elements(1024 as u64));
-    group.bench_function("naive", |b| {
-        b.iter(|| {
-            for color in colors.iter() {
-                black_box(linear_to_srgb(black_box(srgb_to_linear(*color))));
-            }
+    group
+        .sampling_mode(SamplingMode::Flat)
+        .throughput(Throughput::Elements(1024 as u64))
+        .bench_function("naive", |b| {
+            b.iter(|| {
+                for color in colors.iter() {
+                    black_box(linear_to_srgb(black_box(srgb_to_linear(*color))));
+                }
+            })
         })
-    });
-    group.bench_function("fast", |b| {
-        b.iter(|| {
-            for color in colors.iter() {
-                black_box(RGBA::from(black_box(LinColor::from(*color))));
-            }
-        })
-    });
+        .bench_function("fast", |b| {
+            b.iter(|| {
+                for color in colors.iter() {
+                    black_box(RGBA::from(black_box(LinColor::from(*color))));
+                }
+            })
+        });
+    group.finish();
+}
+
+fn image_resize(c: &mut Criterion) {
+    let img = load_ppm("benches/flamingo.ppm").expect("failed to load flamingo.ppm");
+    let mut group = c.benchmark_group("resize");
+    group
+        .throughput(Throughput::Bytes((img.width() * img.height()) as u64))
+        .bench_function("flamingo_half", |b| {
+            b.iter(|| {
+                let size_half = Size {
+                    height: img.height() / 2,
+                    width: img.width() / 2,
+                };
+                img.resize(size_half);
+            })
+        });
+    group.finish();
 }
 
 criterion_group!(
     name = benches;
     config = Criterion::default(); // .sample_size(30).warm_up_time(Duration::new(2, 0));
-    targets = palette_benchmark, srgb_and_linear_benchmark,
+    targets = palette_benchmark, srgb_and_linear_benchmark, image_resize
 );
 criterion_main!(benches);

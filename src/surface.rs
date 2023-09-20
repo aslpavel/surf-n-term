@@ -65,6 +65,19 @@ impl Shape {
     }
 }
 
+impl From<Size> for Shape {
+    fn from(size: Size) -> Self {
+        Self {
+            start: 0,
+            end: size.height * size.width,
+            width: size.width,
+            height: size.height,
+            row_stride: size.width,
+            col_stride: 1,
+        }
+    }
+}
+
 /// Matrix like object used to store `RGBA` (in case of images) and `Cell` (in case of Terminal)
 pub trait Surface {
     type Item;
@@ -495,8 +508,11 @@ where
     }
 }
 
-impl<T> Surface for Arc<dyn Surface<Item = T>> {
-    type Item = T;
+impl<S> Surface for Arc<S>
+where
+    S: Surface + ?Sized,
+{
+    type Item = S::Item;
 
     fn shape(&self) -> Shape {
         (**self).shape()
@@ -504,6 +520,30 @@ impl<T> Surface for Arc<dyn Surface<Item = T>> {
 
     fn data(&self) -> &[Self::Item] {
         (**self).data()
+    }
+}
+
+impl<S> Surface for Box<S>
+where
+    S: Surface + ?Sized,
+{
+    type Item = S::Item;
+
+    fn shape(&self) -> Shape {
+        (**self).shape()
+    }
+
+    fn data(&self) -> &[Self::Item] {
+        (**self).data()
+    }
+}
+
+impl<S> SurfaceMut for Box<S>
+where
+    S: SurfaceMut + ?Sized,
+{
+    fn data_mut(&mut self) -> &mut [Self::Item] {
+        (**self).data_mut()
     }
 }
 
@@ -552,29 +592,19 @@ impl<T> SurfaceOwned<T> {
                 data.push(f(Position { row, col }));
             }
         }
-        let shape = Shape {
-            row_stride: size.width,
-            col_stride: 1,
-            height: size.height,
-            width: size.width,
-            start: 0,
-            end: data.len(),
-        };
-        Self { shape, data }
+        Self {
+            shape: Shape::from(size),
+            data,
+        }
     }
 
     /// Create owned surface from vector and sizes.
     pub fn from_vec(size: Size, data: Vec<T>) -> Self {
-        assert_eq!(size.height * size.width, data.len());
-        let shape = Shape {
-            row_stride: size.width,
-            col_stride: 1,
-            height: size.height,
-            width: size.width,
-            start: 0,
-            end: data.len(),
-        };
-        Self { shape, data }
+        assert!(size.height * size.width < data.len());
+        Self {
+            shape: Shape::from(size),
+            data,
+        }
     }
 
     pub fn to_vec(self) -> Vec<T> {
@@ -784,7 +814,7 @@ fn range_bounds(bound: impl RangeBounds<i64>, size: usize) -> Option<(usize, usi
 }
 
 /// Construct new offset and shape for
-fn view_shape<RS, CS>(shape: Shape, rows: RS, cols: CS) -> Shape
+pub fn view_shape<RS, CS>(shape: Shape, rows: RS, cols: CS) -> Shape
 where
     RS: ViewBounds,
     CS: ViewBounds,

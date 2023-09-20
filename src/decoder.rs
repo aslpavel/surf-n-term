@@ -1137,7 +1137,7 @@ impl<R: Read> Base64Decoder<R> {
 
     /// Decode 4 base64 bytes into 3 bytes
     #[inline]
-    pub fn decode_u8x4(chunk: [u8; 4]) -> [u8; 3] {
+    fn decode_u8x4(chunk: [u8; 4]) -> [u8; 3] {
         let [i0, i1, i2, i3] = chunk;
         let o0 = BASE64_DECODE[i0 as usize];
         let o1 = BASE64_DECODE[i1 as usize];
@@ -1146,12 +1146,12 @@ impl<R: Read> Base64Decoder<R> {
         let b0 = (o0 << 2) | (o1 >> 4);
         let b1 = (o1 << 4) | (o2 >> 2);
         let b2 = (o2 << 6) | o3;
-        return [b0, b1, b2];
+        [b0, b1, b2]
     }
 
     /// Decode number of encoded bytes based on the padding symbol
     #[inline]
-    pub fn decode_size(chunk: [u8; 4]) -> usize {
+    fn decode_size(chunk: [u8; 4]) -> usize {
         let [_, _, i2, i3] = chunk;
         if i2 == b'=' {
             1
@@ -1181,7 +1181,7 @@ impl<R: Read> Base64Decoder<R> {
                     std::io::ErrorKind::Other,
                     Error::ParseError(
                         "Base64Decoder",
-                        format!("input length is not dividable by 4"),
+                        "input length is not dividable by 4".to_owned(),
                     ),
                 ));
             }

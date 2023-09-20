@@ -982,7 +982,7 @@ mod tests {
                 green_color
             }
         });
-        let image_ascii = crate::Image::new(image_surf).ascii_view();
+        let image_ascii = crate::Image::from(image_surf).ascii_view();
         render
             .surface()
             .view_mut(1.., 2..)
@@ -1259,7 +1259,7 @@ mod tests {
         assert_eq!(size, Size::new(4, 9));
 
         // image
-        let image = Image::new(SurfaceOwned::new(Size::new(20, 30)));
+        let image = Image::from(SurfaceOwned::new(Size::new(20, 30)));
         let image_cell = Cell::new_image(image);
         assert_eq!(image_cell.size(ctx), Size::new(2, 3));
         let pos = image_cell.layout(ctx, max_width, &mut size, &mut cursor);

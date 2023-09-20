@@ -8,6 +8,7 @@ use crate::{
     common::{clamp, Rnd},
     decoder::Base64Decoder,
     encoder::{Base64Encoder, Encoder, TTYEncoder},
+    surface::{view_shape, ViewBounds},
     view::{BoxConstraint, Layout, Tree, View, ViewContext},
     Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
@@ -35,17 +36,97 @@ const IMAGE_CACHE_SIZE: usize = 134217728; // 128MB
 /// Arc wrapped RGBA surface with precomputed hash
 #[derive(Clone)]
 pub struct Image {
-    surf: Arc<dyn Surface<Item = RGBA> + Send + Sync>,
-    hash: u64,
+    data: Arc<[RGBA]>,
+    shape: Shape,
 }
 
 impl Image {
     /// Create new image from the RGBA surface
-    pub fn new(surf: impl Surface<Item = RGBA> + Send + Sync + 'static) -> Self {
+    pub fn new(surf: impl Surface<Item = RGBA>) -> Self {
         Self {
-            hash: surf.hash(),
-            surf: Arc::new(surf),
+            data: surf.data().into(),
+            shape: surf.shape(),
         }
+    }
+
+    /// Create new image from parts
+    pub fn from_parts(data: Arc<[RGBA]>, shape: Shape) -> Self {
+        Self { data, shape }
+    }
+
+    /// Crop image
+    pub fn crop<RS, CS>(&self, rows: RS, cols: CS) -> Self
+    where
+        RS: ViewBounds,
+        CS: ViewBounds,
+    {
+        Self {
+            data: self.data.clone(),
+            shape: view_shape(self.shape, rows, cols),
+        }
+    }
+
+    /// Resize image using bi-linear interpolation
+    pub fn resize(&self, size: Size) -> Self {
+        if size.width <= 1 || size.height <= 1 || self.width() <= 2 || self.height() <= 2 {
+            return Image::from(SurfaceOwned::new(size));
+        }
+        if self.size() == size {
+            return self.clone();
+        }
+
+        let src_col_max = self.width() as f32 - 1.5;
+        let src_row_max = self.height() as f32 - 1.5;
+        let dst_col_max = size.width as f32 - 1.0;
+        let dst_row_max = size.height as f32 - 1.0;
+
+        let src_shape = self.shape();
+        let src_data = self.data();
+
+        let mut dst_data: Vec<RGBA> = Vec::new();
+        dst_data.resize_with(size.width * size.height, Default::default);
+
+        fn lerp_u8(left: u8, right: u8, t: f32) -> u8 {
+            (left as f32 * (1.0 - t) + right as f32 * t) as u8
+        }
+
+        fn lerp_rgba(left: RGBA, right: RGBA, t: f32) -> RGBA {
+            let [lr, lg, lb, la] = left.to_rgba();
+            let [rr, rg, rb, ra] = right.to_rgba();
+            RGBA::new(
+                lerp_u8(lr, rr, t),
+                lerp_u8(lg, rg, t),
+                lerp_u8(lb, rb, t),
+                lerp_u8(la, ra, t),
+            )
+        }
+
+        for dst_row in 0..size.height {
+            for dst_col in 0..size.width {
+                let src_row_f = (dst_row as f32) * src_row_max / dst_row_max;
+                let src_col_f = (dst_col as f32) * src_col_max / dst_col_max;
+                let src_row = src_row_f.floor() as usize;
+                let row_frac = src_row_f.fract();
+                let src_col = src_col_f.floor() as usize;
+                let col_frac = src_col_f.fract();
+
+                let p00 = src_data[src_shape.offset(Position::new(src_row, src_col))];
+                let p01 = src_data[src_shape.offset(Position::new(src_row, src_col + 1))];
+                let p10 = src_data[src_shape.offset(Position::new(src_row + 1, src_col))];
+                let p11 = src_data[src_shape.offset(Position::new(src_row + 1, src_col + 1))];
+
+                // bi-linear interpolation
+                // NOTE: not using Color.lerp as it converts to LinColor which increases
+                //       conversion time x5 (see resize benchmark)
+                let r0 = lerp_rgba(p00, p01, col_frac);
+                let r1 = lerp_rgba(p10, p11, col_frac);
+                let r = lerp_rgba(r0, r1, row_frac);
+
+                dst_data[dst_row * size.width + dst_col] = r;
+            }
+        }
+
+        Image::from_parts(dst_data.into(), Shape::from(size))
     }
 
     /// Size in cells
@@ -138,7 +219,7 @@ impl Image {
 
 impl PartialEq for Image {
     fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
+        Arc::ptr_eq(&self.data, &other.data) && self.shape == other.shape
     }
 }
 
@@ -146,28 +227,26 @@ impl Eq for Image {}
 
 impl PartialOrd for Image {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.hash.partial_cmp(&other.hash)
+        (Arc::as_ptr(&self.data), self.shape).partial_cmp(&(Arc::as_ptr(&other.data), other.shape))
     }
 }
 
 impl Ord for Image {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.hash.cmp(&other.hash)
+        (Arc::as_ptr(&self.data), self.shape).cmp(&(Arc::as_ptr(&other.data), other.shape))
     }
 }
 
 impl std::hash::Hash for Image {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash)
+        Arc::as_ptr(&self.data).hash(state);
+        self.shape.hash(state);
     }
 }
 
 impl fmt::Debug for Image {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Image")
-            .field("size", &self.size())
-            .field("hash", &self.hash)
-            .finish()
+        f.debug_struct("Image").field("size", &self.size()).finish()
     }
 }
 
@@ -175,28 +254,38 @@ impl Surface for Image {
     type Item = RGBA;
 
     fn shape(&self) -> Shape {
-        self.surf.shape()
-    }
-
-    fn hash(&self) -> u64 {
-        self.hash
+        self.shape
     }
 
     fn data(&self) -> &[Self::Item] {
-        self.surf.data()
+        &self.data
+    }
+}
+
+impl From<SurfaceOwned<RGBA>> for Image {
+    fn from(value: SurfaceOwned<RGBA>) -> Self {
+        let shape = value.shape();
+        Self {
+            data: value.to_vec().into(),
+            shape,
+        }
     }
 }
 
 impl View for Image {
     fn render<'a>(
         &self,
-        _ctx: &ViewContext,
+        ctx: &ViewContext,
         surf: &'a mut TerminalSurface<'a>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
+        let size = surf.size();
+        let ppc = ctx.pixels_per_cell();
         if let Some(cell) = surf.get_mut(Position::new(0, 0)) {
-            *cell = Cell::new_image(self.clone()).with_face(cell.face());
+            *cell =
+                Cell::new_image(self.crop(..size.height * ppc.height, ..size.width * ppc.width))
+                    .with_face(cell.face());
         }
         Ok(())
     }
@@ -295,7 +384,7 @@ impl<'de> Deserialize<'de> for Image {
                     }),
                     _ => unreachable!(),
                 };
-                Ok(Image::new(surf))
+                Ok(Image::from(surf))
             }
         }
 
@@ -308,7 +397,7 @@ impl Serialize for Image {
     where
         S: Serializer,
     {
-        let mut writer = ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
+        let mut writer = ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::fast());
         for pixel in self.iter() {
             writer.write_all(&pixel.to_rgba()).map_err(|err| {
                 ser::Error::custom(format!("[Image] faield to serialize data: {err}"))
@@ -637,7 +726,7 @@ impl ImageHandler for KittyImageHandler {
             .enter();
             // zlib compressed and base64 encoded RGBA image data
             let mut payload_write =
-                ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::default());
+                ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::fast());
             for color in img.iter() {
                 payload_write.write_all(&color.to_rgba())?;
             }
@@ -804,7 +893,7 @@ impl ImageHandler for SixelImageHandler {
         let height = (img.height() / 6) * 6;
         // sixel color chanel has a range [0,100] colors, we need to reduce it before
         // quantization, it will produce smaller or/and better palette for this color depth
-        let dimg = Image::new(img.view(..height, ..).map(|_, color| {
+        let dimg = Image::from(img.view(..height, ..).map(|_, color| {
             let [red, green, blue, alpha] = color.to_rgba();
             let red = ((red as f32 / 2.55).round() * 2.55) as u8;
             let green = ((green as f32 / 2.55).round() * 2.55) as u8;
@@ -1864,7 +1953,8 @@ mod tests {
             image_serde.ascii_view().debug(Size::new(5, 13))
         );
 
-        assert_eq!(image, image_serde);
+        assert_eq!(image.data(), image_serde.data());
+        assert_eq!(image.shape(), image_serde.shape());
 
         Ok(())
     }

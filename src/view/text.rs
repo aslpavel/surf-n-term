@@ -234,7 +234,7 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
         ) -> Result<(), Error> {
             match value {
                 Value::String(string) => {
-                    text.push_str(&string, None);
+                    text.push_str(string, None);
                 }
                 Value::Object(map) => {
                     let face = match map.get("face") {
@@ -245,11 +245,10 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
                     text.set_face(face_old.overlay(&face));
                     if let Some(glyph) = map.get("glyph") {
                         text.put_glyph(Glyph::deserialize(glyph)?);
-                    } else {
-                        if let Some(text_value) = map.get("text") {
-                            collect_rec(text, colors, text_value)?;
-                        }
+                    } else if let Some(text_value) = map.get("text") {
+                        collect_rec(text, colors, text_value)?;
                     }
+
                     text.face = face_old;
                 }
                 Value::Array(text_values) => {

@@ -798,10 +798,10 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
             .deserialize(&value)
             .map_err(de::Error::custom)?
             .boxed(),
-            "flex" => Flex::from_json_value(&self, &value)
+            "flex" => Flex::from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
                 .boxed(),
-            "container" => container::from_json_value(&self, &value)
+            "container" => container::from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Container] {err}")))?
                 .boxed(),
             "glyph" => Glyph::deserialize(value)
