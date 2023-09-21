@@ -13,7 +13,6 @@ use crate::{
     Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
 };
-use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use serde::{
     de,
     ser::{self, SerializeStruct},
@@ -24,7 +23,7 @@ use std::{
     cmp::{max, Ordering},
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
-    io::{Cursor, Read, Write},
+    io::{Read, Write},
     iter::FromIterator,
     ops::{Add, AddAssign, Mul},
     str::FromStr,
@@ -325,7 +324,7 @@ impl<'de> Deserialize<'de> for Image {
                     match key.as_ref() {
                         "data" => {
                             let data_raw = map.next_value::<Cow<'de, str>>()?;
-                            ZlibDecoder::new(Base64Decoder::new(Cursor::new(data_raw.as_bytes())))
+                            Base64Decoder::new(data_raw.as_bytes())
                                 .read_to_end(&mut data)
                                 .map_err(de::Error::custom)?;
                         }
@@ -397,13 +396,13 @@ impl Serialize for Image {
     where
         S: Serializer,
     {
-        let mut writer = ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::fast());
+        let mut writer = Base64Encoder::new(Vec::new());
         for pixel in self.iter() {
             writer.write_all(&pixel.to_rgba()).map_err(|err| {
                 ser::Error::custom(format!("[Image] faield to serialize data: {err}"))
             })?;
         }
-        let data = writer.finish().and_then(|w| w.finish()).map_err(|err| {
+        let data = writer.finish().map_err(|err| {
             ser::Error::custom(format!("[Image] faield to serialize data: {err}"))
         })?;
         let mut image = serializer.serialize_struct("Image", 3)?;
@@ -724,13 +723,12 @@ impl ImageHandler for KittyImageHandler {
                 ?img
             )
             .enter();
-            // zlib compressed and base64 encoded RGBA image data
-            let mut payload_write =
-                ZlibEncoder::new(Base64Encoder::new(Vec::new()), Compression::fast());
+            // base64 encoded RGBA image data
+            let mut payload_write = Base64Encoder::new(Vec::new());
             for color in img.iter() {
                 payload_write.write_all(&color.to_rgba())?;
             }
-            let payload = payload_write.finish()?.finish()?;
+            let payload = payload_write.finish()?;
 
             // NOTE:
             //  - data needs to be transferred in chunks
@@ -751,7 +749,7 @@ impl ImageHandler for KittyImageHandler {
                     // m    - whether more chunks will follow or not
                     write!(
                         out,
-                        "\x1b_Ga=t,f=32,o=z,i={},v={},s={},m={},q={};",
+                        "\x1b_Ga=t,f=32,i={},v={},s={},m={},q={};",
                         img_id,
                         img.height(),
                         img.width(),

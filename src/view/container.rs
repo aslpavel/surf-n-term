@@ -268,7 +268,7 @@ pub(super) fn from_json_value(
         .transpose()?
         .unwrap_or_default();
     let margins = value
-        .get("marins")
+        .get("margins")
         .map(Margins::deserialize)
         .transpose()?
         .unwrap_or_default();

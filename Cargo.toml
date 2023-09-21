@@ -8,10 +8,9 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.11.4"
+version = "0.11.5"
 
 [dependencies]
-flate2 = "^1.0"
 fnv = "^1.0"
 lazy_static = "^1.1"
 libc = "^0.2"

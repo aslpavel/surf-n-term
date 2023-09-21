@@ -145,7 +145,7 @@ fn srgb_and_linear_benchmark(c: &mut Criterion) {
 
 fn image_resize(c: &mut Criterion) {
     let img = load_ppm("benches/flamingo.ppm").expect("failed to load flamingo.ppm");
-    let mut group = c.benchmark_group("resize");
+    let mut group = c.benchmark_group("image_resize");
     group
         .throughput(Throughput::Bytes((img.width() * img.height()) as u64))
         .bench_function("flamingo_half", |b| {
@@ -160,9 +160,23 @@ fn image_resize(c: &mut Criterion) {
     group.finish();
 }
 
+fn image_serde(c: &mut Criterion) {
+    let img = load_ppm("benches/flamingo.ppm").expect("failed to load flamingo.ppm");
+    let mut group = c.benchmark_group("image_serde");
+    group
+        .throughput(Throughput::Bytes((img.width() * img.height()) as u64))
+        .bench_function("serialize", |b| {
+            b.iter(|| serde_json::to_vec(&img).expect("failed to serialize"))
+        })
+        .bench_function("deserialize", |b| {
+            let img_data = serde_json::to_vec(&img).expect("faield to serialize");
+            b.iter(|| serde_json::from_slice::<Image>(&img_data).expect("failed to deserialize"))
+        });
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default(); // .sample_size(30).warm_up_time(Duration::new(2, 0));
-    targets = palette_benchmark, srgb_and_linear_benchmark, image_resize
+    targets = palette_benchmark, srgb_and_linear_benchmark, image_resize, image_serde
 );
 criterion_main!(benches);
