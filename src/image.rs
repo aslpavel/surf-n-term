@@ -1933,7 +1933,7 @@ mod tests {
     #[test]
     fn test_image_serde() -> Result<(), Error> {
         let image_value = serde_json::json!({
-            "data": "eJxjYEAF/5FICA1nQwCUDeIygHn/EQCkGMaEcKCmIOliQAcA3jAt0w==",
+            "data": "AAAAAAAAAAAAAAAAAAAAAP8AAAAAAP8AAAAAAAAA/wAAAP8AAAAAAAAA/////////wAAAAAA//8A////AP//AAAA//////////////8AAP8A/////////wD/AAD/AP8AAAAAAP8A/wAAAAAA//8A//8AAAAAAAAAAAAAAAAAAAAAAA==",
             "channels": 1,
             "size": [10, 13],
         });
