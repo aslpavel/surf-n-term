@@ -130,8 +130,7 @@ impl<V> Frame<V> {
         let mut fragments: [Cell; 9] = Default::default();
         for x in 0..3 {
             for y in 0..3 {
-                let img =
-                    rimage_to_image(image.view(h * y, h * (y + 1) + 1, w * x, w * (x + 1) + 1));
+                let img = rimage_to_image(image.view(h * y, h * (y + 1), w * x, w * (x + 1)));
                 fragments[x + y * 3] = Cell::new_image(img);
             }
         }

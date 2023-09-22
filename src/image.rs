@@ -20,7 +20,7 @@ use serde::{
 };
 use std::{
     borrow::Cow,
-    cmp::{max, Ordering},
+    cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
     io::{Read, Write},
@@ -133,9 +133,17 @@ impl Image {
         if pixels_per_cell.is_empty() || self.size().is_empty() {
             return Size::new(0, 0);
         }
+        fn round_up(a: usize, b: usize) -> usize {
+            let c = a / b;
+            if a % b == 0 {
+                c
+            } else {
+                c + 1
+            }
+        }
         Size {
-            height: max(1, self.height() / pixels_per_cell.height),
-            width: max(1, self.width() / pixels_per_cell.width),
+            height: round_up(self.height(), pixels_per_cell.height),
+            width: round_up(self.width(), pixels_per_cell.width),
         }
     }
 
