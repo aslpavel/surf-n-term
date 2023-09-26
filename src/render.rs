@@ -277,6 +277,16 @@ impl TerminalRenderer {
             // skip cells that have not changed, go over ignored items too as they
             // might remove old images.
             if old == new && self.marks.get(pos) != Some(&CellMark::Damaged) {
+                // cell under the image needs to be marked as ignored
+                if let CellKind::Image(image) = &new.kind {
+                    let size = image.size_cells(self.size.pixels_per_cell());
+                    self.marks
+                        .view_mut(
+                            pos.row..pos.row + size.height,
+                            pos.col..pos.col + size.width,
+                        )
+                        .fill(CellMark::Ignored);
+                }
                 continue;
             }
 
