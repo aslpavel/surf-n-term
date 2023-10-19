@@ -704,9 +704,12 @@ where
     }
 
     fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        let mut layout = self.view.layout(ctx, ct);
+        let layout_child = self.view.layout(ctx, ct);
+        let mut layout = Layout::new()
+            .with_position(layout_child.pos)
+            .with_size(layout_child.size);
         layout.set_data(self.tag.clone());
-        layout
+        Tree::new(layout, vec![layout_child])
     }
 }
 

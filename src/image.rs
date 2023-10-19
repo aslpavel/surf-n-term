@@ -234,7 +234,7 @@ impl Eq for Image {}
 
 impl PartialOrd for Image {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        (Arc::as_ptr(&self.data), self.shape).partial_cmp(&(Arc::as_ptr(&other.data), other.shape))
+        Some(self.cmp(other))
     }
 }
 
@@ -950,7 +950,7 @@ impl ImageHandler for SixelImageHandler {
                     }
                     sixel_lines
                         .entry(*color)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((col, sixel_code + 63));
                 }
             }
