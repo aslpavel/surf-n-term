@@ -689,7 +689,7 @@ struct TermCapMatcher;
 
 impl TTYMatcher for TermCapMatcher {
     fn matcher(&self) -> NFA<_Void> {
-        let hex = NFA::predicate(|b| matches!(b, b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9'));
+        let hex = NFA::predicate(|b| b.is_ascii_hexdigit());
         let hex = hex.clone() + hex;
         let key_value = NFA::sequence([hex.clone().some(), NFA::from("="), hex.clone().some()]);
         NFA::choice([

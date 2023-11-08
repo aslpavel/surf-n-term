@@ -42,7 +42,7 @@ mod nix {
             termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
             time::TimeVal,
         },
-        unistd::{close, isatty, read, write},
+        unistd::{isatty, read, write},
         Error,
     };
 }
