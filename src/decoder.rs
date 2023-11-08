@@ -880,6 +880,16 @@ fn tty_event_nfa() -> NFA<TerminalEvent> {
             (KeyName::Char(c), KeyMod::CTRL),
         ));
     }
+    for byte in (0..=255u8).filter(|c| c.is_ascii_uppercase()) {
+        let c = char::from(byte);
+        cmds.push(basic_key(
+            &format!("\x1b{}", c),
+            (
+                KeyName::Char(c.to_ascii_lowercase()),
+                KeyMod::ALT | KeyMod::SHIFT,
+            ),
+        ));
+    }
 
     // alt+punctuation
     for byte in (0..=255u8).filter(|c| c.is_ascii_punctuation()) {
@@ -1234,11 +1244,11 @@ mod tests {
         assert_eq!(cursor.position(), 1);
 
         // send rest of the sequence, plus full other sequence, and some garbage
-        write!(cursor.get_mut(), "OR\x1b[15~AB")?;
+        write!(cursor.get_mut(), "OR\x1b[15~AB\x1bM")?;
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(KeyName::F(3).into()))
+            Some(TerminalEvent::Key("f3".parse()?))
         );
         assert_eq!(cursor.position(), 3);
 
@@ -1255,6 +1265,10 @@ mod tests {
         assert_eq!(
             decoder.decode(&mut cursor)?,
             Some(TerminalEvent::Key(KeyName::Char('B').into())),
+        );
+        assert_eq!(
+            decoder.decode(&mut cursor)?,
+            Some(TerminalEvent::Key("shift+alt+m".parse()?)),
         );
         assert_eq!(decoder.decode(&mut cursor)?, None);
 
@@ -1276,12 +1290,7 @@ mod tests {
 
         assert_eq!(
             decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(KeyName::Esc.into()))
-        );
-
-        assert_eq!(
-            decoder.decode(&mut cursor)?,
-            Some(TerminalEvent::Key(KeyName::Char('O').into())),
+            Some(TerminalEvent::Key("alt+shift+o".parse()?))
         );
         assert_eq!(
             decoder.decode(&mut cursor)?,
