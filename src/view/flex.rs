@@ -185,10 +185,10 @@ impl<'a> View for Flex<'a>
 where
     Self: 'a,
 {
-    fn render<'b>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'b mut TerminalSurface<'b>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
@@ -215,7 +215,7 @@ where
                 surf.erase(face);
             }
 
-            child.view.render(ctx, &mut surf.as_mut(), child_layout)?;
+            child.view.render(ctx, surf.as_mut(), child_layout)?;
         }
         Ok(())
     }

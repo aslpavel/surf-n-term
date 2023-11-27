@@ -174,10 +174,10 @@ impl Hash for Glyph {
 }
 
 impl View for Glyph {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);

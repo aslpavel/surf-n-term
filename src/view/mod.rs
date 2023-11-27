@@ -23,9 +23,9 @@ pub use frame::Frame;
 pub use either::{self, Either};
 
 use crate::{
-    encoder::ColorDepth, image::ImageAsciiView, Cell, Error, Face, FaceAttrs, FaceDeserializer,
-    Glyph, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal, TerminalSurface,
-    TerminalSurfaceExt, RGBA,
+    encoder::ColorDepth, image::ImageAsciiView, surface::view_shape, Cell, Error, Face, FaceAttrs,
+    FaceDeserializer, Glyph, Image, Position, Size, SurfaceMut, SurfaceMutView, SurfaceOwned,
+    Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use serde::{
     de::{self, DeserializeSeed},
@@ -47,10 +47,10 @@ pub type ArcView<'a> = Arc<dyn View + 'a>;
 /// View is anything that can be layed out and rendered to the terminal
 pub trait View: Send + Sync {
     /// Render view into a given surface with the provided layout
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error>;
 
@@ -85,10 +85,10 @@ pub trait View: Send + Sync {
 }
 
 impl<'a, V: View + ?Sized> View for &'a V {
-    fn render<'b>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'b mut TerminalSurface<'b>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         (**self).render(ctx, surf, layout)
@@ -100,10 +100,10 @@ impl<'a, V: View + ?Sized> View for &'a V {
 }
 
 impl<T: View + ?Sized> View for Box<T> {
-    fn render<'b>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'b mut TerminalSurface<'b>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         (**self).render(ctx, surf, layout)
@@ -115,10 +115,10 @@ impl<T: View + ?Sized> View for Box<T> {
 }
 
 impl<T: View + ?Sized> View for Arc<T> {
-    fn render<'b>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'b mut TerminalSurface<'b>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         (**self).render(ctx, surf, layout)
@@ -159,10 +159,10 @@ where
     V: View,
     S: Fn(&BoxConstraint, &Tree<Layout>) + Send + Sync,
 {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         self.view.render(ctx, surf, layout)
@@ -372,14 +372,11 @@ impl Layout {
 
     /// Constrain surface by the layout, that is create sub-subsurface view
     /// with offset `pos` and size of `size`.
-    pub fn apply_to<'a, S>(&self, surf: &'a mut S) -> TerminalSurface<'a>
-    where
-        S: SurfaceMut<Item = Cell>,
-    {
-        surf.view_mut(
-            self.pos.row..self.pos.row + self.size.height,
-            self.pos.col..self.pos.col + self.size.width,
-        )
+    pub fn apply_to<'a>(&self, surf: TerminalSurface<'a>) -> TerminalSurface<'a> {
+        let rows = self.pos.row..self.pos.row + self.size.height;
+        let cols = self.pos.col..self.pos.col + self.size.width;
+        let (shape, data) = surf.parts();
+        SurfaceMutView::new(view_shape(shape, rows, cols), data)
     }
 }
 
@@ -646,10 +643,10 @@ where
     L: View,
     R: View,
 {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         either::for_both!(self, view => view.render(ctx, surf, layout))
@@ -694,10 +691,10 @@ where
     T: Clone + Any + Send + Sync,
     V: View,
 {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         self.view.render(ctx, surf, layout)
@@ -715,10 +712,10 @@ where
 
 /// Renders nothing takes all space
 impl View for () {
-    fn render<'a>(
+    fn render(
         &self,
         _ctx: &ViewContext,
-        _surf: &'a mut TerminalSurface<'a>,
+        _surf: TerminalSurface<'_>,
         _layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         Ok(())
@@ -731,10 +728,10 @@ impl View for () {
 
 /// Fills with color takes all space
 impl View for RGBA {
-    fn render<'a>(
+    fn render(
         &self,
         _ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let cell = Cell::new_char(Face::new(None, Some(*self), FaceAttrs::default()), ' ');
@@ -845,7 +842,7 @@ mod tests {
     ) -> Result<SurfaceOwned<Cell>, Error> {
         let layout = view.layout(ctx, BoxConstraint::loose(size));
         let mut surf = SurfaceOwned::new(size);
-        view.render(ctx, &mut surf.view_mut(.., ..), &layout)?;
+        view.render(ctx, surf.as_mut(), &layout)?;
         Ok(surf)
     }
 

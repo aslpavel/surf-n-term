@@ -24,10 +24,10 @@ where
     B: Fn(&ViewContext, BoxConstraint) -> V + Send + Sync,
     V: View + 'static,
 {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let view = layout.data::<V>().ok_or(Error::InvalidLayout)?;

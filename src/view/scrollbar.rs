@@ -26,10 +26,10 @@ impl ScrollBar {
 }
 
 impl View for ScrollBar {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let major = self.direction.major(layout.size);

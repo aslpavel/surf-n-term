@@ -86,10 +86,10 @@ pub trait Terminal: Write + Send {
     /// terminal commands to produce the desired result.
     fn run_render<H, R, E>(&mut self, mut handler: H) -> Result<R, E>
     where
-        H: for<'a> FnMut(
-            &'a mut Self,
+        H: FnMut(
+            &mut Self,
             Option<TerminalEvent>,
-            TerminalSurface<'a>,
+            TerminalSurface<'_>,
         ) -> Result<TerminalAction<R>, E>,
         E: From<Error>,
         Self: Sized,

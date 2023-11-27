@@ -568,10 +568,30 @@ pub struct SurfaceView<'a, T> {
     data: &'a [T],
 }
 
+impl<'a, T> SurfaceView<'a, T> {
+    pub fn new(shape: Shape, data: &'a [T]) -> Self {
+        Self { shape, data }
+    }
+
+    pub fn parts(self) -> (Shape, &'a [T]) {
+        (self.shape, self.data)
+    }
+}
+
 /// Mutable view of (sub)surface
 pub struct SurfaceMutView<'a, T> {
     shape: Shape,
     data: &'a mut [T],
+}
+
+impl<'a, T> SurfaceMutView<'a, T> {
+    pub fn new(shape: Shape, data: &'a mut [T]) -> Self {
+        Self { shape, data }
+    }
+
+    pub fn parts(self) -> (Shape, &'a mut [T]) {
+        (self.shape, self.data)
+    }
 }
 
 impl<T> SurfaceOwned<T> {

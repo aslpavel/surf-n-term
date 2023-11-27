@@ -4,9 +4,7 @@ use std::ops::Add;
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext, ViewDeserializer};
-use crate::{
-    Error, Face, FaceAttrs, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt, RGBA,
-};
+use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
 
 /// Alignment of a child view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -152,21 +150,18 @@ impl<V: View> Container<V> {
 }
 
 impl<V: View> View for Container<V> {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         if self.face != Face::default() {
             surf.erase(self.face);
         }
-        self.child.render(
-            ctx,
-            &mut surf.as_mut(),
-            layout.get(0).ok_or(Error::InvalidLayout)?,
-        )?;
+        self.child
+            .render(ctx, surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
         Ok(())
     }
 
@@ -311,7 +306,7 @@ mod tests {
         fn render<'a>(
             &self,
             ctx: &ViewContext,
-            surf: &'a mut TerminalSurface<'a>,
+            surf: TerminalSurface<'a>,
             layout: &Tree<Layout>,
         ) -> Result<(), Error> {
             self.view.render(ctx, surf, layout)

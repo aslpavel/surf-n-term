@@ -146,10 +146,10 @@ impl<V> Frame<V> {
 }
 
 impl<V: View> View for Frame<V> {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         if !ctx.has_glyphs {
@@ -174,7 +174,7 @@ impl<V: View> View for Frame<V> {
         }
 
         self.view
-            .render(ctx, &mut surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
+            .render(ctx, surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
         Ok(())
     }
 

@@ -257,7 +257,7 @@ const GET_TERM_SIZE: &[u8] = b"\x1b[18t\x1b[14t";
 fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     if let Ok("linux") | Ok("dumb") = std::env::var("TERM").as_deref() {
         // do not try to query anything on dumb terminals
-        tracing::warn!("[capabilities_detected] dump terminal");
+        tracing::warn!("[capabilities_detected] dumb terminal");
         term.capabilities.depth = ColorDepth::Gray;
         term.encoder = TTYEncoder::new(term.capabilities.clone());
         return Ok(());

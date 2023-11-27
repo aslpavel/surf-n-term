@@ -12,10 +12,10 @@ use crate::{
 use std::{collections::HashMap, fmt::Write as _};
 
 impl View for str {
-    fn render<'b>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'b mut TerminalSurface<'b>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
@@ -38,10 +38,10 @@ impl View for str {
 }
 
 impl View for String {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         self.as_str().render(ctx, surf, layout)
@@ -186,10 +186,10 @@ impl<'a> From<&'a str> for Text {
 }
 
 impl View for Text {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);

@@ -482,7 +482,7 @@ where
     fn draw_view(&mut self, ctx: &ViewContext, view: impl IntoView) -> Result<(), Error> {
         let view = view.into_view();
         let layout = view.layout(ctx, BoxConstraint::loose(self.size()));
-        view.render(ctx, &mut self.as_mut(), &layout)?;
+        view.render(ctx, self.as_mut(), &layout)?;
         Ok(())
     }
 

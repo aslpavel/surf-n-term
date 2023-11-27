@@ -280,10 +280,10 @@ impl From<SurfaceOwned<RGBA>> for Image {
 }
 
 impl View for Image {
-    fn render<'a>(
+    fn render(
         &self,
         ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
@@ -432,10 +432,10 @@ pub struct ImageAsciiView {
 }
 
 impl View for ImageAsciiView {
-    fn render<'a>(
+    fn render(
         &self,
         _ctx: &ViewContext,
-        surf: &'a mut TerminalSurface<'a>,
+        surf: TerminalSurface<'_>,
         layout: &Tree<Layout>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
