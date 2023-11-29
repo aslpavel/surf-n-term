@@ -1,6 +1,6 @@
 use super::{
-    Align, AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, View, ViewContext,
-    ViewDeserializer,
+    Align, AlongAxis, Axis, BoxConstraint, IntoView, Layout, Tree, TreeMut, View, ViewContext,
+    ViewDeserializer, ViewLayout, ViewMutLayout,
 };
 use crate::{Error, Face, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
@@ -189,12 +189,11 @@ where
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        for (index, child) in self.children.iter().enumerate() {
-            let child_layout = layout.get(index).ok_or(Error::InvalidLayout)?;
-            if child_layout.size.is_empty() {
+        for (child, child_layout) in self.children.iter().zip(layout.children()) {
+            if child_layout.size().is_empty() {
                 continue;
             }
 
@@ -202,13 +201,13 @@ where
             if let Some(face) = child.face {
                 let mut surf = match self.direction {
                     Axis::Horizontal => {
-                        let start = child_layout.pos.col;
-                        let end = start + child_layout.size.width;
+                        let start = child_layout.pos().col;
+                        let end = start + child_layout.size().width;
                         surf.view_mut(.., start..end)
                     }
                     Axis::Vertical => {
-                        let start = child_layout.pos.row;
-                        let end = start + child_layout.size.height;
+                        let start = child_layout.pos().row;
+                        let end = start + child_layout.size().height;
                         surf.view_mut(start..end, ..)
                     }
                 };
@@ -220,24 +219,25 @@ where
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        // allocate children layout
-        let mut children_layout = Vec::new();
-        children_layout.resize_with(self.children.len(), Tree::<Layout>::default);
-
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let mut flex_total = 0.0;
         let mut major_non_flex = 0;
         let mut minor = self.direction.minor(ct.min());
         let ct_loosen = ct.loosen();
 
         // layout non-flex
-        for (index, child) in self.children.iter().enumerate() {
+        for child in self.children.iter() {
+            let mut child_layout = layout.push_default();
             match child.flex {
                 None => {
-                    let child_layout = child.view.layout(ctx, ct_loosen);
-                    major_non_flex += self.direction.major(child_layout.size);
-                    minor = max(minor, self.direction.minor(child_layout.size));
-                    children_layout[index] = child_layout;
+                    child.view.layout(ctx, ct_loosen, child_layout.view_mut())?;
+                    major_non_flex += self.direction.major(child_layout.size());
+                    minor = max(minor, self.direction.minor(child_layout.size()));
                 }
                 Some(flex) => flex_total += flex,
             }
@@ -250,28 +250,29 @@ where
             .saturating_sub(major_non_flex);
         let mut major_flex = 0;
         if major_remain > 0 && flex_total > 0.0 {
-            for (index, child) in self.children.iter().enumerate() {
+            let mut child_layout_opt = layout.child_mut();
+            for child in self.children.iter() {
+                let mut child_layout =
+                    child_layout_opt.expect("not all flex children are allocated");
                 if let Some(flex) = child.flex {
                     // compute available flex
                     let child_major_max =
                         ((major_remain as f64) * flex / flex_total).round() as usize;
                     flex_total -= flex;
-                    if child_major_max == 0 {
-                        continue;
+                    if child_major_max != 0 {
+                        // layout child
+                        let child_ct = self.direction.constraint(ct_loosen, 0, child_major_max);
+                        child.view.layout(ctx, child_ct, child_layout.view_mut())?;
+                        let child_major = self.direction.major(child_layout.size());
+                        let child_minor = self.direction.minor(child_layout.size());
+
+                        // update counters
+                        major_remain -= child_major;
+                        major_flex += child_major;
+                        minor = max(minor, child_minor);
                     }
-
-                    // layout child
-                    let child_ct = self.direction.constraint(ct_loosen, 0, child_major_max);
-                    let child_layout = child.view.layout(ctx, child_ct);
-                    let child_major = self.direction.major(child_layout.size);
-                    let child_minor = self.direction.minor(child_layout.size);
-                    children_layout[index] = child_layout;
-
-                    // update counters
-                    major_remain -= child_major;
-                    major_flex += child_major;
-                    minor = max(minor, child_minor);
                 }
+                child_layout_opt = child_layout.sibling();
             }
         }
 
@@ -306,33 +307,41 @@ where
             (0, 0)
         };
 
-        // calculate offsets
+        // calculate positions
         let mut major_offset = space_side;
-        for (index, child_layout) in children_layout.iter_mut().enumerate() {
-            child_layout.pos = Position::from_axes(
-                self.direction,
-                major_offset,
-                self.children[index]
-                    .align
-                    .align(self.direction.minor(child_layout.size), minor),
-            );
+        if !self.children.is_empty() {
+            let mut child_layout_opt = layout.child_mut();
+            for child in self.children.iter() {
+                let mut child_layout =
+                    child_layout_opt.expect("not all flex children are allocated");
+                let child_size = child_layout.size();
+                child_layout.set_pos(Position::from_axes(
+                    self.direction,
+                    major_offset,
+                    child.align.align(self.direction.minor(child_size), minor),
+                ));
 
-            major_offset += child_layout.size.major(self.direction);
-            major_offset += space_between;
+                major_offset += child_size.major(self.direction);
+                major_offset += space_between;
+
+                child_layout_opt = child_layout.sibling();
+            }
         }
 
-        // create layout tree
-        Tree::new(
-            Layout::new().with_size(ct.clamp(Size::from_axes(self.direction, major_offset, minor))),
-            children_layout,
-        )
+        // set layout
+        *layout =
+            Layout::new().with_size(ct.clamp(Size::from_axes(self.direction, major_offset, minor)));
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{view::Text, Position};
+    use crate::{
+        view::{Text, ViewLayoutStore},
+        Position,
+    };
 
     #[test]
     fn test_flex() -> Result<(), Error> {
@@ -354,64 +363,66 @@ mod tests {
                 Some("bg=#d3869b".parse()?),
                 Align::Start,
             );
+        let mut reference_store = ViewLayoutStore::new();
+        let mut result_store = ViewLayoutStore::new();
 
         let size = Size::new(5, 12);
         print!("[flex] squeeze {:?}", flex.debug(size));
-        let reference = Tree::new(
+        let mut reference_layout = ViewMutLayout::new(
+            &mut reference_store,
             Layout::new().with_size(Size::new(3, 12)),
-            vec![
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(1, 0))
-                        .with_size(Size::new(2, 8)),
-                ),
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(0, 8))
-                        .with_size(Size::new(3, 4)),
-                ),
-            ],
         );
-        assert_eq!(reference, flex.layout(&ctx, BoxConstraint::loose(size)));
+        reference_layout.push(
+            Layout::new()
+                .with_position(Position::new(1, 0))
+                .with_size(Size::new(2, 8)),
+        );
+        reference_layout.push(
+            Layout::new()
+                .with_position(Position::new(0, 8))
+                .with_size(Size::new(3, 4)),
+        );
+        let result_layout = flex.layout_new(&ctx, BoxConstraint::loose(size), &mut result_store)?;
+        assert_eq!(reference_layout, result_layout);
 
         let size = Size::new(5, 40);
         print!("[flex] justify start {:?}", flex.debug(size));
-        let reference = Tree::new(
+        let mut reference_layout = ViewMutLayout::new(
+            &mut reference_store,
             Layout::new().with_size(Size::new(1, 19)),
-            vec![
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(0, 0))
-                        .with_size(Size::new(1, 9)),
-                ),
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(0, 9))
-                        .with_size(Size::new(1, 10)),
-                ),
-            ],
         );
-        assert_eq!(reference, flex.layout(&ctx, BoxConstraint::loose(size)));
+        reference_layout.push(
+            Layout::new()
+                .with_position(Position::new(0, 0))
+                .with_size(Size::new(1, 9)),
+        );
+        reference_layout.push(
+            Layout::new()
+                .with_position(Position::new(0, 9))
+                .with_size(Size::new(1, 10)),
+        );
+        let result_layout = flex.layout_new(&ctx, BoxConstraint::loose(size), &mut result_store)?;
+        assert_eq!(reference_layout, result_layout);
 
         let size = Size::new(5, 40);
         let flex = flex.justify(Justify::SpaceBetween);
         print!("[flex] justify space between {:?}", flex.debug(size));
-        let reference = Tree::new(
+        let mut reference_layout = ViewMutLayout::new(
+            &mut reference_store,
             Layout::new().with_size(Size::new(1, 40)),
-            vec![
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(0, 0))
-                        .with_size(Size::new(1, 9)),
-                ),
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(0, 30))
-                        .with_size(Size::new(1, 10)),
-                ),
-            ],
         );
-        assert_eq!(reference, flex.layout(&ctx, BoxConstraint::loose(size)));
+        reference_layout.push(
+            Layout::new()
+                .with_position(Position::new(0, 0))
+                .with_size(Size::new(1, 9)),
+        );
+        reference_layout.push(
+            Layout::new()
+                .with_position(Position::new(0, 30))
+                .with_size(Size::new(1, 10)),
+        );
+        let result_layout = flex.layout_new(&ctx, BoxConstraint::loose(size), &mut result_store)?;
+        assert_eq!(reference_layout, result_layout);
 
         Ok(())
     }

@@ -3,7 +3,10 @@ use std::ops::Add;
 
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
-use super::{BoxConstraint, IntoView, Layout, Tree, View, ViewContext, ViewDeserializer};
+use super::{
+    BoxConstraint, IntoView, Layout, Tree, TreeMut, View, ViewContext, ViewDeserializer,
+    ViewLayout, ViewMutLayout,
+};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
 
 /// Alignment of a child view
@@ -154,18 +157,23 @@ impl<V: View> View for Container<V> {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         if self.face != Face::default() {
             surf.erase(self.face);
         }
-        self.child
-            .render(ctx, surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
+        let child_layout = layout.children().next().ok_or(Error::InvalidLayout)?;
+        self.child.render(ctx, surf, child_layout)?;
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         // calculate the size taken by the whole container, it will span
         // all available space if size is not set.
         let mut container_size = Size {
@@ -207,22 +215,25 @@ impl<V: View> View for Container<V> {
         let child_constraint = BoxConstraint::new(child_size_min, child_size_max);
 
         // calculate child layout
-        let mut child_layout = self.child.layout(ctx, child_constraint);
-        child_layout.pos = Position {
+        let mut child_layout = layout.push_default();
+        self.child
+            .layout(ctx, child_constraint, child_layout.view_mut())?;
+        let child_size = child_layout.size();
+        child_layout.set_pos(Position {
             row: self
                 .align_vertical
-                .align(child_layout.size.height, child_size_max.height)
+                .align(child_size.height, child_size_max.height)
                 .add(self.margins.top),
             col: self
                 .align_horizontal
-                .align(child_layout.size.width, child_size_max.width)
+                .align(child_size.width, child_size_max.width)
                 .add(self.margins.left),
-        };
+        });
 
         // try to shrink container if necessary
         if self.align_vertical == Align::Shrink {
             container_size.height = child_layout
-                .size
+                .size()
                 .height
                 .add(self.margins.top)
                 .add(self.margins.bottom)
@@ -230,7 +241,7 @@ impl<V: View> View for Container<V> {
         }
         if self.align_horizontal == Align::Shrink {
             container_size.width = child_layout
-                .size
+                .size()
                 .width
                 .add(self.margins.left)
                 .add(self.margins.right)
@@ -238,7 +249,8 @@ impl<V: View> View for Container<V> {
         }
 
         // layout tree
-        Tree::new(Layout::new().with_size(container_size), vec![child_layout])
+        *layout = Layout::new().with_size(container_size);
+        Ok(())
     }
 }
 
@@ -288,7 +300,7 @@ pub(super) fn from_json_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RGBA;
+    use crate::{view::ViewLayoutStore, RGBA};
 
     #[derive(Debug)]
     struct Fixed<V> {
@@ -303,18 +315,23 @@ mod tests {
     }
 
     impl<V: View> View for Fixed<V> {
-        fn render<'a>(
+        fn render(
             &self,
             ctx: &ViewContext,
-            surf: TerminalSurface<'a>,
-            layout: &Tree<Layout>,
+            surf: TerminalSurface<'_>,
+            layout: ViewLayout<'_>,
         ) -> Result<(), Error> {
             self.view.render(ctx, surf, layout)
         }
 
-        fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+        fn layout(
+            &self,
+            ctx: &ViewContext,
+            ct: BoxConstraint,
+            layout: ViewMutLayout<'_>,
+        ) -> Result<(), Error> {
             let size = ct.clamp(self.size);
-            self.view.layout(ctx, BoxConstraint::tight(size))
+            self.view.layout(ctx, BoxConstraint::tight(size), layout)
         }
     }
 
@@ -330,48 +347,48 @@ mod tests {
             .with_vertical(Align::Center)
             .with_horizontal(Align::End);
 
+        let mut layout_store = ViewLayoutStore::new();
+        let mut reference_store = ViewLayoutStore::new();
+
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(&mut reference_store, Layout::new().with_size(size));
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(2, 6))
+                .with_size(Size::new(1, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(size),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(2, 6))
-                        .with_size(Size::new(1, 4))
-                )],
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         let cont = cont.with_horizontal(Align::Start);
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(&mut reference_store, Layout::new().with_size(size));
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(2, 0))
+                .with_size(Size::new(1, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(size),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(2, 0))
-                        .with_size(Size::new(1, 4))
-                )]
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         let cont = cont.with_horizontal(Align::Center);
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(&mut reference_store, Layout::new().with_size(size));
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(2, 3))
+                .with_size(Size::new(1, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(size),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(2, 3))
-                        .with_size(Size::new(1, 4))
-                )]
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         let cont = cont
@@ -379,31 +396,29 @@ mod tests {
             .with_vertical(Align::Offset(1));
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(&mut reference_store, Layout::new().with_size(size));
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(1, 4))
+                .with_size(Size::new(1, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(size),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(1, 4))
-                        .with_size(Size::new(1, 4))
-                )]
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         let cont = cont.with_vertical(Align::Expand);
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(&mut reference_store, Layout::new().with_size(size));
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(0, 4))
+                .with_size(Size::new(5, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(size),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(0, 4))
-                        .with_size(Size::new(5, 4))
-                )]
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         let cont = cont.with_margins(Margins {
@@ -414,31 +429,32 @@ mod tests {
         });
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(&mut reference_store, Layout::new().with_size(size));
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(1, 3))
+                .with_size(Size::new(4, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(size),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(1, 3))
-                        .with_size(Size::new(4, 4))
-                )]
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         let cont = cont.with_vertical(Align::Shrink);
         println!("{:?}", cont);
         println!("{:?}", cont.debug(size));
+        let mut reference = ViewMutLayout::new(
+            &mut reference_store,
+            Layout::new().with_size(Size::new(2, 10)),
+        );
+        reference.push(
+            Layout::new()
+                .with_position(Position::new(1, 3))
+                .with_size(Size::new(1, 4)),
+        );
         assert_eq!(
-            Tree::new(
-                Layout::new().with_size(Size::new(2, 10)),
-                vec![Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(1, 3))
-                        .with_size(Size::new(1, 4))
-                )]
-            ),
-            cont.layout(&ctx, BoxConstraint::loose(size))
+            reference,
+            cont.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?
         );
 
         Ok(())

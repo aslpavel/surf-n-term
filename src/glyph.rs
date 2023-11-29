@@ -1,5 +1,5 @@
 use crate::{
-    view::{BoxConstraint, Layout, Tree, View, ViewContext},
+    view::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout},
     Cell, Color, Error, Face, Image, LinColor, Position, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
@@ -178,7 +178,7 @@ impl View for Glyph {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         if ctx.has_glyphs() {
@@ -192,12 +192,18 @@ impl View for Glyph {
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         if ctx.has_glyphs() {
-            Tree::leaf(Layout::new().with_size(ct.clamp(self.size())))
+            *layout = Layout::new().with_size(ct.clamp(self.size()));
         } else {
-            self.fallback_str().layout(ctx, ct)
+            self.fallback_str().layout(ctx, ct, layout)?;
         }
+        Ok(())
     }
 }
 

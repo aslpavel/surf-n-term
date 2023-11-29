@@ -1,4 +1,4 @@
-use super::{AlongAxis, Axis, BoxConstraint, Layout, Tree, View, ViewContext};
+use super::{AlongAxis, Axis, BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt};
 use std::cmp::{max, min, Ordering};
 
@@ -30,9 +30,9 @@ impl View for ScrollBar {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
-        let major = self.direction.major(layout.size);
+        let major = self.direction.major(layout.size());
         if major == 0 {
             return Ok(());
         }
@@ -65,21 +65,28 @@ impl View for ScrollBar {
         Ok(())
     }
 
-    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        _ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let major = self.direction.major(ct.max());
         let minor = max(self.direction.minor(ct.min()), 1);
-        Tree::leaf(
-            Layout::new()
-                .with_size(Size::from_axes(self.direction, major, 1))
-                .with_position(Position::from_axes(self.direction, 0, minor - 1)),
-        )
+        *layout = Layout::new()
+            .with_size(Size::from_axes(self.direction, major, 1))
+            .with_position(Position::from_axes(self.direction, 0, minor - 1));
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{view::tests::render, Surface};
+    use crate::{
+        view::{tests::render, ViewLayoutStore},
+        Surface,
+    };
 
     #[test]
     fn test_scroll_bar() -> Result<(), Error> {
@@ -94,10 +101,14 @@ mod tests {
         );
         let ctx = &ViewContext::dummy();
         let size = Size::new(5, 20);
-        assert_eq!(
-            bar.layout(ctx, BoxConstraint::loose(size)),
-            Tree::leaf(Layout::new().with_size(Size::new(1, 20)))
+        let mut layout_store = ViewLayoutStore::new();
+        let layout = bar.layout_new(ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        let mut reference_store = ViewLayoutStore::new();
+        let reference = ViewLayout::new(
+            &mut reference_store,
+            Layout::new().with_size(Size::new(1, 20)),
         );
+        assert_eq!(reference, layout);
         print!("{:?}", bar.debug(size));
 
         let surf = render(ctx, &bar, size)?;

@@ -4,7 +4,7 @@ use serde::{
     Deserialize, Deserializer,
 };
 
-use super::{BoxConstraint, Layout, Tree, View, ViewContext};
+use super::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{
     surface::ViewBounds, Cell, Error, Face, FaceDeserializer, Glyph, Position, Size,
     TerminalSurface, TerminalSurfaceExt,
@@ -16,7 +16,7 @@ impl View for str {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         let mut writer = surf.writer(ctx);
@@ -26,14 +26,20 @@ impl View for str {
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let mut size = Size::empty();
         let mut cursor = Position::origin();
         let face = Face::default();
         self.chars().for_each(|c| {
             Cell::new_char(face, c).layout(ctx, ct.max.width, &mut size, &mut cursor);
         });
-        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
+        *layout = Layout::new().with_size(ct.clamp(size));
+        Ok(())
     }
 }
 
@@ -42,13 +48,18 @@ impl View for String {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         self.as_str().render(ctx, surf, layout)
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
-        self.as_str().layout(ctx, ct)
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
+        self.as_str().layout(ctx, ct, layout)
     }
 }
 
@@ -63,15 +74,6 @@ impl Text {
     /// Create new empty text
     pub fn new() -> Self {
         Default::default()
-    }
-
-    /// Calculate maximum size of the text
-    pub fn max_size(&self) -> Size {
-        self.layout(
-            &ViewContext::dummy(),
-            BoxConstraint::loose(Size::new(usize::MAX, usize::MAX)),
-        )
-        .size()
     }
 
     /// Number of cells
@@ -190,7 +192,7 @@ impl View for Text {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         let mut writer = surf.writer(ctx);
@@ -200,13 +202,19 @@ impl View for Text {
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let mut size = Size::empty();
         let mut cursor = Position::origin();
         self.cells.iter().for_each(|cell| {
             cell.layout(ctx, ct.max.width, &mut size, &mut cursor);
         });
-        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
+        *layout = Layout::new().with_size(ct.clamp(size));
+        Ok(())
     }
 }
 
@@ -276,6 +284,8 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
 mod tests {
     use rasterize::SVG_COLORS;
 
+    use crate::view::ViewLayoutStore;
+
     use super::*;
 
     #[test]
@@ -284,21 +294,22 @@ mod tests {
         let size = Size::new(5, 10);
         let ctx = ViewContext::dummy();
         let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
+        let mut layout_store = ViewLayoutStore::new();
 
         writeln!(&mut text, "11")?;
         text.set_face("fg=#3c3836,bg=#ebdbb2".parse()?);
         writeln!(&mut text, "222")?;
 
         print!("{tag} first line longest: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(2, 3));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(2, 3));
 
         text.set_face(text.face().overlay(&"fg=#af3a03,bold".parse()?));
         writeln!(&mut text, "3")?;
 
         print!("{tag} middle line longest: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(3, 3));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(3, 3));
 
         Ok(())
     }
@@ -309,22 +320,23 @@ mod tests {
         let size = Size::new(5, 10);
         let ctx = ViewContext::dummy();
         let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
+        let mut layout_store = ViewLayoutStore::new();
 
         write!(&mut text, "1 no wrap")?;
 
         print!("{tag} will not wrap: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(1, 9));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(1, 9));
 
         writeln!(&mut text, "\n2 this will wrap")?;
         print!("{tag} will wrap: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(3, 10));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(3, 10));
 
         write!(&mut text, "3 bla")?;
         print!("{tag} one more line: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(4, 10));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(4, 10));
 
         Ok(())
     }
@@ -335,31 +347,32 @@ mod tests {
         let size = Size::new(6, 20);
         let ctx = ViewContext::dummy();
         let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
+        let mut layout_store = ViewLayoutStore::new();
 
         writeln!(&mut text, ".\t|")?;
         print!("{tag} 1 char: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(1, 9));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(1, 9));
 
         writeln!(&mut text, ".......\t|")?;
         print!("{tag} 7 chars: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(2, 9));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(2, 9));
 
         writeln!(&mut text, "........\t|")?;
         print!("{tag} 8 chars: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(3, 17));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(3, 17));
 
         writeln!(&mut text, "...............\t|")?;
         print!("{tag} 15 chars: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(4, 17));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(4, 17));
 
         writeln!(&mut text, "................\t|")?;
         print!("{tag} 16 chars: {:?}", text.debug(size));
-        let layout = text.layout(&ctx, BoxConstraint::loose(size));
-        assert_eq!(layout.size, Size::new(6, 20));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(6, 20));
 
         Ok(())
     }

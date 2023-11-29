@@ -1,5 +1,5 @@
 use surf_n_term::{
-    view::{Align, Container, Margins, Text, View, ViewContext},
+    view::{Align, Container, Margins, Text, View, ViewContext, ViewLayoutStore},
     Cell, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
     TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
@@ -97,6 +97,7 @@ fn main() -> Result<(), Error> {
     let mut event_count = 0;
     let mut pos = Position::new(0, 0);
     term.waker().wake()?;
+    let mut layout_store = ViewLayoutStore::new();
     term.run_render(|term, event, mut surf| -> Result<_, Error> {
         event_count += 1;
         surf.draw_check_pattern("fg=#282828,bg=#3c3836".parse()?);
@@ -116,6 +117,7 @@ fn main() -> Result<(), Error> {
                 let size = surf.size();
                 surf.view_mut(1..-1, 1..-1).draw_view(
                     &ViewContext::new(term)?,
+                    Some(&mut layout_store),
                     Container::new(stats_view(term, &event, event_count)?)
                         .with_vertical(if pos.row > size.height / 2 {
                             Align::Start

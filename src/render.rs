@@ -3,7 +3,10 @@ use crate::{
     decoder::Decoder,
     encoder::{Encoder, TTYEncoder},
     error::Error,
-    view::{BoxConstraint, IntoView, View, ViewContext},
+    view::{
+        BoxConstraint, IntoView, Layout, Tree, TreeMut, View, ViewContext, ViewLayoutStore,
+        ViewMutLayout,
+    },
     Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
     SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps, TerminalCommand,
     TerminalEvent, TerminalSize, TerminalWaker,
@@ -427,7 +430,12 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     fn draw_check_pattern(&mut self, face: Face);
 
     /// Draw view on the surface
-    fn draw_view(&mut self, ctx: &ViewContext, view: impl IntoView) -> Result<(), Error>;
+    fn draw_view(
+        &mut self,
+        ctx: &ViewContext,
+        layout_store: Option<&mut ViewLayoutStore>,
+        view: impl IntoView,
+    ) -> Result<(), Error>;
 
     /// Erase surface with face
     fn erase(&mut self, face: Face);
@@ -479,10 +487,22 @@ where
     }
 
     /// Draw view on the surface
-    fn draw_view(&mut self, ctx: &ViewContext, view: impl IntoView) -> Result<(), Error> {
+    fn draw_view(
+        &mut self,
+        ctx: &ViewContext,
+        layout_store: Option<&mut ViewLayoutStore>,
+        view: impl IntoView,
+    ) -> Result<(), Error> {
         let view = view.into_view();
-        let layout = view.layout(ctx, BoxConstraint::loose(self.size()));
-        view.render(ctx, self.as_mut(), &layout)?;
+
+        let mut layout_store_vec = ViewLayoutStore::new();
+        let layout_store = layout_store.unwrap_or(&mut layout_store_vec);
+        layout_store.clear();
+
+        let mut layout = ViewMutLayout::new(layout_store, Layout::default());
+
+        view.layout(ctx, BoxConstraint::loose(self.size()), layout.view_mut())?;
+        view.render(ctx, self.as_mut(), layout.view())?;
         Ok(())
     }
 
@@ -996,7 +1016,7 @@ mod tests {
         render
             .surface()
             .view_mut(1.., 2..)
-            .draw_view(&ctx, image_ascii)?;
+            .draw_view(&ctx, None, image_ascii)?;
         print!("[render] ascii image: {:?}", render.surface().debug());
         render.frame(&mut term)?;
         assert_eq!(

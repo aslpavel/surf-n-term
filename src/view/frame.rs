@@ -1,4 +1,4 @@
-use super::{BoxConstraint, Layout, Tree, View, ViewContext};
+use super::{BoxConstraint, Layout, Tree, TreeMut, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{
     Cell, Error, Face, Image, Position, Shape, Size, Surface, SurfaceMut, TerminalSurface, RGBA,
 };
@@ -150,7 +150,7 @@ impl<V: View> View for Frame<V> {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         if !ctx.has_glyphs {
             return self.view.render(ctx, surf, layout);
@@ -173,14 +173,19 @@ impl<V: View> View for Frame<V> {
             }
         }
 
-        self.view
-            .render(ctx, surf, layout.get(0).ok_or(Error::InvalidLayout)?)?;
+        let child_layout = layout.children().next().ok_or(Error::InvalidLayout)?;
+        self.view.render(ctx, surf, child_layout)?;
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         if !ctx.has_glyphs {
-            return self.view.layout(ctx, ct);
+            return self.view.layout(ctx, ct, layout);
         }
 
         let ct = BoxConstraint::new(
@@ -193,13 +198,15 @@ impl<V: View> View for Frame<V> {
                 width: ct.max().width.saturating_sub(2),
             },
         );
-        let mut layout = self.view.layout(ctx, ct);
-        layout.set_pos(Position::new(1, 1));
+        let mut child_layout = layout.push_default();
+        self.view.layout(ctx, ct, child_layout.view_mut())?;
+        child_layout.set_pos(Position::new(1, 1));
         let size = Size {
-            height: layout.size().height + 2,
-            width: layout.size().width + 2,
+            height: child_layout.size().height + 2,
+            width: child_layout.size().width + 2,
         };
-        Tree::new(Layout::new().with_size(size), vec![layout])
+        *layout = Layout::new().with_size(size);
+        Ok(())
     }
 }
 

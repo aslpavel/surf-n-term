@@ -1,4 +1,4 @@
-use super::{BoxConstraint, Layout, Tree, View, ViewContext};
+use super::{BoxConstraint, Tree, TreeMut, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{Error, TerminalSurface};
 
 /// Widget that changes depending on constraints that it was given.
@@ -28,18 +28,23 @@ where
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let view = layout.data::<V>().ok_or(Error::InvalidLayout)?;
-        view.render(ctx, surf, layout)?;
+        view.render(ctx, surf, layout.view())?;
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let view = (self.build)(ctx, ct);
-        let mut layout = view.layout(ctx, ct);
+        view.layout(ctx, ct, layout.view_mut())?;
         layout.set_data(view);
-        layout
+        Ok(())
     }
 }
 

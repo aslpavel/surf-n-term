@@ -9,7 +9,7 @@ use crate::{
     decoder::Base64Decoder,
     encoder::{Base64Encoder, Encoder, TTYEncoder},
     surface::{view_shape, ViewBounds},
-    view::{BoxConstraint, Layout, Tree, View, ViewContext},
+    view::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout},
     Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
 };
@@ -284,7 +284,7 @@ impl View for Image {
         &self,
         ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         let size = surf.size();
@@ -297,9 +297,15 @@ impl View for Image {
         Ok(())
     }
 
-    fn layout(&self, ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let size = ct.clamp(self.size_cells(ctx.pixels_per_cell()));
-        Tree::leaf(Layout::new().with_size(size))
+        *layout = Layout::new().with_size(size);
+        Ok(())
     }
 }
 
@@ -436,7 +442,7 @@ impl View for ImageAsciiView {
         &self,
         _ctx: &ViewContext,
         surf: TerminalSurface<'_>,
-        layout: &Tree<Layout>,
+        layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         surf.fill_with(|pos, _| {
@@ -451,12 +457,18 @@ impl View for ImageAsciiView {
         Ok(())
     }
 
-    fn layout(&self, _ctx: &ViewContext, ct: BoxConstraint) -> Tree<Layout> {
+    fn layout(
+        &self,
+        _ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
         let size = Size {
             height: self.image.height() / 2 + self.image.height() % 2,
             width: self.image.width(),
         };
-        Tree::leaf(Layout::new().with_size(ct.clamp(size)))
+        *layout = Layout::new().with_size(ct.clamp(size));
+        Ok(())
     }
 }
 

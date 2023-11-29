@@ -131,6 +131,7 @@ fn render(term: &mut dyn Terminal) -> Result<(), Error> {
         surf.erase("bg=#ff0000".parse()?);
         surf.draw_view(
             &ctx,
+            None,
             sweep_view([
                 "first item",
                 "multi\n line",
