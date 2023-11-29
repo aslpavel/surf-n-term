@@ -161,18 +161,17 @@ pub trait Tree {
         }
     }
 
-    /*
     /// Find path in the layout that leads to the position
     fn find_path(&self, pos: Position) -> FindPath<'_>
     where
         Self: Tree<Value = Layout>,
     {
         FindPath {
-            current: Some(self.view()),
+            current: Some(self.id()),
+            store: self.store(),
             pos,
         }
     }
-    */
 }
 
 impl<'a, T: Tree> Tree for &'a T {
@@ -217,18 +216,20 @@ impl<'a, T> Iterator for TreeIter<'a, T> {
     }
 }
 
-/*
 pub struct FindPath<'a> {
-    current: Option<ViewLayout<'a>>,
+    current: Option<TreeId>,
+    store: &'a [TreeNode<Layout>],
     pos: Position,
 }
 
 impl<'a> Iterator for FindPath<'a> {
-    type Item = ViewLayout<'a>;
+    type Item = &'a Layout;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let result = self.current.take()?;
-        for child in result.children() {
+        let current_id = self.current.take()?;
+        let mut child_id_opt = self.store[current_id.0].child_first;
+        while let Some(child_id) = child_id_opt {
+            let child = &self.store[child_id.0].value;
             if child.pos.col <= self.pos.col
                 && self.pos.col < child.pos.col + child.size.width
                 && child.pos.row <= self.pos.row
@@ -238,14 +239,14 @@ impl<'a> Iterator for FindPath<'a> {
                     row: self.pos.row - child.pos.row,
                     col: self.pos.col - child.pos.col,
                 };
-                self.current.replace(child);
+                self.current.replace(child_id);
                 break;
             }
+            child_id_opt = self.store[child_id.0].sibling;
         }
-        Some(result)
+        Some(&self.store[current_id.0].value)
     }
 }
-*/
 
 pub trait TreeMut: Tree {
     /// Get mutable reference to the vector of node store
@@ -519,37 +520,34 @@ mod tests {
         Ok(())
     }
 
-    /*
     #[test]
     fn test_layout_find_path() {
-        let layout = Tree::new(
+        let mut layout_store = ViewLayoutStore::new();
+        let mut layout = ViewMutLayout::new(
+            &mut layout_store,
             Layout::new().with_size(Size::new(10, 10)),
-            vec![
-                Tree::leaf(Layout::new().with_size(Size::new(6, 6))),
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(6, 0))
-                        .with_size(Size::new(4, 5)),
-                ),
-                Tree::leaf(
-                    Layout::new()
-                        .with_position(Position::new(6, 5))
-                        .with_size(Size::new(4, 5)),
-                ),
-                Tree::new(
-                    Layout::new()
-                        .with_position(Position::new(0, 6))
-                        .with_size(Size::new(6, 4)),
-                    vec![
-                        Tree::leaf(Layout::new().with_size(Size::new(3, 4))),
-                        Tree::leaf(
-                            Layout::new()
-                                .with_position(Position::new(3, 0))
-                                .with_size(Size::new(3, 4)),
-                        ),
-                    ],
-                ),
-            ],
+        );
+        layout.push(Layout::new().with_size(Size::new(6, 6)));
+        layout.push(
+            Layout::new()
+                .with_position(Position::new(6, 0))
+                .with_size(Size::new(4, 5)),
+        );
+        layout.push(
+            Layout::new()
+                .with_position(Position::new(6, 5))
+                .with_size(Size::new(4, 5)),
+        );
+        let mut layout1 = layout.push(
+            Layout::new()
+                .with_position(Position::new(0, 6))
+                .with_size(Size::new(6, 4)),
+        );
+        layout1.push(Layout::new().with_size(Size::new(3, 4)));
+        layout1.push(
+            Layout::new()
+                .with_position(Position::new(3, 0))
+                .with_size(Size::new(3, 4)),
         );
 
         assert_eq!(
@@ -565,5 +563,4 @@ mod tests {
             ]
         );
     }
-    */
 }
