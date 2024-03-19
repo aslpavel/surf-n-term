@@ -338,10 +338,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        view::{Text, ViewLayoutStore},
-        Position,
-    };
+    use crate::view::{Text, ViewLayoutStore};
 
     #[test]
     fn test_flex() -> Result<(), Error> {

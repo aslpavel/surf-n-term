@@ -504,7 +504,7 @@ impl<O> KeyMapHandler<O> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::BTreeMap, sync::Mutex};
+    use std::sync::Mutex;
 
     #[test]
     fn test_key_map() -> Result<(), Error> {

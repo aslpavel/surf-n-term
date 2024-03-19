@@ -855,11 +855,7 @@ impl<W: Write> Write for TerminalDebug<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        encoder::ColorDepth::TrueColor,
-        terminal::{Size, TerminalEvent, TerminalSize, TerminalWaker},
-        TerminalCaps,
-    };
+    use crate::encoder::ColorDepth::TrueColor;
 
     struct DummyTerminal {
         size: TerminalSize,

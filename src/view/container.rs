@@ -300,7 +300,7 @@ pub(super) fn from_json_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{view::ViewLayoutStore, RGBA};
+    use crate::view::ViewLayoutStore;
 
     #[derive(Debug)]
     struct Fixed<V> {

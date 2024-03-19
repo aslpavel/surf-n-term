@@ -1,4 +1,4 @@
-use std::{boxed::Box, error::Error, io::Write, time::Duration};
+use std::{error::Error, io::Write, time::Duration};
 use surf_n_term::{
     DecMode, SystemTerminal, Terminal, TerminalColor, TerminalCommand, TerminalEvent,
 };
