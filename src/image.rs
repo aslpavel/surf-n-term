@@ -24,7 +24,6 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
     io::{Read, Write},
-    iter::FromIterator,
     ops::{Add, AddAssign, Mul},
     str::FromStr,
     sync::Arc,

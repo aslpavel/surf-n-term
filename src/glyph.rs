@@ -242,7 +242,7 @@ impl FromStr for Glyph {
                     "size" => {
                         attrs.size.replace(value.parse()?);
                     }
-                    "fallback" => attrs.fallback = value.to_owned(),
+                    "fallback" => value.clone_into(&mut attrs.fallback),
                     "" => {}
                     _ => return Err(Error::ParseError("Glyph", string.to_owned())),
                 }

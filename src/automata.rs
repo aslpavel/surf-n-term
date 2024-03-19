@@ -4,7 +4,6 @@
 //! in more complicated one with Thompson's construction and complied to DFA (Deterministic
 //! finite automaton) with power set construction.
 use std::{
-    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     fmt,
     iter::once,

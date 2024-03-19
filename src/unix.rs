@@ -128,7 +128,7 @@ impl UnixTerminal {
         let waker = TerminalWaker::new(move || {
             const WAKE: &[u8] = b"\x00";
             // use write syscall instead of locking so it would be safe to use in a signal handler
-            match nix::write(waker_write.as_raw_fd(), WAKE) {
+            match nix::write(waker_write.as_fd(), WAKE) {
                 Ok(_) | Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => Ok(()),
                 Err(error) => Err(error.into()),
             }
@@ -426,12 +426,12 @@ impl Terminal for UnixTerminal {
 
                 // update descriptors sets
                 let mut read_set = nix::FdSet::new();
-                read_set.insert(&self.tty);
-                read_set.insert(&signal_read);
-                read_set.insert(&self.waker_read);
+                read_set.insert(self.tty.as_fd());
+                read_set.insert(signal_read.as_fd());
+                read_set.insert(self.waker_read.as_fd());
                 let mut write_set = nix::FdSet::new();
                 if !self.write_queue.is_empty() {
-                    write_set.insert(&self.tty);
+                    write_set.insert(self.tty.as_fd());
                 }
 
                 // wait for descriptors
@@ -443,10 +443,10 @@ impl Terminal for UnixTerminal {
                 };
 
                 (
-                    read_set.contains(&self.waker_read),
-                    read_set.contains(&signal_read),
-                    read_set.contains(&self.tty),
-                    write_set.contains(&self.tty),
+                    read_set.contains(self.waker_read.as_fd()),
+                    read_set.contains(signal_read.as_fd()),
+                    read_set.contains(self.tty.as_fd()),
+                    write_set.contains(self.tty.as_fd()),
                 )
             };
 
@@ -632,8 +632,7 @@ impl AsFd for Tty {
 
 impl Write for Tty {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        nix::write(self.as_raw_fd(), buf)
-            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
+        nix::write(self, buf).map_err(|err| std::io::Error::from_raw_os_error(err as i32))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
