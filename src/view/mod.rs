@@ -653,6 +653,29 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
             .deserialize(&value)
             .map_err(de::Error::custom)?
             .boxed(),
+            "trace-layout" => {
+                // Generate debug message with calculated constraints and layout
+                let view_value = value.get("view").ok_or_else(|| {
+                    let err = Error::ParseError(
+                        "TracelLayout",
+                        "must include `view` attribute".to_owned(),
+                    );
+                    de::Error::custom(format!("[TraceLayout] {err}"))
+                })?;
+                let msg = value
+                    .get("msg")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("trace-layout")
+                    .to_owned();
+                self.deserialize(view_value)
+                    .map(move |view| {
+                        view.trace_layout(move |ct, layout| {
+                            tracing::debug!(?ct, ?layout, "{}", msg);
+                        })
+                    })
+                    .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
+                    .boxed()
+            }
             "flex" => Flex::from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
                 .boxed(),

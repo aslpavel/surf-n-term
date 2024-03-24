@@ -182,7 +182,7 @@ impl View for Glyph {
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
         if ctx.has_glyphs() {
-            if let Some(cell) = surf.get_mut(layout.pos()) {
+            if let Some(cell) = surf.get_mut(Position::origin()) {
                 cell.overlay(Cell::new_glyph(Face::default(), self.clone()));
             }
         } else {

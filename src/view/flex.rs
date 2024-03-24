@@ -56,26 +56,32 @@ impl<'a> Flex<'a> {
         }
     }
 
+    /// How to justify/align children along major axis
     pub fn justify(self, justify: Justify) -> Self {
         Self { justify, ..self }
     }
 
+    /// Create flex with horizontal major axis
     pub fn row() -> Self {
         Self::new(Axis::Horizontal)
     }
 
+    /// Create flex with vertical major axis
     pub fn column() -> Self {
         Self::new(Axis::Vertical)
     }
 
+    /// Push non-flex child
     pub fn push_child(&mut self, child: impl IntoView + 'a) {
         self.push_child_ext(child, None, None, Align::Start)
     }
 
+    /// Push flex child
     pub fn push_flex_child(&mut self, flex: f64, child: impl IntoView + 'a) {
         self.push_child_ext(child, Some(flex), None, Align::Start)
     }
 
+    /// Push child with extended attributes
     pub fn push_child_ext(
         &mut self,
         child: impl IntoView + 'a,
@@ -97,6 +103,7 @@ impl<'a> Flex<'a> {
         self
     }
 
+    /// Add new child with extended attributes
     pub fn add_child_ext(
         mut self,
         child: impl IntoView + 'a,
@@ -108,7 +115,7 @@ impl<'a> Flex<'a> {
         self
     }
 
-    /// Add new flex size child
+    /// Add new flex sized child
     pub fn add_flex_child(mut self, flex: f64, child: impl IntoView + 'a) -> Self {
         self.push_flex_child(flex, child);
         self

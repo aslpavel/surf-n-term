@@ -288,7 +288,7 @@ impl View for Image {
         let mut surf = layout.apply_to(surf);
         let size = surf.size();
         let ppc = ctx.pixels_per_cell();
-        if let Some(cell) = surf.get_mut(Position::new(0, 0)) {
+        if let Some(cell) = surf.get_mut(Position::origin()) {
             *cell =
                 Cell::new_image(self.crop(..size.height * ppc.height, ..size.width * ppc.width))
                     .with_face(cell.face());
