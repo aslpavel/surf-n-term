@@ -1,12 +1,13 @@
 use crate::{
     view::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout},
-    Cell, Color, Error, Face, Image, LinColor, Position, Size, Surface, SurfaceMut, SurfaceOwned,
-    TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
+    Cell, Color, Error, Face, Image, LinColor, Position, Size, Surface, SurfaceMut, SurfaceMutView,
+    SurfaceOwned, TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use rasterize::{
-    ActiveEdgeRasterizer, Align, Image as _, Point, Rasterizer, Scalar, Scene, Transform,
+    ActiveEdgeRasterizer, Align, Image as _, LineCap, PathBuilder, Point, Rasterizer, Scalar,
+    Scene, StrokeStyle, Transform,
 };
-pub use rasterize::{BBox, FillRule, Path};
+pub use rasterize::{BBox, FillRule, Path, EPSILON};
 use serde::{de, Deserialize, Serialize};
 use std::{
     hash::{Hash, Hasher},
@@ -40,6 +41,8 @@ struct GlyphInner {
     size: Size,
     /// Fallback text (used when image is not supported)
     fallback: String,
+    /// Render a frame around the glyph
+    frame: Option<GlyphFrame>,
 }
 
 /// Glyph defined as an SVG path
@@ -55,6 +58,7 @@ impl Glyph {
         view_box: Option<BBox>,
         size: Size,
         fallback: String,
+        frame: Option<GlyphFrame>,
     ) -> Self {
         let view_box = view_box
             .or_else(|| {
@@ -70,6 +74,7 @@ impl Glyph {
                 view_box,
                 size,
                 fallback,
+                frame,
             }),
         }
     }
@@ -81,31 +86,37 @@ impl Glyph {
             height: pixel_size.height,
             width: pixel_size.width,
         };
-        let tr = Transform::fit_size(self.inner.view_box, size, Align::Mid);
+        let _ = tracing::debug_span!("[Glyph.rasterize]", glyph=?self, ?face, ?size).enter();
 
-        let bg_rgba = face.bg.unwrap_or_else(|| RGBA::new(0, 0, 0, 0));
-        let bg: LinColor = bg_rgba.into();
-        let fg: LinColor = face
-            .fg
-            .unwrap_or_else(|| RGBA::new(255, 255, 255, 255))
-            .into();
+        let bg: LinColor = face.bg.unwrap_or_default().into();
+        let fg: LinColor = face.fg.unwrap_or_default().into();
 
-        let _ = tracing::debug_span!("[Glyph.rasterize]", path=?self, ?face, ?size).enter();
         let rasterizer = ActiveEdgeRasterizer::default();
         let mut surf = SurfaceOwned::new_with(
             Size {
                 height: size.height,
                 width: size.width,
             },
-            |_| bg_rgba,
+            |_| bg,
         );
+
+        // draw frame
+        let scene_bbox = if let Some(frame) = &self.inner.frame {
+            frame.rasterize(&rasterizer, surf.as_mut())
+        } else {
+            BBox::new((0.0, 0.0), (size.width as Scalar, size.height as Scalar))
+        };
+
+        // draw scene
         let shape = surf.shape();
         let data = surf.data_mut();
+        let tr = Transform::fit_bbox(self.inner.view_box, scene_bbox, Align::Mid);
         match &self.inner.scene {
             GlyphScene::Symbol { path, fill_rule } => {
                 for pixel in rasterizer.mask_iter(path, tr, size, *fill_rule) {
                     let pos = Position::new(pixel.y, pixel.x);
-                    data[shape.offset(pos)] = bg.lerp(fg, pixel.alpha as f32).into();
+                    let offset = shape.offset(pos);
+                    data[offset] = data[offset].lerp(fg, pixel.alpha as f32);
                 }
             }
             GlyphScene::Scene(scene) => {
@@ -124,13 +135,14 @@ impl Glyph {
                     for col in 0..image.width() {
                         let pos = Position::new(row, col);
                         let pixel = image_data[image_shape.offset(pos.row, pos.col)];
-                        data[shape.offset(pos)] = bg.lerp(pixel, pixel.alpha()).into();
+                        let offset = shape.offset(pos);
+                        data[offset] = data[offset].lerp(pixel, pixel.alpha());
                     }
                 }
             }
         }
 
-        Image::from(surf)
+        Image::new(surf)
     }
 
     /// Size of the glyph in cells
@@ -262,7 +274,206 @@ impl FromStr for Glyph {
             attrs.view_box,
             attrs.size.unwrap_or_else(glyph_default_size),
             attrs.fallback,
+            None,
         ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct GlyphFrame {
+    /// Margins (top height%, right width%, bottom height%, left width%)
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub margin: [Scalar; 4],
+    /// Border width (top px, right px, bottom px, left px)
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub border_width: [Scalar; 4],
+    /// Border radius (top-left min%, top-right min%, bottom-right %min, bottom-left min%)
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub border_radius: [Scalar; 4],
+    /// Border color
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub border_color: Option<RGBA>,
+    /// Padding (top height%, right width%, bottom height%, left width%)
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub padding: [Scalar; 4],
+    /// Fill color inside the frame
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub fill_color: Option<RGBA>,
+}
+
+impl GlyphFrame {
+    /// Set same border width for all sides
+    pub fn with_border_width(self, width: Scalar) -> Self {
+        Self {
+            border_width: [width; 4],
+            ..self
+        }
+    }
+
+    /// Set same border radius for all corners
+    pub fn with_border_radius(self, radius: Scalar) -> Self {
+        Self {
+            border_radius: [radius; 4],
+            ..self
+        }
+    }
+
+    pub fn rasterize(
+        &self,
+        rasterizer: &dyn Rasterizer,
+        mut surf: SurfaceMutView<'_, LinColor>,
+    ) -> BBox {
+        let width = surf.width() as Scalar;
+        let height = surf.height() as Scalar;
+
+        // margins
+        let [m_top, m_right, m_bottom, m_left] = self.margin;
+        let m_top = (m_top.clamp(0.0, 100.0) / 100.0 * height).round();
+        let m_right = (m_right.clamp(0.0, 100.0) / 100.0 * width).round();
+        let m_bottom = (m_bottom.clamp(0.0, 100.0) / 100.0 * height).round();
+        let m_left = (m_left.clamp(0.0, 100.0) / 100.0 * width).round();
+
+        // border width
+
+        let [bw_top, bw_right, bw_bottom, bw_left] = self.border_width;
+        let bw_top = bw_top.max(0.0);
+        let bw_right = bw_right.max(0.0);
+        let bw_bottom = bw_bottom.max(0.0);
+        let bw_left = bw_left.max(0.0);
+
+        // border radius
+        let size = (width - m_right - m_left - (bw_left + bw_right) / 2.0)
+            .min(height - m_top - m_bottom - (bw_top + bw_bottom) / 2.0);
+        let [br_tl, br_tr, br_br, br_bl] = self.border_radius;
+        let br_tl = br_tl.clamp(0.0, 100.0) / 100.0 * size;
+        let br_tr = br_tr.clamp(0.0, 100.0) / 100.0 * size;
+        let br_br = br_br.clamp(0.0, 100.0) / 100.0 * size;
+        let br_bl = br_bl.clamp(0.0, 100.0) / 100.0 * size;
+
+        // paddings
+        let [p_top, p_right, p_bottom, p_left] = self.padding;
+        let p_top = (p_top.clamp(0.0, 100.0) / 100.0 * height).round();
+        let p_right = (p_right.clamp(0.0, 100.0) / 100.0 * width).round();
+        let p_bottom = (p_bottom.clamp(0.0, 100.0) / 100.0 * height).round();
+        let p_left = (p_left.clamp(0.0, 100.0) / 100.0 * width).round();
+
+        // border path
+        let lx = m_left + bw_left / 2.0; // low x
+        let ly = m_top + bw_top / 2.0; // low y
+        let hx = width - m_right - bw_right / 2.0; // high x
+        let hy = height - m_bottom - bw_bottom / 2.0; // high y
+
+        let shape = surf.shape();
+        let size = rasterize::Size {
+            height: shape.height,
+            width: shape.width,
+        };
+        let data = surf.data_mut();
+
+        // fill
+        if let Some(fill_color) = self.fill_color {
+            let mut builder = PathBuilder::new();
+            builder.move_to((lx + br_tl, ly)).line_to((hx - br_tr, ly));
+            if br_tr > EPSILON {
+                builder.arc_to((br_tr, br_tr), 0.0, false, true, (hx, ly + br_tr));
+            }
+            builder.line_to((hx, hy - br_br));
+            if br_br > EPSILON {
+                builder.arc_to((br_br, br_br), 0.0, false, true, (hx - br_br, hy));
+            }
+            builder.line_to((lx + br_bl, hy));
+            if br_bl > EPSILON {
+                builder.arc_to((br_bl, br_bl), 0.0, false, true, (lx, hy - br_bl));
+            }
+            builder.line_to((lx, ly + br_tl));
+            if br_tl > EPSILON {
+                builder.arc_to((br_tl, br_tl), 0.0, false, true, (lx + br_tl, ly));
+            }
+            let path = builder.close().build();
+
+            let fill_color = LinColor::from(fill_color);
+            for pixel in
+                rasterizer.mask_iter(&path, Transform::identity(), size, FillRule::default())
+            {
+                let pos = Position::new(pixel.y, pixel.x);
+                let offset = shape.offset(pos);
+                data[offset] = data[offset].lerp(fill_color, pixel.alpha as f32);
+            }
+        }
+
+        // border
+        if let Some(border_color) = self.border_color {
+            let mut subpaths = Vec::new();
+            let stroke_style = StrokeStyle {
+                line_cap: LineCap::Round,
+                ..Default::default()
+            };
+            // top
+            let top_path = PathBuilder::new()
+                .move_to((lx + br_tl, ly))
+                .line_to((hx - br_tr, ly))
+                .build()
+                .stroke(StrokeStyle {
+                    width: bw_top,
+                    ..stroke_style
+                });
+            subpaths.extend(top_path);
+            // right
+            let mut right_build = PathBuilder::new();
+            right_build.move_to((hx - br_tr, ly));
+            if br_tr > EPSILON {
+                right_build.arc_to((br_tr, br_tr), 0.0, false, true, (hx, ly + br_tr));
+            }
+            right_build.line_to((hx, hy - br_br));
+            if br_br > EPSILON {
+                right_build.arc_to((br_br, br_br), 0.0, false, true, (hx - br_br, hy));
+            }
+            let right_path = right_build.build().stroke(StrokeStyle {
+                width: bw_right,
+                ..stroke_style
+            });
+            subpaths.extend(right_path);
+            // bottom
+            let bottom_path = PathBuilder::new()
+                .move_to((hx - br_br, hy))
+                .line_to((lx + br_bl, hy))
+                .build()
+                .stroke(StrokeStyle {
+                    width: bw_bottom,
+                    ..stroke_style
+                });
+            subpaths.extend(bottom_path);
+            // left
+            let mut left_build = PathBuilder::new();
+            left_build.move_to((lx + br_bl, hy));
+            if br_bl > EPSILON {
+                left_build.arc_to((br_bl, br_bl), 0.0, false, true, (lx, hy - br_bl));
+            }
+            left_build.line_to((lx, ly + br_tl));
+            if br_tl > EPSILON {
+                left_build.arc_to((br_tl, br_tl), 0.0, false, true, (lx + br_tl, ly));
+            }
+            let left_path = left_build.build().stroke(StrokeStyle {
+                width: bw_left,
+                ..stroke_style
+            });
+            subpaths.extend(left_path);
+            let path = Path::new(subpaths);
+
+            let border_color = LinColor::from(border_color);
+            for pixel in
+                rasterizer.mask_iter(&path, Transform::identity(), size, FillRule::default())
+            {
+                let pos = Position::new(pixel.y, pixel.x);
+                let offset = shape.offset(pos);
+                data[offset] = data[offset].lerp(border_color, pixel.alpha as f32);
+            }
+        }
+
+        BBox::new(
+            (m_left + p_left, m_top + p_top),
+            (width - m_right - p_right, height - m_bottom - p_bottom),
+        )
     }
 }
 
@@ -280,6 +491,8 @@ struct GlyphSerde {
     fill_rule: FillRule,
     #[serde(default = "glyph_default_size")]
     size: Size,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    frame: Option<GlyphFrame>,
 }
 
 fn glyph_default_size() -> Size {
@@ -307,6 +520,7 @@ impl Serialize for Glyph {
                 size: self.inner.size,
                 scene: None,
                 fallback,
+                frame: self.inner.frame,
             }
             .serialize(serializer),
             GlyphScene::Scene(scene) => GlyphSerde {
@@ -316,6 +530,7 @@ impl Serialize for Glyph {
                 fill_rule: FillRule::default(),
                 path: None,
                 fallback,
+                frame: self.inner.frame,
             }
             .serialize(serializer),
         }
@@ -335,6 +550,7 @@ impl<'de> Deserialize<'de> for Glyph {
                 glyph.view_box,
                 glyph.size,
                 glyph.fallback.unwrap_or_default(),
+                glyph.frame,
             ))
         } else if let Some(scene) = glyph.scene {
             let view_box = glyph
@@ -347,6 +563,7 @@ impl<'de> Deserialize<'de> for Glyph {
                     view_box,
                     size: glyph.size,
                     fallback: glyph.fallback.unwrap_or_default(),
+                    frame: glyph.frame,
                 }),
             })
         } else {
@@ -376,6 +593,7 @@ mod tests {
             Some(BBox::new((1.0, 0.0), (25.0, 21.0))),
             Size::new(1, 2),
             String::new(),
+            None,
         );
         let glyph_str = serde_json::to_string(&glyph)?;
         let glyph_de: Glyph = serde_json::from_str(glyph_str.as_ref())?;

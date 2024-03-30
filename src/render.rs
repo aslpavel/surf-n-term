@@ -1278,6 +1278,7 @@ mod tests {
             None,
             Size::new(1, 3),
             " ".to_owned(),
+            None,
         );
         let pos = Cell::new_glyph(face, glyph).layout(ctx, max_width, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(3, 2)));

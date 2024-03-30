@@ -40,9 +40,14 @@ pub struct Image {
 
 impl Image {
     /// Create new image from the RGBA surface
-    pub fn new(surf: impl Surface<Item = RGBA>) -> Self {
+    pub fn new(surf: impl Surface<Item = impl Color>) -> Self {
+        let data: Vec<_> = surf
+            .data()
+            .iter()
+            .map(|color| color.to_rgba().into())
+            .collect();
         Self {
-            data: surf.data().into(),
+            data: data.into(),
             shape: surf.shape(),
         }
     }
