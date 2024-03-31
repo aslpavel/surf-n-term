@@ -61,11 +61,11 @@ fn stats_view(
 }
 
 fn main() -> Result<(), Error> {
-    let appnder = tracing_appender::rolling::never("/tmp", "surf-n-term-mouse.log");
+    let appender = tracing_appender::rolling::never("/tmp", "surf-n-term-mouse.log");
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::CLOSE)
         .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(appnder)
+        .with_writer(appender)
         .init();
 
     let mut term = SystemTerminal::new()?;

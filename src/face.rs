@@ -221,14 +221,24 @@ impl FromStr for Face {
 
 impl fmt::Display for Face {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
         if let Some(fg) = self.fg {
-            write!(f, "fg={},", fg)?;
+            write!(f, "fg={}", fg)?;
+            first = false;
         }
         if let Some(bg) = self.bg {
-            write!(f, "bg={},", bg)?;
+            if !first {
+                write!(f, ",")?;
+            }
+            write!(f, "bg={}", bg)?;
+            first = false;
         }
         for attr in self.attrs.names() {
-            write!(f, "{},", attr)?;
+            if !first {
+                write!(f, ",")?;
+            }
+            write!(f, "{}", attr)?;
+            first = false;
         }
         Ok(())
     }
@@ -237,14 +247,24 @@ impl fmt::Display for Face {
 impl fmt::Debug for Face {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Face(")?;
+        let mut first = true;
         if let Some(fg) = self.fg {
-            write!(f, "fg={:?},", fg)?;
+            write!(f, "fg={:?}", fg)?;
+            first = false;
         }
         if let Some(bg) = self.bg {
-            write!(f, "bg={:?},", bg)?;
+            if !first {
+                write!(f, ",")?;
+            }
+            write!(f, "bg={:?}", bg)?;
+            first = false;
         }
         for attr in self.attrs.names() {
-            write!(f, "{},", attr)?;
+            if !first {
+                write!(f, ",")?;
+            }
+            write!(f, "{}", attr)?;
+            first = false;
         }
         write!(f, ")")?;
         Ok(())

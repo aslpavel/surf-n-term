@@ -2,6 +2,7 @@ use std::{error::Error, io::Write, time::Duration};
 use surf_n_term::{
     DecMode, SystemTerminal, Terminal, TerminalColor, TerminalCommand, TerminalEvent,
 };
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 fn header(term: &mut dyn Terminal, content: impl std::fmt::Display) -> Result<(), Box<dyn Error>> {
     term.execute(TerminalCommand::Face("fg=#b8bb26,bg=#3c3836,bold".parse()?))?;
@@ -13,6 +14,13 @@ fn header(term: &mut dyn Terminal, content: impl std::fmt::Display) -> Result<()
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let appender = tracing_appender::rolling::never("/tmp", "surf-n-term-events.log");
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(appender)
+        .init();
+
     use TerminalCommand::*;
     let mut term = SystemTerminal::new()?;
 

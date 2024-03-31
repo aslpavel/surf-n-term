@@ -394,7 +394,7 @@ impl Write for UnixTerminal {
 }
 
 impl Terminal for UnixTerminal {
-    #[tracing::instrument(name="[UnixTerminal.poll]", level="debug", skip_all, fields(?timeout))]
+    #[tracing::instrument(name="[UnixTerminal.poll]", level="trace", skip_all, fields(?timeout))]
     fn poll(&mut self, timeout: Option<Duration>) -> Result<Option<TerminalEvent>, Error> {
         self.write_queue.flush()?;
 
@@ -499,8 +499,8 @@ impl Terminal for UnixTerminal {
                 self.stats.recv += recv;
                 tracing::trace!(
                     size = %recv,
-                    data = format!("\"{}\"", buf[..recv].escape_ascii()),
-                    "[UnixTerminal.poll] received"
+                    data = format!("{}", buf[..recv].escape_ascii()),
+                    "[UnixTerminal.poll] received:"
                 );
                 // parse events
                 let mut read_queue = Cursor::new(&buf[..recv]);

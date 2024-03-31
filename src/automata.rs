@@ -346,14 +346,14 @@ impl<T> NFA<T> {
         // construct state information
         let mut infos: Vec<DFAStateInfo<T>> = Vec::new();
         infos.resize_with(dfa_states.len(), || DFAStateInfo {
-            accepting: false,
-            terminal: false,
+            is_accepting: false,
+            is_terminal: false,
             tags: Default::default(),
         });
         for (dfa_state, dfa_state_id) in dfa_states {
             let info = &mut infos[dfa_state_id.0];
-            info.accepting = dfa_state.contains(&self.stop);
-            info.terminal = dfa_table[&dfa_state_id].is_empty();
+            info.is_accepting = dfa_state.contains(&self.stop);
+            info.is_terminal = dfa_table[&dfa_state_id].is_empty();
             for nfa_state_id in dfa_state.iter() {
                 if let Some(tag) = self.states.get(nfa_state_id).and_then(|s| s.tag.clone()) {
                     info.tags.insert(tag.clone());
@@ -495,9 +495,9 @@ pub struct DFAState(usize);
 
 pub struct DFAStateInfo<T> {
     /// Input can be accepted at this point
-    pub accepting: bool,
+    pub is_accepting: bool,
     /// There is no outgoing edges from this state
-    pub terminal: bool,
+    pub is_terminal: bool,
     /// All tags associated with this node
     pub tags: BTreeSet<T>,
 }
@@ -543,7 +543,7 @@ impl<T> DFA<T> {
     /// Check if DFA accepts given input
     pub fn matches(&self, symbols: impl IntoIterator<Item = Symbol>) -> bool {
         if let Some(state) = self.transition_many(self.start(), symbols) {
-            self.info(state).accepting
+            self.info(state).is_accepting
         } else {
             false
         }
@@ -563,12 +563,12 @@ where
             // node
             let info = self.info(from);
             write!(f, "  {} [", from.0)?;
-            if info.accepting {
+            if info.is_accepting {
                 write!(f, "shape=doublecircle")?;
             } else {
                 write!(f, "shape=circle")?;
             }
-            if info.terminal {
+            if info.is_terminal {
                 write!(f, ",color=red")?
             }
             if !info.tags.is_empty() {

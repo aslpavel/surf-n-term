@@ -106,7 +106,7 @@ impl Decoder for Utf8Decoder {
                     buf.consume(consume);
                     return Err(Error::new(ErrorKind::InvalidInput, "utf8 decoder failed"));
                 }
-                Some(state) if UTF8DFA.info(state).accepting => {
+                Some(state) if UTF8DFA.info(state).is_accepting => {
                     self.push(*byte);
                     buf.consume(consume);
                     return Ok(Some(self.consume()));
@@ -128,7 +128,7 @@ pub struct TTYDecoder {
     /// DFA that represents all possible states of the parser
     automata: DFA<TTYTag>,
     /// Current DFA state of the parser
-    state: DFAState,
+    automata_state: DFAState,
     /// Matchers registered with TTYMatch::Index tag
     matchers: Vec<Box<dyn TTYMatcher>>,
     /// Bytes consumed since the initialization of DFA
@@ -140,7 +140,7 @@ pub struct TTYDecoder {
     /// Possible match is filled when we have automata in the accepting state
     /// but it is not terminal (transition to other state is possible). Contains
     /// TerminalEvent and amount of data in the buffer when this event was found.
-    possible: Option<(TerminalEvent, usize)>,
+    event_candidate: Option<(TerminalEvent, usize)>,
 }
 
 impl Decoder for TTYDecoder {
@@ -212,22 +212,22 @@ impl TTYDecoder {
         Self {
             automata,
             matchers,
-            state,
+            automata_state: state,
             rescheduled: Default::default(),
             buffer: Default::default(),
-            possible: None,
+            event_candidate: None,
         }
     }
 
     /// Process single byte
     fn decode_byte(&mut self, byte: u8) -> Option<TerminalEvent> {
         self.buffer.push(byte);
-        match self.automata.transition(self.state, byte) {
+        match self.automata.transition(self.automata_state, byte) {
             Some(state) => {
-                self.state = state;
-                let info = self.automata.info(state);
-                if info.accepting {
-                    let tag = info
+                self.automata_state = state;
+                let state_desc = self.automata.info(state);
+                if state_desc.is_accepting {
+                    let tag = state_desc
                         .tags
                         .iter()
                         .next()
@@ -239,7 +239,7 @@ impl TTYDecoder {
                         TTYTag::Matcher(index) => self.matchers[*index]
                             .decode(&self.buffer)
                             .unwrap_or_else(|| {
-                                tracing::info!(
+                                tracing::warn!(
                                     "[TTYDecoder.decode] unhandled: {}",
                                     String::from_utf8_lossy(&self.buffer)
                                 );
@@ -247,17 +247,17 @@ impl TTYDecoder {
                             }),
                     };
 
-                    self.possible.replace((event, self.buffer.len()));
-                    if info.terminal {
-                        return self.take();
+                    self.event_candidate.replace((event, self.buffer.len()));
+                    if state_desc.is_terminal {
+                        return self.take_candidate();
                     }
                 }
                 None
             }
             None => {
-                let event = self.take().unwrap_or_else(|| {
-                    self.rescheduled.push(byte); // schedule current by for parsing
-                    self.state = self.automata.start();
+                let event = self.take_candidate().unwrap_or_else(|| {
+                    self.rescheduled.push(byte); // re-schedule current byte for parsing
+                    self.automata_state = self.automata.start();
                     self.buffer.pop();
                     let raw = std::mem::take(&mut self.buffer);
                     tracing::info!(
@@ -272,11 +272,11 @@ impl TTYDecoder {
     }
 
     /// Take last successfully parsed event
-    pub fn take(&mut self) -> Option<TerminalEvent> {
-        self.possible.take().map(|(event, size)| {
+    pub fn take_candidate(&mut self) -> Option<TerminalEvent> {
+        self.event_candidate.take().map(|(event, size)| {
             self.rescheduled.extend(self.buffer.drain(size..).rev());
             self.buffer.clear();
-            self.state = self.automata.start();
+            self.automata_state = self.automata.start();
             event
         })
     }
@@ -364,7 +364,7 @@ struct KittyKeyboardMatcher;
 // 0b0001 - Disambiguate escape codes
 // 0b0100 - Report alternate keys
 // 0b1000 - Report all keys as escape codes
-//          NOTE: 0b1000 breaks shift+key as it no longer gene ported as uppercase
+//          NOTE: 0b1000 breaks shift+key as it no longer generated as uppercase
 pub(crate) const KEYBOARD_LEVEL: usize = 0b0101;
 
 impl TTYMatcher for KittyKeyboardMatcher {
@@ -911,10 +911,17 @@ fn tty_event_nfa() -> NFA<TerminalEvent> {
 
     for (name, code) in [
         (KeyName::Home, "1"),
+        (KeyName::Insert, "2"),
         (KeyName::Delete, "3"),
         (KeyName::End, "4"),
         (KeyName::PageUp, "5"),
         (KeyName::PageDown, "6"),
+        (KeyName::Insert, "7"),
+        (KeyName::End, "8"),
+        (KeyName::F(1), "11"),
+        (KeyName::F(2), "12"),
+        (KeyName::F(3), "13"),
+        (KeyName::F(4), "14"),
         (KeyName::F(5), "15"),
         (KeyName::F(6), "17"),
         (KeyName::F(7), "18"),
@@ -942,9 +949,13 @@ fn tty_event_nfa() -> NFA<TerminalEvent> {
         (KeyName::End, "[", "F"),
         (KeyName::Home, "[", "H"),
         (KeyName::F(1), "O", "P"),
+        (KeyName::F(1), "[", "P"),
         (KeyName::F(2), "O", "Q"),
+        (KeyName::F(2), "[", "Q"),
         (KeyName::F(3), "O", "R"),
+        (KeyName::F(3), "[", "R"),
         (KeyName::F(4), "O", "S"),
+        (KeyName::F(4), "[", "S"),
     ]
     .iter()
     {
@@ -1050,7 +1061,7 @@ fn sgr_face<'a>(face: &mut Face, mut cmds: impl Iterator<Item = &'a [u8]>) {
             Some(v) if (40..=48).contains(&v) => face.bg = Some(COLORS[v - 40]),
             Some(v) if (100..=107).contains(&v) => face.bg = Some(COLORS[v - 92]),
             _ => {
-                // TODO:
+                // TODO: SGR more codes
                 //   - de jure standard (ITU-T T.416)
                 //   - different types of underline
                 // [reference](https://github.com/csdvrx/sixel-testsuite/blob/master/ansi-vte52.sh)

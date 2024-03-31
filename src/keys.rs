@@ -112,6 +112,7 @@ pub enum KeyName {
     Backspace,
     Char(char),
     Delete,
+    Insert,
     Down,
     End,
     Enter,
@@ -145,6 +146,7 @@ impl fmt::Debug for KeyName {
                 _ => write!(f, "\"{}\"", c),
             },
             KeyName::Delete => write!(f, "delete"),
+            KeyName::Insert => write!(f, "insert"),
             KeyName::Down => write!(f, "down"),
             KeyName::End => write!(f, "end"),
             KeyName::Enter => write!(f, "enter"),
@@ -194,6 +196,7 @@ impl FromStr for KeyName {
             "space" => KeyName::Char(' '),
             "backspace" => KeyName::Backspace,
             "delete" => KeyName::Delete,
+            "insert" => KeyName::Insert,
             f if f.starts_with('f')
                 && f.len() > 1
                 && string[1..].chars().all(|c| c.is_ascii_digit()) =>
