@@ -480,7 +480,6 @@ impl View for ImageAsciiView {
 pub enum ImageHandlerKind {
     Kitty,
     Sixel,
-    ITerm,
     Dummy,
 }
 
@@ -490,7 +489,6 @@ impl ImageHandlerKind {
         match self {
             Kitty => Box::new(KittyImageHandler::new()),
             Sixel => Box::new(SixelImageHandler::new(bg)),
-            ITerm => Box::new(ItermImageHandler::new()),
             Dummy => Box::new(DummyImageHandler),
         }
     }
@@ -504,7 +502,6 @@ impl FromStr for ImageHandlerKind {
         match s.to_ascii_lowercase().as_str() {
             "kitty" => Ok(Kitty),
             "sixel" => Ok(Sixel),
-            "iterm" => Ok(ITerm),
             "dummy" => Ok(Dummy),
             _ => Err(Error::ParseError(
                 "ImageHandlerKind",
@@ -575,77 +572,6 @@ impl ImageHandler for DummyImageHandler {
     }
 
     fn draw(&mut self, _out: &mut dyn Write, _img: &Image, _pos: Position) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn erase(
-        &mut self,
-        _out: &mut dyn Write,
-        _img: &Image,
-        _pos: Option<Position>,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn handle(&mut self, _out: &mut dyn Write, _event: &TerminalEvent) -> Result<bool, Error> {
-        Ok(false)
-    }
-}
-
-/// Image handler for iTerm2 graphic protocol
-///
-/// Reference: [iTerm2 Image Protocol](https://iterm2.com/documentation-images.html)
-pub struct ItermImageHandler {
-    imgs: lru::LruCache<u64, Vec<u8>>,
-    size: usize,
-}
-
-impl ItermImageHandler {
-    pub fn new() -> Self {
-        Self {
-            imgs: lru::LruCache::unbounded(),
-            size: 0,
-        }
-    }
-}
-
-impl Default for ItermImageHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ImageHandler for ItermImageHandler {
-    fn kind(&self) -> ImageHandlerKind {
-        ImageHandlerKind::ITerm
-    }
-
-    fn draw(&mut self, out: &mut dyn Write, img: &Image, _pos: Position) -> Result<(), Error> {
-        if let Some(data) = self.imgs.get(&img.hash()) {
-            out.write_all(data.as_slice())?;
-            return Ok(());
-        }
-
-        let mut data = Vec::new();
-        write!(data, "\x1b]1337;File=inline=1;width={}px:", img.width())?;
-        let mut base64 = Base64Encoder::new(&mut data);
-        img.write_png(&mut base64).map_err(|err| match err {
-            png::EncodingError::IoError(err) => err.into(),
-            err => Error::Other(Cow::from(err.to_string())),
-        })?;
-        base64.finish()?;
-        data.write_all(b"\x07")?;
-
-        out.write_all(data.as_slice())?;
-
-        self.size += data.len();
-        self.imgs.put(img.hash(), data);
-        if self.size > IMAGE_CACHE_SIZE {
-            if let Some((_, lru_image)) = self.imgs.pop_lru() {
-                self.size -= lru_image.len();
-            }
-        }
-
         Ok(())
     }
 
