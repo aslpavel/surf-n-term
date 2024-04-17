@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     // trigger some events
-    term.execute_many(TerminalCommand::mouse_events_set(true, true))?;
+    term.execute_many(TerminalCommand::mouse_events_set(true, false))?;
     term.execute_many([
         DecModeGet(DecMode::VisibleCursor),
         DecModeGet(DecMode::AutoWrap),

@@ -98,6 +98,15 @@ pub trait View: Send + Sync {
     {
         TraceLayout { view: self, trace }
     }
+
+    /// Tag the view
+    fn tag<T>(self, tag: T) -> Tag<T, Self>
+    where
+        T: Any + Clone,
+        Self: Sized,
+    {
+        Tag::new(tag, self)
+    }
 }
 
 impl<'a, V: View + ?Sized> View for &'a V {
@@ -533,7 +542,10 @@ where
         surf: TerminalSurface<'_>,
         layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
-        self.view.render(ctx, surf, layout)
+        let surf = layout.apply_to(surf);
+        let child_layout = layout.children().next().ok_or(Error::InvalidLayout)?;
+        self.view.render(ctx, surf, child_layout)?;
+        Ok(())
     }
 
     fn layout(
@@ -544,11 +556,9 @@ where
     ) -> Result<(), Error> {
         let mut layout_child = layout.push_default();
         self.view.layout(ctx, ct, layout_child.view_mut())?;
-        let mut layout_val = Layout::new()
-            .with_position(layout_child.pos())
-            .with_size(layout_child.size());
-        layout_val.set_data(self.tag.clone());
-        *layout = layout_val;
+        *layout = Layout::new()
+            .with_size(layout_child.size())
+            .with_data(self.tag.clone());
         Ok(())
     }
 }

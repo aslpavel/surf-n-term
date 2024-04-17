@@ -33,12 +33,16 @@ impl std::cmp::Eq for Layout {}
 
 impl Debug for Layout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Layout")
-            .field("row", &self.pos.row)
-            .field("col", &self.pos.col)
-            .field("height", &self.size.height)
-            .field("width", &self.size.width)
-            .finish()
+        f.debug_struct(if self.data.is_some() {
+            "Layout"
+        } else {
+            "*Layout"
+        })
+        .field("row", &self.pos.row)
+        .field("col", &self.pos.col)
+        .field("height", &self.size.height)
+        .field("width", &self.size.width)
+        .finish()
     }
 }
 
@@ -89,6 +93,13 @@ impl Layout {
     pub fn set_data(&mut self, data: impl Any) -> &mut Self {
         self.data = Some(Box::new(data));
         self
+    }
+
+    pub fn with_data(self, data: impl Any) -> Self {
+        Self {
+            data: Some(Box::new(data)),
+            ..self
+        }
     }
 
     /// Constrain surface by the layout, that is create sub-subsurface view
@@ -348,6 +359,13 @@ impl<'a, T> TreeView<'a, T> {
             id,
         }
     }
+
+    pub fn from_id(store: &'a TreeStore<T>, id: TreeId) -> Self {
+        Self {
+            store: store.as_slice(),
+            id,
+        }
+    }
 }
 
 impl<'a, T> Deref for TreeView<'a, T> {
@@ -427,6 +445,10 @@ impl<'a, T> TreeMutView<'a, T> {
     pub fn new(store: &'a mut TreeStore<T>, value: T) -> Self {
         let id = TreeId(store.len());
         store.push(TreeNode::new(value));
+        Self { store, id }
+    }
+
+    pub fn from_id(store: &'a mut TreeStore<T>, id: TreeId) -> Self {
         Self { store, id }
     }
 

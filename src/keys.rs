@@ -1,3 +1,5 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 /// Key types
 use crate::Error;
 use std::{
@@ -19,21 +21,6 @@ pub struct Key {
 impl Key {
     pub fn new(name: KeyName, mode: KeyMod) -> Self {
         Self { name, mode }
-    }
-
-    /// Convert string to a vector keys
-    pub fn chord(keys: impl AsRef<str>) -> Result<Vec<Key>, Error> {
-        let chord = keys
-            .as_ref()
-            .split(' ')
-            .filter(|k| !k.is_empty())
-            .map(Key::from_str)
-            .collect::<Result<Vec<Key>, Error>>()?;
-        if chord.is_empty() {
-            Err(Error::ParseError("Key", keys.as_ref().to_string()))
-        } else {
-            Ok(chord)
-        }
     }
 }
 
@@ -106,6 +93,95 @@ impl FromStr for Key {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct KeyChord {
+    keys: Arc<Vec<Key>>,
+}
+
+impl KeyChord {
+    pub fn new(keys: Vec<Key>) -> KeyChord {
+        Self { keys: keys.into() }
+    }
+
+    pub fn keys(&self) -> &[Key] {
+        self.keys.as_ref()
+    }
+}
+
+impl FromIterator<Key> for KeyChord {
+    fn from_iter<T: IntoIterator<Item = Key>>(iter: T) -> Self {
+        Self {
+            keys: iter.into_iter().collect::<Vec<_>>().into(),
+        }
+    }
+}
+
+impl<'a> FromIterator<&'a Key> for KeyChord {
+    fn from_iter<T: IntoIterator<Item = &'a Key>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().cloned())
+    }
+}
+
+impl AsRef<[Key]> for KeyChord {
+    fn as_ref(&self) -> &[Key] {
+        self.keys()
+    }
+}
+
+impl fmt::Display for KeyChord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, key) in self.keys().iter().enumerate() {
+            write!(f, "{}", key)?;
+            if index + 1 < self.keys().len() {
+                write!(f, " ")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for KeyChord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl FromStr for KeyChord {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let chord = s
+            .split(' ')
+            .filter(|k| !k.is_empty())
+            .map(Key::from_str)
+            .collect::<Result<Vec<Key>, Error>>()?;
+        if chord.is_empty() {
+            Err(Error::ParseError("Key", s.to_string()))
+        } else {
+            Ok(Self::new(chord))
+        }
+    }
+}
+
+impl Serialize for KeyChord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for KeyChord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let chord_str = std::borrow::Cow::<'de, str>::deserialize(deserializer)?;
+        KeyChord::from_str(chord_str.as_ref()).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Key name
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KeyName {
@@ -131,6 +207,16 @@ pub enum KeyName {
     Right,
     Tab,
     Up,
+}
+
+impl KeyName {
+    pub fn is_mouse(&self) -> bool {
+        use KeyName::*;
+        matches!(
+            self,
+            MouseLeft | MouseMiddle | MouseRight | MouseMove | MouseWheelUp | MouseWheelDown
+        )
+    }
 }
 
 impl fmt::Debug for KeyName {
@@ -341,7 +427,7 @@ impl<V> KeyMap<V> {
     /// Register key chord to produce the value.
     ///
     /// Returns previously registered value or key_map associated with provided chord.
-    pub fn register(&mut self, chord: &[Key], value: V) -> Option<Result<V, KeyMap<V>>> {
+    pub fn register(&mut self, chord: impl AsRef<[Key]>, value: V) -> Option<Result<V, KeyMap<V>>> {
         fn register_rec<'a, V>(key_map: &'a mut KeyMap<V>, chord: &[Key]) -> &'a mut KeyMap<V> {
             match chord.split_first() {
                 None => key_map,
@@ -363,7 +449,7 @@ impl<V> KeyMap<V> {
             }
         }
 
-        match chord.split_last() {
+        match chord.as_ref().split_last() {
             Some((key, chord)) => register_rec(self, chord).mapping.insert(*key, Ok(value)),
             None => None,
         }
@@ -511,21 +597,21 @@ mod tests {
 
     #[test]
     fn test_key_map() -> Result<(), Error> {
-        let c0 = Key::chord("ctrl+x")?;
-        let c1 = Key::chord("ctrl+x f")?;
-        let c2 = Key::chord("ctrl+x a b")?;
+        let c0 = KeyChord::from_str("ctrl+x")?;
+        let c1 = KeyChord::from_str("ctrl+x f")?;
+        let c2 = KeyChord::from_str("ctrl+x a b")?;
 
         let mut key_map = KeyMap::new();
 
-        key_map.register(c0.as_ref(), 0);
-        assert_eq!(key_map.lookup(c0.as_ref()), KeyMapResult::Success(&0));
-        assert_eq!(key_map.lookup(c1.as_ref()), KeyMapResult::Failure);
+        key_map.register(c0.keys(), 0);
+        assert_eq!(key_map.lookup(c0.keys()), KeyMapResult::Success(&0));
+        assert_eq!(key_map.lookup(c1.keys()), KeyMapResult::Failure);
 
-        key_map.register(c1.as_ref(), 1);
-        key_map.register(c2.as_ref(), 2);
-        assert_eq!(key_map.lookup(c0.as_ref()), KeyMapResult::Continue);
-        assert_eq!(key_map.lookup(c1.as_ref()), KeyMapResult::Success(&1));
-        assert_eq!(key_map.lookup(c2.as_ref()), KeyMapResult::Success(&2));
+        key_map.register(c1.keys(), 1);
+        key_map.register(c2.keys(), 2);
+        assert_eq!(key_map.lookup(c0.keys()), KeyMapResult::Continue);
+        assert_eq!(key_map.lookup(c1.keys()), KeyMapResult::Success(&1));
+        assert_eq!(key_map.lookup(c2.keys()), KeyMapResult::Success(&2));
         Ok(())
     }
 

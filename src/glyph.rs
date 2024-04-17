@@ -334,7 +334,6 @@ impl GlyphFrame {
         let m_left = (m_left.clamp(0.0, 100.0) / 100.0 * width).round();
 
         // border width
-
         let [bw_top, bw_right, bw_bottom, bw_left] = self.border_width;
         let bw_top = bw_top.max(0.0);
         let bw_right = bw_right.max(0.0);

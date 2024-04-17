@@ -4,7 +4,7 @@ use crate::{
     encoder::{Encoder, TTYEncoder},
     error::Error,
     view::{
-        BoxConstraint, IntoView, Layout, Tree, TreeMut, View, ViewContext, ViewLayoutStore,
+        BoxConstraint, IntoView, Layout, Tree, TreeId, TreeMut, View, ViewContext, ViewLayoutStore,
         ViewMutLayout,
     },
     Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
@@ -435,7 +435,7 @@ pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
         ctx: &ViewContext,
         layout_store: Option<&mut ViewLayoutStore>,
         view: impl IntoView,
-    ) -> Result<(), Error>;
+    ) -> Result<TreeId, Error>;
 
     /// Erase surface with face
     fn erase(&mut self, face: Face);
@@ -492,7 +492,7 @@ where
         ctx: &ViewContext,
         layout_store: Option<&mut ViewLayoutStore>,
         view: impl IntoView,
-    ) -> Result<(), Error> {
+    ) -> Result<TreeId, Error> {
         let view = view.into_view();
 
         let mut layout_store_vec = ViewLayoutStore::new();
@@ -503,7 +503,7 @@ where
 
         view.layout(ctx, BoxConstraint::loose(self.size()), layout.view_mut())?;
         view.render(ctx, self.as_mut(), layout.view())?;
-        Ok(())
+        Ok(layout.id())
     }
 
     /// Replace all cells with empty character and provided face

@@ -149,8 +149,11 @@ impl Text {
     }
 
     /// Append format argument to the end of the [Text]
-    pub fn push_fmt(&mut self, args: std::fmt::Arguments<'_>) -> &mut Self {
-        self.write_fmt(args).expect("in memory write failed");
+    pub fn push_fmt<T>(&mut self, value: &T) -> &mut Self
+    where
+        T: std::fmt::Display + ?Sized,
+    {
+        write!(self, "{}", value).expect("in memory write failed");
         self
     }
 

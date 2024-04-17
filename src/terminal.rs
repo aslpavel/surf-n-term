@@ -5,6 +5,7 @@ use crate::{
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
     Face, Image, Key, KeyMod, KeyName, RGBA,
 };
+use either::Either;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -343,35 +344,45 @@ impl TerminalCommand {
         motion: bool,
     ) -> impl IntoIterator<Item = TerminalCommand> {
         if enable {
-            [
-                TerminalCommand::DecModeSet {
-                    enable: true,
-                    mode: DecMode::MouseSGR,
-                },
-                TerminalCommand::DecModeSet {
-                    enable: true,
-                    mode: DecMode::MouseReport,
-                },
+            let motion_mode = if motion {
                 TerminalCommand::DecModeSet {
                     enable: motion,
                     mode: DecMode::MouseMotions,
-                },
-            ]
-        } else {
-            [
+                }
+            } else {
                 TerminalCommand::DecModeSet {
-                    enable: false,
-                    mode: DecMode::MouseMotions,
-                },
-                TerminalCommand::DecModeSet {
-                    enable: false,
+                    enable: true,
                     mode: DecMode::MouseReport,
-                },
-                TerminalCommand::DecModeSet {
-                    enable: false,
-                    mode: DecMode::MouseSGR,
-                },
-            ]
+                }
+            };
+            Either::Left(
+                [
+                    motion_mode,
+                    TerminalCommand::DecModeSet {
+                        enable: true,
+                        mode: DecMode::MouseSGR,
+                    },
+                ]
+                .into_iter(),
+            )
+        } else {
+            Either::Right(
+                [
+                    TerminalCommand::DecModeSet {
+                        enable: false,
+                        mode: DecMode::MouseSGR,
+                    },
+                    TerminalCommand::DecModeSet {
+                        enable: false,
+                        mode: DecMode::MouseReport,
+                    },
+                    TerminalCommand::DecModeSet {
+                        enable: false,
+                        mode: DecMode::MouseMotions,
+                    },
+                ]
+                .into_iter(),
+            )
         }
     }
 }
