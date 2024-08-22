@@ -787,9 +787,9 @@ impl ImageHandler for KittyImageHandler {
                         // in case of very large image.
                         let suppress = self.suppress;
                         self.suppress.replace(2);
-                        self.draw(&mut out, &img, pos)?;
+                        self.draw(out, &img, pos)?;
                         self.suppress = suppress;
-                        encoder.encode(&mut out, TerminalCommand::CursorRestore)?;
+                        encoder.encode(out, TerminalCommand::CursorRestore)?;
                     }
                 }
                 Ok(true)

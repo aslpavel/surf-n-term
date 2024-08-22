@@ -93,7 +93,7 @@ impl<T> NFA<T> {
         let start = NFAStateId(0);
         let stop = NFAStateId(1);
         let mut state = NFAState::new();
-        for symbol in 0..=Symbol::max_value() {
+        for symbol in 0..=Symbol::MAX {
             if pred(symbol) {
                 state.edges.insert(symbol, stop);
             }
@@ -362,13 +362,13 @@ impl<T> NFA<T> {
         }
 
         // by construction all states are dense (meaning they start from 0 and do not have gaps)
-        let lang_size = Symbol::max_value() as usize + 1;
+        let lang_size = Symbol::MAX as usize + 1;
         let states = dfa_table
             .into_iter()
             .enumerate()
             .flat_map(|(index, (state, edges))| {
                 assert_eq!(index, state.0);
-                (0..=Symbol::max_value()).map(move |symbol| edges.get(&symbol).copied())
+                (0..=Symbol::MAX).map(move |symbol| edges.get(&symbol).copied())
             })
             .collect::<Vec<Option<DFAState>>>();
 

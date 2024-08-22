@@ -204,7 +204,7 @@ pub struct TerminalRenderer {
 
     /// Marked cell that are treaded specially during diffing
     marks: SurfaceOwned<CellMark>,
-    /// Images to be rendered (frame function local kept here to avoid allocation)
+    /// Images to be rendered (frame function local, kept here to avoid allocation)
     images: Vec<(Position, Face, Image)>,
 
     /// Cache of rendered glyphs
@@ -256,8 +256,12 @@ impl TerminalRenderer {
 
     /// Generate frame, that is issue terminal command to reconcile
     /// back (old) and front (new) buffers.
-    #[tracing::instrument(name = "[TerminalRenderer.frame]", level="trace", skip_all, fields(frame_count = %self.frame_count))]
+    #[tracing::instrument(name = "[TerminalRenderer.frame]", level="debug", skip_all, fields(frame_count = %self.frame_count))]
     pub fn frame<T: Terminal + ?Sized>(&mut self, term: &mut T) -> Result<(), Error> {
+        // clear hoisted locals
+        self.images.clear();
+        self.marks.fill(CellMark::Empty);
+
         // First pass
         //
         // - Replace glyphs with images in the front buffer
@@ -414,8 +418,6 @@ impl TerminalRenderer {
         self.frame_count += 1;
         std::mem::swap(&mut self.front, &mut self.back);
         self.front.clear();
-        self.images.clear();
-        self.marks.fill(CellMark::Empty);
 
         Ok(())
     }

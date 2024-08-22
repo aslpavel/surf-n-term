@@ -3,7 +3,7 @@ use crate::{
     encoder::ColorDepth,
     error::Error,
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
-    Face, Image, Key, KeyMod, KeyName, RGBA,
+    Face, Image, Key, KeyMod, KeyName, SurfaceMut, RGBA,
 };
 use either::Either;
 use serde::{Deserialize, Serialize};
@@ -71,7 +71,7 @@ pub trait Terminal: Write + Send {
             let event = self.poll(timeout)?;
             timeout = match handler(self, event)? {
                 TerminalAction::Quit(result) => return Ok(result),
-                TerminalAction::Wait => None,
+                TerminalAction::Wait | TerminalAction::WaitNoFrame => None,
                 TerminalAction::Sleep(timeout) => Some(timeout),
             };
         }
@@ -116,29 +116,33 @@ pub trait Terminal: Write + Send {
                     }
                     // handle event
                     let action = handler(self, event, renderer.surface())?;
-                    // drop frames if we are too far behind
-                    if self.frames_pending() > TERMINAL_FRAMES_DROP {
-                        tracing::warn!(
-                            "[Terminal.run_render] dropping frames: {}",
-                            self.frames_pending()
-                        );
-                        self.frames_drop();
-                        renderer.clear(self)?;
+                    if !matches!(action, TerminalAction::WaitNoFrame) {
+                        // drop frames if we are too far behind
+                        if self.frames_pending() > TERMINAL_FRAMES_DROP {
+                            tracing::warn!(
+                                "[Terminal.run_render] dropping frames: {}",
+                                self.frames_pending()
+                            );
+                            self.frames_drop();
+                            renderer.clear(self)?;
+                        }
+                        // render frame
+                        self.execute(TerminalCommand::DecModeSet {
+                            enable: true,
+                            mode: DecMode::SynchronizedOutput,
+                        })?;
+                        renderer.frame(self)?;
+                        self.execute(TerminalCommand::DecModeSet {
+                            enable: false,
+                            mode: DecMode::SynchronizedOutput,
+                        })?;
+                    } else {
+                        renderer.surface().clear();
                     }
-                    // render frame
-                    self.execute(TerminalCommand::DecModeSet {
-                        enable: true,
-                        mode: DecMode::SynchronizedOutput,
-                    })?;
-                    renderer.frame(self)?;
-                    self.execute(TerminalCommand::DecModeSet {
-                        enable: false,
-                        mode: DecMode::SynchronizedOutput,
-                    })?;
                     // handle action
                     timeout = match action {
                         TerminalAction::Quit(result) => return Ok(result),
-                        TerminalAction::Wait => None,
+                        TerminalAction::Wait | TerminalAction::WaitNoFrame => None,
                         TerminalAction::Sleep(timeout) => Some(timeout),
                     };
                 }
@@ -253,6 +257,8 @@ pub enum TerminalAction<R> {
     Quit(R),
     /// Wait for the next event from terminal
     Wait,
+    /// Wait for the next event and do not render current frame
+    WaitNoFrame,
     /// Wait for the next event with the provided timeout
     Sleep(Duration),
 }
