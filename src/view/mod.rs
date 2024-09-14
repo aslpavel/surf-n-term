@@ -81,6 +81,14 @@ pub trait View: Send + Sync {
         Box::new(self)
     }
 
+    /// Convert into Arc-ed view
+    fn arc<'a>(self) -> ArcView<'a>
+    where
+        Self: Sized + Send + Sync + 'a,
+    {
+        Arc::new(self)
+    }
+
     /// Wrapper around view that implements [std::fmt::Debug] which renders
     /// view. Only supposed to be used for debugging.
     fn debug(&self, size: Size) -> ViewDebug<&'_ Self>
@@ -521,7 +529,7 @@ impl<T: Clone + Any, V: View> Tag<T, V> {
 fn tag_from_json_value(
     seed: &ViewDeserializer<'_>,
     value: &serde_json::Value,
-) -> Result<Tag<serde_json::Value, BoxView<'static>>, Error> {
+) -> Result<Tag<serde_json::Value, ArcView<'static>>, Error> {
     let view = value
         .get("view")
         .ok_or_else(|| Error::ParseError("Tag", "must include view attribute".to_owned()))?;
@@ -609,19 +617,67 @@ impl View for RGBA {
     }
 }
 
+/// Used as a part of `ViewDeserializer` to implement cached views identified by `ref` type
+pub trait ViewCache: Send + Sync {
+    fn get(&self, uid: i64) -> Option<ArcView<'static>>;
+}
+
+impl ViewCache for Arc<dyn ViewCache> {
+    fn get(&self, uid: i64) -> Option<ArcView<'static>> {
+        (**self).get(uid)
+    }
+}
+
+struct ViewCached {
+    cache: Option<Arc<dyn ViewCache>>,
+    uid: i64,
+}
+
+impl View for ViewCached {
+    fn render(
+        &self,
+        ctx: &ViewContext,
+        surf: TerminalSurface<'_>,
+        layout: ViewLayout<'_>,
+    ) -> Result<(), Error> {
+        if let Some(view) = layout.data::<ArcView<'static>>() {
+            view.render(ctx, surf, layout.view())?;
+        }
+        Ok(())
+    }
+
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
+        if let Some(view) = self.cache.as_ref().and_then(|c| c.get(self.uid)) {
+            view.layout(ctx, ct, layout.view_mut())?;
+            layout.set_data(view);
+        }
+        Ok(())
+    }
+}
+
 /// View deserializer
 pub struct ViewDeserializer<'a> {
     colors: &'a HashMap<String, RGBA>,
+    view_cache: Option<Arc<dyn ViewCache>>,
     handlers: HashMap<
         String,
-        Box<dyn for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> BoxView<'static>>,
+        Box<dyn for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> ArcView<'static>>,
     >,
 }
 
 impl<'a> ViewDeserializer<'a> {
-    pub fn new(colors: Option<&'a HashMap<String, RGBA>>) -> Self {
+    pub fn new(
+        colors: Option<&'a HashMap<String, RGBA>>,
+        view_cache: Option<Arc<dyn ViewCache>>,
+    ) -> Self {
         Self {
             colors: colors.unwrap_or(&SVG_COLORS),
+            view_cache,
             handlers: HashMap::default(),
         }
     }
@@ -638,7 +694,7 @@ impl<'a> ViewDeserializer<'a> {
 
     pub fn register<H>(&mut self, name: impl Into<String>, handler: H)
     where
-        H: for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> BoxView<'static>
+        H: for<'b> Fn(&'b ViewDeserializer<'_>, &'b serde_json::Value) -> ArcView<'static>
             + 'static,
     {
         self.handlers.insert(name.into(), Box::new(handler));
@@ -646,7 +702,7 @@ impl<'a> ViewDeserializer<'a> {
 }
 
 impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
-    type Value = BoxView<'static>;
+    type Value = ArcView<'static>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -662,7 +718,7 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
             }
             .deserialize(&value)
             .map_err(de::Error::custom)?
-            .boxed(),
+            .arc(),
             "trace-layout" => {
                 // Generate debug message with calculated constraints and layout
                 let view_value = value.get("view").ok_or_else(|| {
@@ -684,32 +740,42 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
                         })
                     })
                     .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
-                    .boxed()
+                    .arc()
             }
             "flex" => Flex::from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
-                .boxed(),
+                .arc(),
             "container" => container::from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Container] {err}")))?
-                .boxed(),
+                .arc(),
             "glyph" => Glyph::deserialize(value)
                 .map_err(|err| de::Error::custom(format!("[Glyph] {err}")))?
-                .boxed(),
+                .arc(),
             "image" => Image::deserialize(value)
                 .map_err(|err| de::Error::custom(format!("[Image] {err}")))?
-                .boxed(),
+                .arc(),
             "image_ascii" => ImageAsciiView::deserialize(value)
                 .map_err(|err| de::Error::custom(format!("[ImageAscii] {err}")))?
-                .boxed(),
+                .arc(),
             "color" => RGBADeserializer {
                 colors: self.colors,
             }
             .deserialize(value)
             .map_err(|err| de::Error::custom(format!("[RGBA] {err}")))?
-            .boxed(),
+            .arc(),
             "tag" => tag_from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Tag] {err}")))?
-                .boxed(),
+                .arc(),
+            "ref" => {
+                let uid = value.get("ref").and_then(|v| v.as_i64()).ok_or_else(|| {
+                    de::Error::custom(format!("[ref] must include `uid: u64` attribute"))
+                })?;
+                ViewCached {
+                    cache: self.view_cache.clone(),
+                    uid,
+                }
+                .arc()
+            }
             name => match self.handlers.get(name) {
                 None => return Err(de::Error::custom(format!("unknown view type: {name}"))),
                 Some(handler) => handler(self, &value),
@@ -808,7 +874,7 @@ mod tests {
             ]
         });
 
-        let view = ViewDeserializer::new(None).deserialize(view_value)?;
+        let view = ViewDeserializer::new(None, None).deserialize(view_value)?;
         let size = Size::new(10, 20);
         println!("[view] deserialize: {:?}", view.debug(size));
         let mut layout_store = ViewLayoutStore::new();

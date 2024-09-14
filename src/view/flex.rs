@@ -164,7 +164,7 @@ impl<'a> Flex<'a> {
                             )
                         })?;
                         children.push(Child {
-                            view: seed.deserialize(view)?,
+                            view: seed.deserialize(view)?.boxed(),
                             flex,
                             face,
                             align,

@@ -288,7 +288,7 @@ pub(super) fn from_json_value(
         .get("child")
         .ok_or_else(|| Error::ParseError("Container", "must include child attribute".to_owned()))?;
     Ok(Container {
-        child: seed.deserialize(view)?,
+        child: seed.deserialize(view)?.boxed(),
         face,
         align_vertical,
         align_horizontal,
