@@ -6,8 +6,8 @@ use serde::{
 
 use super::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{
-    surface::ViewBounds, Cell, Error, Face, FaceDeserializer, Glyph, Position, Size,
-    TerminalSurface, TerminalSurfaceExt,
+    glyph::GlyphDeserializer, surface::ViewBounds, Cell, Error, Face, FaceDeserializer, Glyph,
+    Position, Size, TerminalSurface, TerminalSurfaceExt,
 };
 use std::{collections::HashMap, fmt::Write as _};
 
@@ -255,7 +255,7 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
                     let face_old = text.face;
                     text.set_face(face_old.overlay(&face));
                     if let Some(glyph) = map.get("glyph") {
-                        text.put_glyph(Glyph::deserialize(glyph)?);
+                        text.put_glyph(GlyphDeserializer { colors }.deserialize(glyph)?);
                     } else if let Some(text_value) = map.get("text") {
                         collect_rec(text, colors, text_value)?;
                     }
