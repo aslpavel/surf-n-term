@@ -591,9 +591,7 @@ impl FromStr for Size {
     type Err = Error;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let mut values = string
-            .split(|c| matches!(c, ' ' | ','))
-            .map(|s| s.trim().parse().ok());
+        let mut values = string.split([' ', ',']).map(|s| s.trim().parse().ok());
         let height = values
             .next()
             .flatten()

@@ -4,12 +4,18 @@ use crate::{
     SurfaceOwned, TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use rasterize::{
-    ActiveEdgeRasterizer, Align, Image as _, LineCap, PathBuilder, Point, Rasterizer, Scalar,
-    Scene, StrokeStyle, Transform,
+    ActiveEdgeRasterizer, Align, Image as _, LineCap, PathBuilder, Point, RGBADeserializer,
+    Rasterizer, Scalar, Scene, StrokeStyle, Transform, SVG_COLORS,
 };
 pub use rasterize::{BBox, FillRule, Path, EPSILON};
-use serde::{de, Deserialize, Serialize};
+use serde::{
+    de::{self, DeserializeSeed, IgnoredAny},
+    ser::SerializeMap,
+    Deserialize, Serialize,
+};
 use std::{
+    borrow::Cow,
+    collections::HashMap,
     hash::{Hash, Hasher},
     io::Write,
     str::FromStr,
@@ -20,15 +26,6 @@ use std::{
 pub enum GlyphScene {
     Symbol { path: Path, fill_rule: FillRule },
     Scene(Scene),
-}
-
-impl GlyphScene {
-    fn bbox(&self, tr: Transform) -> Option<BBox> {
-        match self {
-            GlyphScene::Symbol { path, .. } => path.bbox(tr),
-            GlyphScene::Scene(scene) => scene.bbox(tr),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -272,14 +269,14 @@ impl FromStr for Glyph {
             path,
             attrs.fill_rule,
             attrs.view_box,
-            attrs.size.unwrap_or_else(glyph_default_size),
+            attrs.size.unwrap_or(Size::new(1, 3)),
             attrs.fallback,
             None,
         ))
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct GlyphFrame {
     /// Margins (top height%, right width%, bottom height%, left width%)
     #[serde(default, skip_serializing_if = "is_default")]
@@ -476,26 +473,197 @@ impl GlyphFrame {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct GlyphSerde {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    scene: Option<Scene>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    path: Option<Path>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    view_box: Option<BBox>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    fallback: Option<String>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    fill_rule: FillRule,
-    #[serde(default = "glyph_default_size")]
-    size: Size,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    frame: Option<GlyphFrame>,
+pub struct GlyphFrameDeserializer<'a> {
+    pub colors: &'a HashMap<String, RGBA>,
 }
 
-fn glyph_default_size() -> Size {
-    Size::new(1, 3)
+impl<'de> Deserialize<'de> for GlyphFrame {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        GlyphFrameDeserializer {
+            colors: &SVG_COLORS,
+        }
+        .deserialize(deserializer)
+    }
+}
+
+impl<'de, 'a> de::DeserializeSeed<'de> for &'a GlyphFrameDeserializer<'_> {
+    type Value = GlyphFrame;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de, 'a> de::Visitor<'de> for &'a GlyphFrameDeserializer<'_> {
+    type Value = GlyphFrame;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("mapping")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: de::MapAccess<'de>,
+    {
+        let mut margin: Option<[Scalar; 4]> = None;
+        let mut border_width: Option<[Scalar; 4]> = None;
+        let mut border_radius: Option<[Scalar; 4]> = None;
+        let mut border_color: Option<RGBA> = None;
+        let mut padding: Option<[Scalar; 4]> = None;
+        let mut fill_color: Option<RGBA> = None;
+
+        let color_seed = RGBADeserializer {
+            colors: self.colors,
+        };
+
+        while let Some(name) = map.next_key::<Cow<'de, str>>()? {
+            match name.as_ref() {
+                "margin" => {
+                    margin.replace(map.next_value()?);
+                }
+                "border_width" => {
+                    border_width.replace(map.next_value()?);
+                }
+                "border_radius" => {
+                    border_radius.replace(map.next_value()?);
+                }
+                "border_color" => {
+                    border_color.replace(map.next_value_seed(color_seed.clone())?);
+                }
+                "padding" => {
+                    padding.replace(map.next_value()?);
+                }
+                "fill_color" => {
+                    fill_color.replace(map.next_value_seed(color_seed.clone())?);
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+
+        Ok(GlyphFrame {
+            margin: margin.unwrap_or_default(),
+            border_width: border_width.unwrap_or_default(),
+            border_radius: border_radius.unwrap_or_default(),
+            border_color,
+            padding: padding.unwrap_or_default(),
+            fill_color,
+        })
+    }
+}
+
+pub struct GlyphDeserializer<'a> {
+    pub colors: &'a HashMap<String, RGBA>,
+}
+
+impl<'de> Deserialize<'de> for Glyph {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        GlyphDeserializer {
+            colors: &SVG_COLORS,
+        }
+        .deserialize(deserializer)
+    }
+}
+
+impl<'de, 'a> de::DeserializeSeed<'de> for &'a GlyphDeserializer<'_> {
+    type Value = Glyph;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de, 'a> de::Visitor<'de> for &'a GlyphDeserializer<'_> {
+    type Value = Glyph;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("mapping")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: de::MapAccess<'de>,
+    {
+        let mut scene: Option<Scene> = None;
+        let mut path: Option<Path> = None;
+        let mut view_box: Option<BBox> = None;
+        let mut fallback: Option<String> = None;
+        let mut fill_rule: Option<FillRule> = None;
+        let mut size: Option<Size> = None;
+        let mut frame: Option<GlyphFrame> = None;
+
+        while let Some(name) = map.next_key::<Cow<'de, str>>()? {
+            match name.as_ref() {
+                "scene" => {
+                    // TODO: if scene deserializer is implemented use it here
+                    scene.replace(map.next_value()?);
+                }
+                "path" => {
+                    path.replace(map.next_value()?);
+                }
+                "view_box" => {
+                    view_box.replace(map.next_value()?);
+                }
+                "fallback" => {
+                    fallback.replace(map.next_value()?);
+                }
+                "fill_rule" => {
+                    fill_rule.replace(map.next_value()?);
+                }
+                "size" => {
+                    size.replace(map.next_value()?);
+                }
+                "frame" => {
+                    frame.replace(map.next_value_seed(&GlyphFrameDeserializer {
+                        colors: self.colors,
+                    })?);
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+
+        let size = size.unwrap_or(Size::new(1, 3));
+        match (path, scene) {
+            (Some(path), None) => Ok(Glyph::new(
+                path,
+                fill_rule.unwrap_or_default(),
+                view_box,
+                size,
+                fallback.unwrap_or_default(),
+                frame,
+            )),
+            (None, Some(scene)) => {
+                let view_box = view_box
+                    .or_else(|| scene.bbox(Transform::identity()))
+                    .unwrap_or_else(|| BBox::new((0.0, 0.0), (1.0, 1.0)));
+                Ok(Glyph {
+                    inner: Arc::new(GlyphInner {
+                        scene: GlyphScene::Scene(scene),
+                        view_box,
+                        size,
+                        fallback: fallback.unwrap_or_default(),
+                        frame,
+                    }),
+                })
+            }
+            _ => Err(de::Error::custom("must contain either scene or path")),
+        }
+    }
 }
 
 impl Serialize for Glyph {
@@ -503,71 +671,27 @@ impl Serialize for Glyph {
     where
         S: serde::Serializer,
     {
-        let view_box = match self.inner.scene.bbox(Transform::identity()) {
-            Some(bbox) if bbox == self.inner.view_box => None,
-            _ => Some(self.inner.view_box),
-        };
-        let fallback = self
-            .fallback_str()
-            .is_empty()
-            .then_some(self.fallback_str().to_owned());
+        let mut attrs = serializer.serialize_map(Some(6))?;
         match &self.inner.scene {
-            GlyphScene::Symbol { path, fill_rule } => GlyphSerde {
-                path: Some(path.clone()),
-                view_box,
-                fill_rule: *fill_rule,
-                size: self.inner.size,
-                scene: None,
-                fallback,
-                frame: self.inner.frame,
+            GlyphScene::Symbol { path, fill_rule } => {
+                attrs.serialize_entry("path", path)?;
+                if fill_rule != &FillRule::default() {
+                    attrs.serialize_entry("fill_rule", fill_rule)?;
+                }
             }
-            .serialize(serializer),
-            GlyphScene::Scene(scene) => GlyphSerde {
-                scene: Some(scene.clone()),
-                view_box,
-                size: self.inner.size,
-                fill_rule: FillRule::default(),
-                path: None,
-                fallback,
-                frame: self.inner.frame,
+            GlyphScene::Scene(scene) => {
+                attrs.serialize_entry("scene", scene)?;
             }
-            .serialize(serializer),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Glyph {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let glyph = GlyphSerde::deserialize(deserializer)?;
-        if let Some(path) = glyph.path {
-            Ok(Glyph::new(
-                path,
-                glyph.fill_rule,
-                glyph.view_box,
-                glyph.size,
-                glyph.fallback.unwrap_or_default(),
-                glyph.frame,
-            ))
-        } else if let Some(scene) = glyph.scene {
-            let view_box = glyph
-                .view_box
-                .or_else(|| scene.bbox(Transform::identity()))
-                .unwrap_or_else(|| BBox::new((0.0, 0.0), (1.0, 1.0)));
-            Ok(Glyph {
-                inner: Arc::new(GlyphInner {
-                    scene: GlyphScene::Scene(scene),
-                    view_box,
-                    size: glyph.size,
-                    fallback: glyph.fallback.unwrap_or_default(),
-                    frame: glyph.frame,
-                }),
-            })
-        } else {
-            Err(de::Error::custom("must contain either scene or path"))
+        attrs.serialize_entry("view_box", &self.inner.view_box)?;
+        if !self.fallback_str().is_empty() {
+            attrs.serialize_entry("fallback", self.fallback_str())?;
         }
+        attrs.serialize_entry("size", &self.inner.size)?;
+        if let Some(frame) = &self.inner.frame {
+            attrs.serialize_entry("frame", frame)?;
+        }
+        attrs.end()
     }
 }
 

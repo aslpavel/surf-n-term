@@ -29,9 +29,9 @@ pub use frame::Frame;
 pub use either::{self, Either};
 
 use crate::{
-    encoder::ColorDepth, image::ImageAsciiView, Cell, Error, Face, FaceAttrs, FaceDeserializer,
-    Glyph, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal, TerminalSurface,
-    TerminalSurfaceExt, RGBA,
+    encoder::ColorDepth, glyph::GlyphDeserializer, image::ImageAsciiView, Cell, Error, Face,
+    FaceAttrs, FaceDeserializer, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal,
+    TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use serde::{
     de::{self, DeserializeSeed},
@@ -748,9 +748,12 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
             "container" => container::from_json_value(self, &value)
                 .map_err(|err| de::Error::custom(format!("[Container] {err}")))?
                 .arc(),
-            "glyph" => Glyph::deserialize(value)
-                .map_err(|err| de::Error::custom(format!("[Glyph] {err}")))?
-                .arc(),
+            "glyph" => GlyphDeserializer {
+                colors: self.colors,
+            }
+            .deserialize(value)
+            .map_err(|err| de::Error::custom(format!("[Glyph] {err}")))?
+            .arc(),
             "image" => Image::deserialize(value)
                 .map_err(|err| de::Error::custom(format!("[Image] {err}")))?
                 .arc(),
@@ -768,7 +771,7 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
                 .arc(),
             "ref" => {
                 let uid = value.get("ref").and_then(|v| v.as_i64()).ok_or_else(|| {
-                    de::Error::custom(format!("[ref] must include `uid: u64` attribute"))
+                    de::Error::custom("[ref] must include `uid: u64` attribute".to_string())
                 })?;
                 ViewCached {
                     cache: self.view_cache.clone(),
