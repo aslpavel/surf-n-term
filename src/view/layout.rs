@@ -34,9 +34,9 @@ impl std::cmp::Eq for Layout {}
 impl Debug for Layout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(if self.data.is_some() {
-            "Layout"
+            "Layout*"
         } else {
-            "*Layout"
+            "Layout"
         })
         .field("row", &self.pos.row)
         .field("col", &self.pos.col)

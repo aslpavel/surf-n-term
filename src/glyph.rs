@@ -113,7 +113,7 @@ impl Glyph {
                 for pixel in rasterizer.mask_iter(path, tr, size, *fill_rule) {
                     let pos = Position::new(pixel.y, pixel.x);
                     let offset = shape.offset(pos);
-                    data[offset] = data[offset].lerp(fg, pixel.alpha as f32);
+                    data[offset] = data[offset].blend_over(fg.with_alpha(pixel.alpha));
                 }
             }
             GlyphScene::Scene(scene) => {
@@ -393,7 +393,7 @@ impl GlyphFrame {
             {
                 let pos = Position::new(pixel.y, pixel.x);
                 let offset = shape.offset(pos);
-                data[offset] = data[offset].lerp(fill_color, pixel.alpha as f32);
+                data[offset] = data[offset].blend_over(fill_color.with_alpha(pixel.alpha));
             }
         }
 
@@ -462,7 +462,7 @@ impl GlyphFrame {
             {
                 let pos = Position::new(pixel.y, pixel.x);
                 let offset = shape.offset(pos);
-                data[offset] = data[offset].lerp(border_color, pixel.alpha as f32);
+                data[offset] = data[offset].blend_over(border_color.with_alpha(pixel.alpha));
             }
         }
 

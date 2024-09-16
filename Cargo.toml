@@ -8,7 +8,7 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.16.2"
+version = "0.16.3"
 
 [dependencies]
 fnv = "^1.0"
@@ -30,7 +30,7 @@ unicode-width = "^0.1"
 either = "^1.9"
 
 rasterize = "^0.4"
-# rasterize = { path = "../rasterize" }
+# rasterize = { path = "../rasterize", default-features = false, features = ["serde"]}
 
 [dev-dependencies]
 criterion = { version = "^0.5", features = ["html_reports"] }

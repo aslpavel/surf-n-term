@@ -739,7 +739,7 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
                             tracing::debug!(?ct, ?layout, "{}", msg);
                         })
                     })
-                    .map_err(|err| de::Error::custom(format!("[Flex] {err}")))?
+                    .map_err(|err| de::Error::custom(format!("[TraceLayout] {err}")))?
                     .arc()
             }
             "flex" => Flex::from_json_value(self, &value)
