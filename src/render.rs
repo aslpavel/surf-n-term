@@ -121,6 +121,7 @@ impl Cell {
         &self,
         ctx: &ViewContext,
         max_width: usize,
+        wraps: bool,
         size: &mut Size,
         cursor: &mut Position,
     ) -> Option<Position> {
@@ -156,6 +157,8 @@ impl Cell {
             size.width = max(size.width, cursor.col);
             size.height = max(size.height, cursor.row + cell_size.height);
             Some(pos)
+        } else if !wraps {
+            None
         } else {
             // put new line
             cursor.row += 1;
@@ -530,6 +533,7 @@ where
 /// Writable (implements `Write`) object for `TerminalSurface`
 pub struct TerminalWriter<'a> {
     ctx: ViewContext,
+    wraps: bool,
     face: Face,       // face underlay-ed over all cells
     cursor: Position, // cursor position (next insert will happen at this position)
     size: Size,       // actual used size
@@ -544,6 +548,7 @@ impl<'a> TerminalWriter<'a> {
     {
         Self {
             ctx,
+            wraps: true,
             face: Default::default(),
             cursor: Position::origin(),
             size: Size::empty(),
@@ -565,6 +570,22 @@ impl<'a> TerminalWriter<'a> {
     /// Set current face
     pub fn set_face(&mut self, face: Face) -> &mut Self {
         self.face = face;
+        self
+    }
+
+    /// Get current value of wraps flag
+    pub fn wraps(&self) -> bool {
+        self.wraps
+    }
+
+    /// Create new surface with update wraps flag
+    pub fn with_wraps(self, wraps: bool) -> Self {
+        Self { wraps, ..self }
+    }
+
+    /// Set wraps flag
+    pub fn set_wraps(&mut self, wraps: bool) -> &mut Self {
+        self.wraps = wraps;
         self
     }
 
@@ -604,6 +625,7 @@ impl<'a> TerminalWriter<'a> {
         let pos = cell.layout(
             &self.ctx,
             self.size().width,
+            self.wraps,
             &mut self.size,
             &mut self.cursor,
         );
@@ -1206,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cell_layout() {
+    fn test_cell_layout_wrap() {
         let max_width = 10;
         let ctx = &ViewContext {
             pixels_per_cell: Size::new(10, 10),
@@ -1219,56 +1241,56 @@ mod tests {
         let mut cursor = Position::default();
 
         // empty new line at the start
-        let pos = Cell::new_char(face, '\n').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, '\n').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert!(pos.is_none());
         assert_eq!(cursor, Position::new(1, 0));
         assert_eq!(size, Size::new(1, 0));
 
         // simple text line
         for c in "test".chars() {
-            Cell::new_char(face, c).layout(ctx, max_width, &mut size, &mut cursor);
+            Cell::new_char(face, c).layout(ctx, max_width, true, &mut size, &mut cursor);
         }
         assert_eq!(cursor, Position::new(1, 4));
         assert_eq!(size, Size::new(2, 4));
 
         // new line
-        let pos = Cell::new_char(face, '\n').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, '\n').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert!(pos.is_none());
         assert_eq!(cursor, Position::new(2, 0));
         assert_eq!(size, Size::new(2, 4));
 
         // single width character
-        let pos = Cell::new_char(face, ' ').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, ' ').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(2, 0)));
         assert_eq!(cursor, Position::new(2, 1));
         assert_eq!(size, Size::new(3, 4));
 
         // double width character
-        let pos = Cell::new_char(face, '🤩').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, '🤩').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(2, 1)));
         assert_eq!(cursor, Position::new(2, 3));
         assert_eq!(size, Size::new(3, 4));
 
         // tabulation
-        let pos = Cell::new_char(face, '\t').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, '\t').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert!(pos.is_none());
         assert_eq!(cursor, Position::new(2, 8));
         assert_eq!(size, Size::new(3, 8));
 
         // zero-width character
-        let pos = Cell::new_char(face, '\0').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, '\0').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert!(pos.is_none());
         assert_eq!(cursor, Position::new(2, 8));
         assert_eq!(size, Size::new(3, 8));
 
         // single width character close to the end of line
-        let pos = Cell::new_char(face, 'P').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, 'P').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(2, 8)));
         assert_eq!(cursor, Position::new(2, 9));
         assert_eq!(size, Size::new(3, 9));
 
         // double width character wraps
-        let pos = Cell::new_char(face, '🥳').layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_char(face, '🥳').layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(3, 0)));
         assert_eq!(cursor, Position::new(3, 2));
         assert_eq!(size, Size::new(4, 9));
@@ -1282,7 +1304,7 @@ mod tests {
             " ".to_owned(),
             None,
         );
-        let pos = Cell::new_glyph(face, glyph).layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = Cell::new_glyph(face, glyph).layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(3, 2)));
         assert_eq!(cursor, Position::new(3, 5));
         assert_eq!(size, Size::new(4, 9));
@@ -1291,16 +1313,62 @@ mod tests {
         let image = Image::from(SurfaceOwned::new(Size::new(20, 30)));
         let image_cell = Cell::new_image(image);
         assert_eq!(image_cell.size(ctx), Size::new(2, 3));
-        let pos = image_cell.layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = image_cell.layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(3, 5)));
         assert_eq!(cursor, Position::new(3, 8));
         assert_eq!(size, Size::new(5, 9));
 
         // image wrap
-        let pos = image_cell.layout(ctx, max_width, &mut size, &mut cursor);
+        let pos = image_cell.layout(ctx, max_width, true, &mut size, &mut cursor);
         assert_eq!(pos, Some(Position::new(4, 0)));
         assert_eq!(cursor, Position::new(4, 3));
         assert_eq!(size, Size::new(6, 9));
+    }
+
+    #[test]
+    fn test_cell_layout_nowrap() {
+        let max_width = 5;
+        let ctx = &ViewContext {
+            pixels_per_cell: Size::new(10, 10),
+            has_glyphs: true,
+            color_depth: TrueColor,
+        };
+        let face = Face::default();
+
+        let mut size = Size::default();
+        let mut cursor = Position::default();
+
+        // no wrap filler text
+        for (index, c) in "test".chars().enumerate() {
+            let pos = Cell::new_char(face, c).layout(ctx, max_width, false, &mut size, &mut cursor);
+            assert_eq!(pos, Some(Position::new(0, index)));
+        }
+        assert_eq!(cursor, Position::new(0, 4));
+        assert_eq!(size, Size::new(1, 4));
+
+        // last cell
+        let pos = Cell::new_char(face, '_').layout(ctx, max_width, false, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(0, 4)));
+        assert_eq!(cursor, Position::new(0, 5));
+        assert_eq!(size, Size::new(1, 5));
+
+        // no more space
+        let pos = Cell::new_char(face, '_').layout(ctx, max_width, false, &mut size, &mut cursor);
+        assert_eq!(pos, None);
+        assert_eq!(cursor, Position::new(0, 5));
+        assert_eq!(size, Size::new(1, 5));
+
+        // new line
+        let pos = Cell::new_char(face, '\n').layout(ctx, max_width, false, &mut size, &mut cursor);
+        assert_eq!(pos, None);
+        assert_eq!(cursor, Position::new(1, 0));
+        assert_eq!(size, Size::new(1, 5));
+
+        // first cell second line
+        let pos = Cell::new_char(face, '*').layout(ctx, max_width, false, &mut size, &mut cursor);
+        assert_eq!(pos, Some(Position::new(1, 0)));
+        assert_eq!(cursor, Position::new(1, 1));
+        assert_eq!(size, Size::new(2, 5));
     }
 
     #[test]

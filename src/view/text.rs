@@ -1,4 +1,4 @@
-use rasterize::RGBA;
+use rasterize::{RGBA, SVG_COLORS};
 use serde::{
     de::{self, DeserializeSeed},
     Deserialize, Deserializer,
@@ -36,7 +36,7 @@ impl View for str {
         let mut cursor = Position::origin();
         let face = Face::default();
         self.chars().for_each(|c| {
-            Cell::new_char(face, c).layout(ctx, ct.max.width, &mut size, &mut cursor);
+            Cell::new_char(face, c).layout(ctx, ct.max.width, true, &mut size, &mut cursor);
         });
         *layout = Layout::new().with_size(ct.clamp(size));
         Ok(())
@@ -66,6 +66,7 @@ impl View for String {
 #[derive(Clone, Default, Debug)]
 pub struct Text {
     cells: Vec<Cell>,
+    wraps: bool,
     // face used write next symbol (not actual face of the text)
     face: Face,
 }
@@ -73,7 +74,11 @@ pub struct Text {
 impl Text {
     /// Create new empty text
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            cells: Vec::default(),
+            wraps: true,
+            face: Face::default(),
+        }
     }
 
     /// Number of cells
@@ -90,6 +95,22 @@ impl Text {
     pub fn clear(&mut self) {
         self.cells.clear();
         self.face = Face::default();
+    }
+
+    /// Get current value of wraps flag
+    pub fn wraps(&self) -> bool {
+        self.wraps
+    }
+
+    /// Create new surface with update wraps flag
+    pub fn with_wraps(self, wraps: bool) -> Self {
+        Self { wraps, ..self }
+    }
+
+    /// Set wraps flag
+    pub fn set_wraps(&mut self, wraps: bool) -> &mut Self {
+        self.wraps = wraps;
+        self
     }
 
     /// Currently set face
@@ -198,7 +219,7 @@ impl View for Text {
         layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
         let mut surf = layout.apply_to(surf);
-        let mut writer = surf.writer(ctx);
+        let mut writer = surf.writer(ctx).with_wraps(self.wraps);
         self.cells.iter().for_each(|cell| {
             writer.put(cell.clone());
         });
@@ -214,7 +235,7 @@ impl View for Text {
         let mut size = Size::empty();
         let mut cursor = Position::origin();
         self.cells.iter().for_each(|cell| {
-            cell.layout(ctx, ct.max.width, &mut size, &mut cursor);
+            cell.layout(ctx, ct.max.width, self.wraps, &mut size, &mut cursor);
         });
         *layout = Layout::new().with_size(ct.clamp(size));
         Ok(())
@@ -252,6 +273,9 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
                         Some(face) => FaceDeserializer { colors }.deserialize(face)?,
                         None => Face::default(),
                     };
+                    if let Some(wraps) = map.get("wraps").and_then(|w| w.as_bool()) {
+                        text.wraps = wraps;
+                    }
                     let face_old = text.face;
                     text.set_face(face_old.overlay(&face));
                     if let Some(glyph) = map.get("glyph") {
@@ -283,13 +307,22 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
     }
 }
 
+impl<'de> Deserialize<'de> for Text {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        TextDeserializer {
+            colors: &SVG_COLORS,
+        }
+        .deserialize(deserializer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use rasterize::SVG_COLORS;
-
-    use crate::view::ViewLayoutStore;
-
     use super::*;
+    use crate::view::ViewLayoutStore;
 
     #[test]
     fn test_text_basic() -> Result<(), Error> {
@@ -322,24 +355,31 @@ mod tests {
         let tag = "[text wrap]";
         let size = Size::new(5, 10);
         let ctx = ViewContext::dummy();
-        let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
+        let mut text = Text::new();
         let mut layout_store = ViewLayoutStore::new();
 
+        text.set_face("fg=gruv-red-2".parse()?);
         write!(&mut text, "1 no wrap")?;
-
         print!("{tag} will not wrap: {:?}", text.debug(size));
         let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
         assert_eq!(layout.size(), Size::new(1, 9));
 
+        text.set_face("fg=gruv-green-2".parse()?);
         writeln!(&mut text, "\n2 this will wrap")?;
         print!("{tag} will wrap: {:?}", text.debug(size));
         let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
         assert_eq!(layout.size(), Size::new(3, 10));
 
+        text.set_face("fg=gruv-blue-2".parse()?);
         write!(&mut text, "3 bla")?;
         print!("{tag} one more line: {:?}", text.debug(size));
         let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
         assert_eq!(layout.size(), Size::new(4, 10));
+
+        text.set_wraps(false);
+        print!("{tag} disable wrapping: {:?}", text.debug(size));
+        let layout = text.layout_new(&ctx, BoxConstraint::loose(size), &mut layout_store)?;
+        assert_eq!(layout.size(), Size::new(3, 10));
 
         Ok(())
     }
@@ -398,10 +438,7 @@ mod tests {
             ]
         });
 
-        let text = TextDeserializer {
-            colors: &SVG_COLORS,
-        }
-        .deserialize(text_json)?;
+        let text = Text::deserialize(text_json)?;
         print!(
             "[text serde] nested text and faces: {:?}",
             text.debug(Size::new(1, 3))
