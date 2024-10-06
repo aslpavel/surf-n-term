@@ -26,12 +26,15 @@ pub use dynamic::Dynamic;
 mod frame;
 pub use frame::Frame;
 
+mod offscreen;
+pub use offscreen::Offscreen;
+
 pub use either::{self, Either};
 
 use crate::{
     encoder::ColorDepth, glyph::GlyphDeserializer, image::ImageAsciiView, Cell, Error, Face,
-    FaceAttrs, FaceDeserializer, Image, Position, Size, SurfaceMut, SurfaceOwned, Terminal,
-    TerminalSurface, TerminalSurfaceExt, RGBA,
+    FaceAttrs, FaceDeserializer, Image, Position, Size, Surface, SurfaceMut, SurfaceOwned,
+    SurfaceView, Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use serde::{
     de::{self, DeserializeSeed},
@@ -617,7 +620,44 @@ impl View for RGBA {
     }
 }
 
-/// Used as a part of `ViewDeserializer` to implement cached views identified by `ref` type
+impl<'a> View for SurfaceView<'a, Cell> {
+    fn render(
+        &self,
+        _ctx: &ViewContext,
+        surf: TerminalSurface<'_>,
+        layout: ViewLayout<'_>,
+    ) -> Result<(), Error> {
+        let src_data = self.data();
+        let src_shape = self.shape();
+
+        let mut dst_surf = layout.apply_to(surf);
+        let width = dst_surf.width().min(src_shape.width);
+        let height = dst_surf.height().min(src_shape.height);
+        dst_surf
+            .view_mut(..height, ..width)
+            .fill_with(|pos, mut dst| {
+                let src = src_data[src_shape.offset(pos)].clone();
+                dst.overlay(src);
+                dst
+            });
+
+        Ok(())
+    }
+
+    fn layout(
+        &self,
+        _ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
+        *layout = Layout::new().with_size(ct.clamp(self.shape().size()));
+        Ok(())
+    }
+}
+
+/// Passed to `ViewDeserializer` and represents cache, when view with type `ref`
+/// is deserialized this cache is used to resolve `uid`s into corresponding view
+/// objects.
 pub trait ViewCache: Send + Sync {
     fn get(&self, uid: i64) -> Option<ArcView<'static>>;
 }

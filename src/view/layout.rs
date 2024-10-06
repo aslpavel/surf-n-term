@@ -6,7 +6,7 @@ use std::{
 
 use smallvec::SmallVec;
 
-use crate::{surface::view_shape, Position, Size, SurfaceMutView, TerminalSurface};
+use crate::{Position, Size, SurfaceMutView, TerminalSurface};
 
 pub type ViewLayoutStore = TreeStore<Layout>;
 pub type ViewLayout<'a> = TreeView<'a, Layout>;
@@ -17,7 +17,7 @@ pub type ViewMutLayout<'a> = TreeMutView<'a, Layout>;
 pub struct Layout {
     pos: Position,
     size: Size,
-    data: Option<Box<dyn Any>>,
+    data: Option<Box<dyn Any + Send + Sync>>,
 }
 
 impl std::cmp::PartialEq for Layout {
@@ -90,12 +90,12 @@ impl Layout {
     }
 
     /// Set layout data
-    pub fn set_data(&mut self, data: impl Any) -> &mut Self {
+    pub fn set_data(&mut self, data: impl Any + Send + Sync) -> &mut Self {
         self.data = Some(Box::new(data));
         self
     }
 
-    pub fn with_data(self, data: impl Any) -> Self {
+    pub fn with_data(self, data: impl Any + Send + Sync) -> Self {
         Self {
             data: Some(Box::new(data)),
             ..self
@@ -108,7 +108,7 @@ impl Layout {
         let rows = self.pos.row..self.pos.row + self.size.height;
         let cols = self.pos.col..self.pos.col + self.size.width;
         let (shape, data) = surf.parts();
-        SurfaceMutView::new(view_shape(shape, rows, cols), data)
+        SurfaceMutView::new(shape.view(rows, cols), data)
     }
 }
 

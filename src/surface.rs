@@ -63,6 +63,37 @@ impl Shape {
             height: self.height,
         }
     }
+
+    /// Construct new offset and shape for
+    pub fn view<RS, CS>(self, rows: RS, cols: CS) -> Self
+    where
+        RS: ViewBounds,
+        CS: ViewBounds,
+    {
+        match (cols.view_bounds(self.width), rows.view_bounds(self.height)) {
+            (Some((col_start, col_end)), Some((row_start, row_end))) => {
+                let width = col_end - col_start;
+                let height = row_end - row_start;
+                let start = self.offset(Position::new(row_start, col_start));
+                let end = self.offset(Position::new(row_end - 1, col_end));
+                Shape {
+                    width,
+                    height,
+                    start,
+                    end,
+                    ..self
+                }
+            }
+            _ => Shape {
+                height: 0,
+                width: 0,
+                row_stride: 0,
+                col_stride: 0,
+                start: 0,
+                end: 0,
+            },
+        }
+    }
 }
 
 impl From<Size> for Shape {
@@ -152,7 +183,7 @@ pub trait Surface {
         Self: Sized,
     {
         SurfaceView {
-            shape: view_shape(self.shape(), rows, cols),
+            shape: self.shape().view(rows, cols),
             data: self.data(),
         }
     }
@@ -172,7 +203,7 @@ pub trait Surface {
         Self: Sized,
     {
         SurfaceOwnedView {
-            shape: view_shape(self.shape(), rows, cols),
+            shape: self.shape().view(rows, cols),
             inner: self,
         }
     }
@@ -265,7 +296,7 @@ pub trait SurfaceMut: Surface {
         Self: Sized,
     {
         SurfaceMutView {
-            shape: view_shape(self.shape(), rows, cols),
+            shape: self.shape().view(rows, cols),
             data: self.data_mut(),
         }
     }
@@ -830,40 +861,6 @@ fn range_bounds(bound: impl RangeBounds<i64>, size: usize) -> Option<(usize, usi
         None
     } else {
         Some((start as usize, end as usize))
-    }
-}
-
-/// Construct new offset and shape for
-pub fn view_shape<RS, CS>(shape: Shape, rows: RS, cols: CS) -> Shape
-where
-    RS: ViewBounds,
-    CS: ViewBounds,
-{
-    match (
-        cols.view_bounds(shape.width),
-        rows.view_bounds(shape.height),
-    ) {
-        (Some((col_start, col_end)), Some((row_start, row_end))) => {
-            let width = col_end - col_start;
-            let height = row_end - row_start;
-            let start = shape.offset(Position::new(row_start, col_start));
-            let end = shape.offset(Position::new(row_end - 1, col_end));
-            Shape {
-                width,
-                height,
-                start,
-                end,
-                ..shape
-            }
-        }
-        _ => Shape {
-            height: 0,
-            width: 0,
-            row_stride: 0,
-            col_stride: 0,
-            start: 0,
-            end: 0,
-        },
     }
 }
 

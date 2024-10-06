@@ -577,6 +577,12 @@ impl Size {
         self.height * self.width == 0
     }
 
+    /// Get size area
+    #[inline]
+    pub fn area(&self) -> usize {
+        self.width * self.height
+    }
+
     /// Expand/Contract size to bigger than `min` and smaller than `max` size
     pub fn clamp(self, min: Self, max: Self) -> Self {
         // NOTE: `self` is needed as reference will have lower precedence then Ord::clamp

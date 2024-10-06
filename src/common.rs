@@ -21,6 +21,58 @@ where
     }
 }
 
+pub trait LockExt {
+    type Value;
+
+    fn with<Scope, Out>(&self, scope: Scope) -> Out
+    where
+        Scope: FnOnce(&Self::Value) -> Out;
+
+    fn with_mut<Scope, Out>(&self, scope: Scope) -> Out
+    where
+        Scope: FnOnce(&mut Self::Value) -> Out;
+}
+
+impl<V> LockExt for std::sync::Mutex<V> {
+    type Value = V;
+
+    fn with<Scope, Out>(&self, scope: Scope) -> Out
+    where
+        Scope: FnOnce(&Self::Value) -> Out,
+    {
+        let value = self.lock().expect("lock poisoned");
+        scope(&*value)
+    }
+
+    fn with_mut<Scope, Out>(&self, scope: Scope) -> Out
+    where
+        Scope: FnOnce(&mut Self::Value) -> Out,
+    {
+        let mut value = self.lock().expect("lock poisoned");
+        scope(&mut *value)
+    }
+}
+
+impl<V> LockExt for std::sync::RwLock<V> {
+    type Value = V;
+
+    fn with<Scope, Out>(&self, scope: Scope) -> Out
+    where
+        Scope: FnOnce(&Self::Value) -> Out,
+    {
+        let value = self.read().expect("lock poisoned");
+        scope(&*value)
+    }
+
+    fn with_mut<Scope, Out>(&self, scope: Scope) -> Out
+    where
+        Scope: FnOnce(&mut Self::Value) -> Out,
+    {
+        let mut value = self.write().expect("lock poisoned");
+        scope(&mut *value)
+    }
+}
+
 lazy_static::lazy_static! {
     static ref ENV_CONFIG: HashMap<String, String> = {
         let mut config = HashMap::new();

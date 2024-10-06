@@ -8,7 +8,7 @@ use crate::{
     common::{clamp, Rnd},
     decoder::Base64Decoder,
     encoder::{Base64Encoder, Encoder, TTYEncoder},
-    surface::{view_shape, ViewBounds},
+    surface::ViewBounds,
     view::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout},
     Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
     TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
@@ -65,7 +65,7 @@ impl Image {
     {
         Self {
             data: self.data.clone(),
-            shape: view_shape(self.shape, rows, cols),
+            shape: self.shape.view(rows, cols),
         }
     }
 
