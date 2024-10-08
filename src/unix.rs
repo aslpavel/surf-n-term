@@ -4,7 +4,7 @@ use crate::decoder::KEYBOARD_LEVEL;
 use crate::encoder::ColorDepth;
 use crate::image::ImageHandlerKind;
 use crate::{
-    decoder::{Decoder, TTYDecoder},
+    decoder::{Decoder, TTYEventDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
     image::DummyImageHandler,
@@ -51,7 +51,7 @@ pub struct UnixTerminal {
     tty: Tty,
     encoder: TTYEncoder,
     write_queue: IOQueue,
-    decoder: TTYDecoder,
+    decoder: TTYEventDecoder,
     events_queue: VecDeque<TerminalEvent>,
     waker_read: UnixStream,
     waker: TerminalWaker,
@@ -139,7 +139,7 @@ impl UnixTerminal {
             tty,
             encoder: TTYEncoder::new(capabilities.clone()),
             write_queue: Default::default(),
-            decoder: TTYDecoder::new(),
+            decoder: TTYEventDecoder::new(),
             events_queue: Default::default(),
             waker_read,
             waker,

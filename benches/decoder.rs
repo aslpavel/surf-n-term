@@ -2,14 +2,14 @@ use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use surf_n_term::{
     common::Rnd,
-    decoder::{Base64Decoder, Decoder, TTYDecoder},
+    decoder::{Base64Decoder, Decoder, TTYEventDecoder},
     encoder::Base64Encoder,
 };
 
 const SMALL_SET: &str = "\x1bOR\x1b[15~\x1b[97;15R\x1b[4;3104;1482t\x1b[8;101;202t\x1b[<0;24;14M\x1b[<65;142;30M\u{1F431}ABC\x1b_Gi=127;OK\x1b\\";
 
 fn small_decoder_benchmark(c: &mut Criterion) {
-    let mut decoder = TTYDecoder::new();
+    let mut decoder = TTYEventDecoder::new();
     let mut cursor = Cursor::new(Vec::new());
     cursor.get_mut().write_all(SMALL_SET.as_ref()).unwrap();
     let count = decoder.decode_into(&mut cursor, &mut Vec::new()).unwrap();

@@ -46,15 +46,16 @@ pub struct NFA<T> {
 /// References:
 ///   - [Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html)
 impl<T> NFA<T> {
-    // Assign provided tag to the stop state
-    pub fn tag(mut self, tag: impl Into<T>) -> Self {
+    /// Assign provided tag to the stop state
+    pub fn tag_stop_state(mut self, tag: impl Into<T>) -> Self {
         if let Some(state) = self.states.get_mut(&self.stop) {
             state.tag = Some(tag.into());
         }
         self
     }
 
-    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> NFA<U> {
+    /// Map tags with the provided function
+    pub fn tags_map<U>(self, mut f: impl FnMut(T) -> U) -> NFA<U> {
         let Self {
             start,
             stop,
@@ -204,6 +205,7 @@ impl<T> NFA<T> {
         self
     }
 
+    /// For `a` regular expression it is equivalent to `a?`
     pub fn optional(mut self) -> Self {
         if let Some(start) = self.states.get_mut(&self.start) {
             start.epsilons.insert(self.stop);
@@ -605,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_dfa_simple() {
-        let nfa = NFA::from("abc").tag(1) | NFA::from("abd").tag(2);
+        let nfa = NFA::from("abc").tag_stop_state(1) | NFA::from("abd").tag_stop_state(2);
         let dfa = nfa.compile();
 
         assert_eq!(dfa.size(), 5);

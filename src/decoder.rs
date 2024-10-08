@@ -5,11 +5,14 @@ use crate::{
     terminal::{DecModeStatus, Mouse, Size, TerminalColor, TerminalEvent, TerminalSize},
     Face, FaceAttrs, Key, KeyMod, KeyName, Position, TerminalCommand, RGBA,
 };
+use either::Either;
 use lazy_static::lazy_static;
 use std::{
     collections::BTreeMap,
     fmt,
     io::{BufRead, Read},
+    ops::Deref,
+    sync::Arc,
 };
 
 /// Decoder interface
@@ -49,6 +52,24 @@ lazy_static! {
             utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
         ])
         .compile()
+    };
+    static ref TTY_EVENT_AUTOMATA: MatcherAutomata<TerminalEvent> = {
+        MatcherAutomata::new([
+            Box::new(BasicEventsMatcher) as Box<dyn TTYMatcher<Item = TerminalEvent>>,
+            Box::new(CursorPositionMatcher),
+            Box::new(DecModeMatcher),
+            Box::new(DeviceAttrsMatcher),
+            Box::new(GraphicRenditionMatcher),
+            Box::new(KittyImageMatcher),
+            Box::new(KittyKeyboardMatcher),
+            Box::new(MouseEventMatcher),
+            Box::new(OSControlMatcher),
+            Box::new(ReportSettingMatcher),
+            Box::new(TermCapMatcher),
+            Box::new(TermSizeMatcher),
+            Box::new(UTF8Matcher),
+            Box::new(BracketedPasteMatcher),
+        ])
     };
 }
 
@@ -122,15 +143,56 @@ impl Decoder for Utf8Decoder {
     }
 }
 
+#[derive(Debug)]
+struct MatcherAutomataInner<T> {
+    /// DFA that represents all possible states of the parser
+    pub(crate) automata: DFA<TTYMatcherTag<T>>,
+    /// Matchers registered with TTYMatch::Index tag
+    pub(crate) matchers: Vec<Box<dyn TTYMatcher<Item = T>>>,
+}
+
+/// Compiled tty matcher automata
+#[derive(Clone, Debug)]
+struct MatcherAutomata<T> {
+    inner: Arc<MatcherAutomataInner<T>>,
+}
+
+impl<T: Clone + Ord> MatcherAutomata<T> {
+    fn new(matchers: impl IntoIterator<Item = Box<dyn TTYMatcher<Item = T>>>) -> Self {
+        let matchers: Vec<_> = matchers.into_iter().collect();
+        let automata = NFA::choice(matchers.iter().enumerate().map(|(index, matcher)| {
+            match matcher.matcher() {
+                Either::Left(automata) => {
+                    automata
+                        // this call only here to convert type as [Void] cannot be created
+                        .tags_map(|_| TTYMatcherTag::Matcher(index))
+                        .tag_stop_state(TTYMatcherTag::Matcher(index))
+                }
+                Either::Right(automata) => automata.tags_map(TTYMatcherTag::Item),
+            }
+        }))
+        .compile();
+        let inner = MatcherAutomataInner { automata, matchers };
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+}
+
+impl<T> Deref for MatcherAutomata<T> {
+    type Target = MatcherAutomataInner<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 /// TTY Decoder
 #[derive(Debug)]
-pub struct TTYDecoder {
-    /// DFA that represents all possible states of the parser
-    automata: DFA<TTYTag>,
+struct MatcherDecoder<T> {
+    automata: MatcherAutomata<T>,
     /// Current DFA state of the parser
     automata_state: DFAState,
-    /// Matchers registered with TTYMatch::Index tag
-    matchers: Vec<Box<dyn TTYMatcher>>,
     /// Bytes consumed since the initialization of DFA
     buffer: Vec<u8>,
     /// Rescheduled data, that needs to be parsed again in **reversed order**
@@ -139,20 +201,20 @@ pub struct TTYDecoder {
     rescheduled: Vec<u8>,
     /// Possible match is filled when we have automata in the accepting state
     /// but it is not terminal (transition to other state is possible). Contains
-    /// TerminalEvent and amount of data in the buffer when this event was found.
-    event_candidate: Option<(TerminalEvent, usize)>,
+    /// item and amount of data in the buffer when this item was found.
+    item_candidate: Option<(Result<T, Vec<u8>>, usize)>,
 }
 
-impl Decoder for TTYDecoder {
-    type Item = TerminalEvent;
+impl<T: Clone + Ord> Decoder for MatcherDecoder<T> {
+    type Item = Result<T, Vec<u8>>;
     type Error = Error;
 
     fn decode<B: BufRead>(&mut self, mut input: B) -> Result<Option<Self::Item>, Self::Error> {
         // process rescheduled data first
         while let Some(byte) = self.rescheduled.pop() {
-            let event = self.decode_byte(byte);
-            if event.is_some() {
-                return Ok(event);
+            let item = self.decode_byte(byte);
+            if item.is_some() {
+                return Ok(item);
             }
         }
 
@@ -161,8 +223,8 @@ impl Decoder for TTYDecoder {
         let mut output = None;
         for byte in input.fill_buf()?.iter() {
             consumed += 1;
-            if let Some(event) = self.decode_byte(*byte) {
-                output.replace(event);
+            if let Some(item) = self.decode_byte(*byte) {
+                output.replace(item);
                 break;
             }
         }
@@ -172,60 +234,25 @@ impl Decoder for TTYDecoder {
     }
 }
 
-impl Default for TTYDecoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TTYDecoder {
-    pub fn new() -> Self {
-        let mut automatas = vec![tty_event_nfa().map(TTYTag::Event)];
-        // NOTE: order does not matter here, since it is compiled to DNF
-        let matchers: Vec<Box<dyn TTYMatcher>> = vec![
-            Box::new(CursorPositionMatcher),
-            Box::new(DecModeMatcher),
-            Box::new(DeviceAttrsMatcher),
-            Box::<GraphicRenditionMatcher>::default(),
-            Box::new(KittyImageMatcher),
-            Box::new(KittyKeyboardMatcher),
-            Box::new(MouseEventMatcher),
-            Box::new(OSControlMatcher),
-            Box::new(ReportSettingMatcher),
-            Box::new(TermCapMatcher),
-            Box::new(TermSizeMatcher),
-            Box::new(UTF8Matcher),
-            Box::new(BracketedPasteMatcher),
-        ];
-        for (index, matcher) in matchers.iter().enumerate() {
-            automatas.push(
-                matcher
-                    .matcher()
-                    // map needs only to convert type, _Void cannot be created
-                    .map(|_| TTYTag::Matcher(index))
-                    .tag(TTYTag::Matcher(index)),
-            )
-        }
-
-        let automata = NFA::choice(automatas).compile();
-        let state = automata.start();
+impl<T: Clone + Ord> MatcherDecoder<T> {
+    fn new(automata: MatcherAutomata<T>) -> Self {
+        let state = automata.automata.start();
         Self {
             automata,
-            matchers,
             automata_state: state,
             rescheduled: Default::default(),
             buffer: Default::default(),
-            event_candidate: None,
+            item_candidate: None,
         }
     }
 
     /// Process single byte
-    fn decode_byte(&mut self, byte: u8) -> Option<TerminalEvent> {
+    fn decode_byte(&mut self, byte: u8) -> Option<Result<T, Vec<u8>>> {
         self.buffer.push(byte);
-        match self.automata.transition(self.automata_state, byte) {
+        match self.automata.automata.transition(self.automata_state, byte) {
             Some(state) => {
                 self.automata_state = state;
-                let state_desc = self.automata.info(state);
+                let state_desc = self.automata.automata.info(state);
                 if state_desc.is_accepting {
                     let tag = state_desc
                         .tags
@@ -235,19 +262,13 @@ impl TTYDecoder {
 
                     // decode events
                     let event = match tag {
-                        TTYTag::Event(event) => event.clone(),
-                        TTYTag::Matcher(index) => self.matchers[*index]
+                        TTYMatcherTag::Item(event) => Ok(event.clone()),
+                        TTYMatcherTag::Matcher(index) => self.automata.matchers[*index]
                             .decode(&self.buffer)
-                            .unwrap_or_else(|| {
-                                tracing::warn!(
-                                    "[TTYDecoder.decode] unhandled: {}",
-                                    String::from_utf8_lossy(&self.buffer)
-                                );
-                                TerminalEvent::Raw(self.buffer.clone())
-                            }),
+                            .map_or_else(|| Err(self.buffer.clone()), |item| Ok(item)),
                     };
 
-                    self.event_candidate.replace((event, self.buffer.len()));
+                    self.item_candidate.replace((event, self.buffer.len()));
                     if state_desc.is_terminal {
                         return self.take_candidate();
                     }
@@ -257,14 +278,9 @@ impl TTYDecoder {
             None => {
                 let event = self.take_candidate().unwrap_or_else(|| {
                     self.rescheduled.push(byte); // re-schedule current byte for parsing
-                    self.automata_state = self.automata.start();
+                    self.automata_state = self.automata.automata.start();
                     self.buffer.pop();
-                    let raw = std::mem::take(&mut self.buffer);
-                    tracing::info!(
-                        "[TTYDecoder.decode] unhandled: {}",
-                        String::from_utf8_lossy(&raw)
-                    );
-                    TerminalEvent::Raw(raw)
+                    Err(std::mem::take(&mut self.buffer))
                 });
                 Some(event)
             }
@@ -272,11 +288,11 @@ impl TTYDecoder {
     }
 
     /// Take last successfully parsed event
-    pub fn take_candidate(&mut self) -> Option<TerminalEvent> {
-        self.event_candidate.take().map(|(event, size)| {
+    fn take_candidate(&mut self) -> Option<Result<T, Vec<u8>>> {
+        self.item_candidate.take().map(|(event, size)| {
             self.rescheduled.extend(self.buffer.drain(size..).rev());
             self.buffer.clear();
-            self.automata_state = self.automata.start();
+            self.automata_state = self.automata.automata.start();
             event
         })
     }
@@ -284,23 +300,61 @@ impl TTYDecoder {
 
 /// Automata tags that are used to pick correct decoder for the event
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum TTYTag {
-    /// Automata already produce valid terminal event
-    Event(TerminalEvent),
-    /// Index of the matcher that needs to be used to decode event
+enum TTYMatcherTag<T> {
+    /// Automata already produces valid item
+    Item(T),
+    /// Index of the matcher that needs to be used to decode item
     Matcher(usize),
 }
 
-/// Same as `!` type, which is not possible to construct
-#[derive(Clone)]
-enum _Void {}
+pub struct TTYEventDecoder {
+    matcher: MatcherDecoder<TerminalEvent>,
+}
 
-trait TTYMatcher: fmt::Debug + Send {
-    /// NFA that should match desired escape sequence
-    fn matcher(&self) -> NFA<_Void>;
+impl Default for TTYEventDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TTYEventDecoder {
+    pub fn new() -> Self {
+        Self {
+            matcher: MatcherDecoder::new(TTY_EVENT_AUTOMATA.clone()),
+        }
+    }
+}
+
+impl Decoder for TTYEventDecoder {
+    type Item = TerminalEvent;
+    type Error = Error;
+
+    fn decode<B: BufRead>(&mut self, buf: B) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(self.matcher.decode(buf)?.map(|item| match item {
+            Ok(event) => event,
+            Err(reject) => {
+                tracing::info!(
+                    "[TTYDecoder.decode] unhandled: {}",
+                    String::from_utf8_lossy(&reject)
+                );
+                TerminalEvent::Raw(reject)
+            }
+        }))
+    }
+}
+
+#[derive(Clone)]
+enum Void {}
+
+trait TTYMatcher: fmt::Debug + Send + Sync {
+    /// Item type decoded by matcher
+    type Item;
+    /// NFA that matches will handle, if tag is Void decoder is called, otherwise
+    /// tag is used to generate an event and decoder is not called.
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>>;
 
     /// Decoder that should produce terminal event given matched data
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent>;
+    fn decode(&self, data: &[u8]) -> Option<Self::Item>;
 }
 
 /// Kitty Image Response
@@ -310,24 +364,27 @@ trait TTYMatcher: fmt::Debug + Send {
 struct KittyImageMatcher;
 
 impl TTYMatcher for KittyImageMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         // `\x1b_Gkey=value(,key=value)*;response\x1b\\`
         let key_value = NFA::sequence([
             NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
             NFA::from("="),
             NFA::predicate(|b| b.is_ascii_alphanumeric()).some(),
         ]);
-        NFA::sequence([
+        let nfa = NFA::sequence([
             NFA::from("\x1b_G"),
             key_value.clone(),
             NFA::sequence([NFA::from(","), key_value]).many(),
             NFA::from(";"),
             NFA::predicate(|b| b != b'\x1b').many(),
             NFA::from("\x1b\\"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         let mut iter = data[3..data.len() - 2].splitn(2, |b| *b == b';');
         let mut id = 0; // id can not be zero according to the spec
         let mut placement = None;
@@ -368,18 +425,21 @@ struct KittyKeyboardMatcher;
 pub(crate) const KEYBOARD_LEVEL: usize = 0b0101;
 
 impl TTYMatcher for KittyKeyboardMatcher {
-    fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence([
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        let nfa = NFA::sequence([
             NFA::from("\x1b["),
             NFA::choice([
                 NFA::from("?") + NFA::digit().some(),
                 NFA::predicate(|c| matches!(c, b';' | b':' | b'0'..=b'9')).many(),
             ]),
             NFA::from("u"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         let data = &data[2..data.len() - 1]; // skip CSI and `u`
         if data[0] == b'?' {
             let level = number_decode(&data[1..data.len()])?;
@@ -447,17 +507,20 @@ fn keyboard_decode_key(code: usize) -> Option<KeyName> {
 struct DecModeMatcher;
 
 impl TTYMatcher for DecModeMatcher {
-    fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence([
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        let nfa = NFA::sequence([
             NFA::from("\x1b[?"),
             NFA::number(),
             NFA::from(";"),
             NFA::number(),
             NFA::from("$y"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b[?{mode};{status}$y"
         let mut nums = numbers_decode(&data[3..data.len() - 2], b';');
         Some(TerminalEvent::DecMode {
@@ -474,16 +537,19 @@ impl TTYMatcher for DecModeMatcher {
 struct DeviceAttrsMatcher;
 
 impl TTYMatcher for DeviceAttrsMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         // "\x1b[?<attr_1>;...<attr_n>c"
-        NFA::sequence([
+        let nfa = NFA::sequence([
             NFA::from("\x1b[?"),
             (NFA::number() + NFA::from(";").optional()).some(),
             NFA::from("c"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         Some(TerminalEvent::DeviceAttrs(
             numbers_decode(&data[3..data.len() - 1], b';')
                 .filter(|v| v > &0)
@@ -499,18 +565,21 @@ impl TTYMatcher for DeviceAttrsMatcher {
 struct OSControlMatcher;
 
 impl TTYMatcher for OSControlMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         // "\x1b]<number>;.*\x1b\\"
-        NFA::sequence([
+        let nfa = NFA::sequence([
             NFA::from("\x1b]"),
             NFA::number(),
             NFA::from(";"),
             NFA::predicate(|c| c != b'\x1b' && c != b'\x07').some(),
             (NFA::from("\x1b\\") | NFA::from("\x07")),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b]<number>;.*(\x1b\\|\x07)"
         let data = if data[data.len() - 1] == b'\x07' {
             &data[2..data.len() - 1]
@@ -566,18 +635,21 @@ fn parse_color(color_str: &str) -> Option<RGBA> {
 struct ReportSettingMatcher;
 
 impl TTYMatcher for ReportSettingMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         // "\x1bP{0|1}$p{data}\x1b\\"
-        NFA::sequence([
+        let nfa = NFA::sequence([
             NFA::from("\x1bP"),              // DCS
             NFA::from("0") | NFA::from("1"), // response code
             NFA::from("$r"),
             NFA::predicate(|c| c != b'\x1b').many(), // data
             NFA::from("\x1b\\"),                     // ST
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // DECRPSS "\x1bP{0|1}$p{data}\x1b\\"
         let code = data[2];
         let payload = &data[5..data.len() - 2];
@@ -601,25 +673,27 @@ impl TTYMatcher for ReportSettingMatcher {
 
 /// SGR - Set Graphic Rendition
 #[derive(Debug, Default)]
-struct GraphicRenditionMatcher {
-    face: Face,
-}
+struct GraphicRenditionMatcher;
 
 impl TTYMatcher for GraphicRenditionMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
-        NFA::sequence([
+        let nfa = NFA::sequence([
             NFA::from("\x1b["),
             (code + NFA::from(";").optional()).some(),
             NFA::from("m"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b[(<cmd>;?)*m"
         let cmds = data[2..data.len() - 1].split(|c| matches!(c, b';' | b':'));
-        sgr_face(&mut self.face, cmds);
-        Some(TerminalEvent::Command(TerminalCommand::Face(self.face)))
+        let mut face = Face::default();
+        sgr_face(&mut face, cmds);
+        Some(TerminalEvent::Command(TerminalCommand::Face(face)))
     }
 }
 
@@ -630,8 +704,10 @@ impl TTYMatcher for GraphicRenditionMatcher {
 struct MouseEventMatcher;
 
 impl TTYMatcher for MouseEventMatcher {
-    fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence([
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        let nfa = NFA::sequence([
             NFA::from("\x1b[<"),
             NFA::number(),
             NFA::from(";"),
@@ -639,10 +715,11 @@ impl TTYMatcher for MouseEventMatcher {
             NFA::from(";"),
             NFA::number(),
             NFA::predicate(|b| b == b'm' || b == b'M'),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b[<{event};{row};{col}(m|M)"
         let mut nums = numbers_decode(&data[3..data.len() - 1], b';');
         let event = nums.next()?;
@@ -688,11 +765,13 @@ impl TTYMatcher for MouseEventMatcher {
 struct TermCapMatcher;
 
 impl TTYMatcher for TermCapMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let hex = NFA::predicate(|b| b.is_ascii_hexdigit());
         let hex = hex.clone() + hex;
         let key_value = NFA::sequence([hex.clone().some(), NFA::from("="), hex.clone().some()]);
-        NFA::choice([
+        let nfa = NFA::choice([
             // success
             NFA::sequence([
                 NFA::from("\x1bP1+r"),
@@ -711,10 +790,11 @@ impl TTYMatcher for TermCapMatcher {
                 ])
                 .optional(),
             ]),
-        ]) + NFA::from("\x1b\\")
+        ]) + NFA::from("\x1b\\");
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // `\x1bP(0|1)+rkey=value(;key=value)\x1b\\`
         let mut termcap = BTreeMap::new();
         if data[2] == b'1' {
@@ -740,21 +820,24 @@ impl TTYMatcher for TermCapMatcher {
 struct UTF8Matcher;
 
 impl TTYMatcher for UTF8Matcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let printable = NFA::predicate(|b| (b' '..=b'~').contains(&b));
         let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
         let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
         let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
         let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-        NFA::choice([
+        let nfa = NFA::choice([
             printable,
             utf8_two + utf8_tail.clone(),
             utf8_three + utf8_tail.clone() + utf8_tail.clone(),
             utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         Some(TerminalEvent::Key(KeyName::Char(utf8_decode(data)).into()))
     }
 }
@@ -766,17 +849,20 @@ impl TTYMatcher for UTF8Matcher {
 struct CursorPositionMatcher;
 
 impl TTYMatcher for CursorPositionMatcher {
-    fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence([
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        let nfa = NFA::sequence([
             NFA::from("\x1b["),
             NFA::number(),
             NFA::from(";"),
             NFA::number(),
             NFA::from("R"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b[{row};{col}R"
         let mut nums = numbers_decode(&data[2..data.len() - 1], b';');
         Some(TerminalEvent::CursorPosition(Position {
@@ -798,7 +884,9 @@ impl TTYMatcher for CursorPositionMatcher {
 struct TermSizeMatcher;
 
 impl TTYMatcher for TermSizeMatcher {
-    fn matcher(&self) -> NFA<_Void> {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let size = NFA::sequence([
             NFA::from(";"),
             NFA::number(),
@@ -806,10 +894,11 @@ impl TTYMatcher for TermSizeMatcher {
             NFA::number(),
             NFA::from("t"),
         ]);
-        NFA::sequence([NFA::from("\x1b[8"), size.clone(), NFA::from("\x1b[4"), size])
+        let nfa = NFA::sequence([NFA::from("\x1b[8"), size.clone(), NFA::from("\x1b[4"), size]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b[8;{cell_height};{cell_width}t\x1b[4;{pixel_height};{pixel_width}t"
         let mut chunks = data.split(|c| *c == b'\x1b');
         chunks.next()?; // empty
@@ -838,27 +927,45 @@ impl TTYMatcher for TermSizeMatcher {
 struct BracketedPasteMatcher;
 
 impl TTYMatcher for BracketedPasteMatcher {
-    fn matcher(&self) -> NFA<_Void> {
-        NFA::sequence([
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        let nfa = NFA::sequence([
             NFA::from("\x1b[200~"),
             NFA::predicate(|b| b != b'\x1b').many(),
             NFA::from("\x1b[201~"),
-        ])
+        ]);
+        Either::Left(nfa)
     }
 
-    fn decode(&mut self, data: &[u8]) -> Option<TerminalEvent> {
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         let text = String::from_utf8(data[6..data.len() - 6].into()).ok()?;
         Some(TerminalEvent::Paste(text))
     }
 }
 
+#[derive(Debug)]
+struct BasicEventsMatcher;
+
+impl TTYMatcher for BasicEventsMatcher {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        Either::Right(basic_events_nfa())
+    }
+
+    fn decode(&self, _data: &[u8]) -> Option<Self::Item> {
+        None
+    }
+}
+
 /// NFA for TerminalEvent events, that do not require parsing
-fn tty_event_nfa() -> NFA<TerminalEvent> {
+fn basic_events_nfa() -> NFA<TerminalEvent> {
     let mut cmds: Vec<NFA<TerminalEvent>> = Vec::new();
 
     // construct NFA for basic key (no additional parsing is needed)
     fn basic_key(seq: &str, key: impl Into<Key>) -> NFA<TerminalEvent> {
-        NFA::from(seq).tag(TerminalEvent::Key(key.into()))
+        NFA::from(seq).tag_stop_state(TerminalEvent::Key(key.into()))
     }
 
     // [Reference](http://www.leonerd.org.uk/hacks/fixterms/)
@@ -1246,7 +1353,7 @@ mod tests {
     #[test]
     fn test_basic() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         // send incomplete sequence
         write!(cursor.get_mut(), "\x1b")?;
@@ -1289,7 +1396,7 @@ mod tests {
     #[test]
     fn test_reschedule() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         // write possible match sequence
         write!(cursor.get_mut(), "\x1bO")?;
@@ -1315,7 +1422,7 @@ mod tests {
     #[test]
     fn test_cursor_position() -> Result<(), Error> {
         assert_eq!(
-            TTYDecoder::new().decode(Cursor::new("\x1b[97;15R"))?,
+            TTYEventDecoder::new().decode(Cursor::new("\x1b[97;15R"))?,
             Some(TerminalEvent::CursorPosition(Position { row: 96, col: 14 })),
         );
         Ok(())
@@ -1324,7 +1431,7 @@ mod tests {
     #[test]
     fn test_terminal_size() -> Result<(), Error> {
         assert_eq!(
-            TTYDecoder::new().decode(Cursor::new("\x1b[8;101;202t\x1b[4;3104;1482t"))?,
+            TTYEventDecoder::new().decode(Cursor::new("\x1b[8;101;202t\x1b[4;3104;1482t"))?,
             Some(TerminalEvent::Size(TerminalSize {
                 cells: Size {
                     width: 202,
@@ -1342,7 +1449,7 @@ mod tests {
     #[test]
     fn test_mouse_sgr() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         write!(cursor.get_mut(), "\x1b[<0;94;14M")?;
         assert_eq!(
@@ -1380,7 +1487,7 @@ mod tests {
     #[test]
     fn test_char() -> Result<(), Error> {
         assert_eq!(
-            TTYDecoder::new().decode(Cursor::new("\u{1F431}"))?,
+            TTYEventDecoder::new().decode(Cursor::new("\u{1F431}"))?,
             Some(TerminalEvent::Key(KeyName::Char('🐱').into())),
         );
         Ok(())
@@ -1391,7 +1498,7 @@ mod tests {
         use crate::DecMode;
 
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         write!(cursor.get_mut(), "\x1b[?1000;1$y")?;
         assert_eq!(
@@ -1469,7 +1576,7 @@ mod tests {
     #[test]
     fn test_kitty() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         write!(cursor.get_mut(), "\x1b_Gi=127;OK\x1b\\")?;
         write!(
@@ -1501,7 +1608,7 @@ mod tests {
     #[test]
     fn test_terminfo() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         write!(
             cursor.get_mut(),
@@ -1545,7 +1652,7 @@ mod tests {
     #[test]
     fn test_da1() -> Result<(), Error> {
         let mut result = Vec::new();
-        TTYDecoder::new().decode_into(Cursor::new("\x1b[?62;c\x1b[?64;4c"), &mut result)?;
+        TTYEventDecoder::new().decode_into(Cursor::new("\x1b[?62;c\x1b[?64;4c"), &mut result)?;
         assert_eq!(
             result,
             vec![
@@ -1560,7 +1667,7 @@ mod tests {
     #[test]
     fn test_osc() -> Result<(), Error> {
         let mut result = Vec::new();
-        TTYDecoder::new().decode_into(
+        TTYEventDecoder::new().decode_into(
             Cursor::new("\x1b]4;1;rgb:cc/24/1d\x1b\\\x1b]10;#ebdbb2\x07"),
             &mut result,
         )?;
@@ -1584,7 +1691,7 @@ mod tests {
     #[test]
     fn test_sgr() -> Result<(), Error> {
         let mut result = Vec::new();
-        TTYDecoder::new().decode_into(
+        TTYEventDecoder::new().decode_into(
             Cursor::new(
                 "\x1b[48;5;150m\x1b[1m\x1b[38:2:255:128:64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m",
             ),
@@ -1599,12 +1706,12 @@ mod tests {
             result,
             vec![
                 face("bg=#afd787")?,
-                face("bg=#afd787,bold")?,
-                face("bg=#afd787,fg=#ff8040,bold")?,
+                face("bold")?,
+                face("fg=#ff8040")?,
                 face("")?,
                 face("fg=#008000")?,
-                face("fg=#ff0000,bg=#00ff00,bold,underline")?,
-                face("fg=#ff0000,bg=#00ff00,bold")?,
+                face("bg=#00ff00,fg=#ff0000,bold,underline")?,
+                face("")?,
             ]
         );
 
@@ -1614,7 +1721,7 @@ mod tests {
     #[test]
     fn test_report_setting() -> Result<(), Error> {
         let mut result = Vec::new();
-        TTYDecoder::new().decode_into(
+        TTYEventDecoder::new().decode_into(
             Cursor::new("\x1bP1$r48:2:1:2:3m\x1b\\\x1bP1$r0;48:2::6:5:4m\x1b\\"),
             &mut result,
         )?;
@@ -1633,7 +1740,7 @@ mod tests {
     #[test]
     fn test_kitty_keyboard() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
-        let mut decoder = TTYDecoder::new();
+        let mut decoder = TTYEventDecoder::new();
 
         write!(cursor.get_mut(), "\x1b[?15u")?;
         write!(cursor.get_mut(), "\x1b[27;7u")?;
@@ -1661,7 +1768,7 @@ mod tests {
     #[test]
     fn test_bracketed_paste() -> Result<(), Error> {
         assert_eq!(
-            TTYDecoder::new().decode(Cursor::new("\x1b[200~some awesome text\x1b[201~"))?,
+            TTYEventDecoder::new().decode(Cursor::new("\x1b[200~some awesome text\x1b[201~"))?,
             Some(TerminalEvent::Paste("some awesome text".to_string())),
         );
         Ok(())
