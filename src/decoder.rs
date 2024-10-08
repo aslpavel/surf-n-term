@@ -55,11 +55,14 @@ lazy_static! {
     };
     static ref TTY_EVENT_AUTOMATA: MatcherAutomata<TerminalEvent> = {
         MatcherAutomata::new([
-            Box::new(BasicEventsMatcher) as Box<dyn TTYMatcher<Item = TerminalEvent>>,
+            Box::new(BasicEventsMatcher) as Box<dyn Matcher<Item = TerminalEvent>>,
             Box::new(CursorPositionMatcher),
             Box::new(DecModeMatcher),
             Box::new(DeviceAttrsMatcher),
-            Box::new(GraphicRenditionMatcher),
+            Box::new(
+                GraphicRenditionMatcher
+                    .map(|face| TerminalEvent::Command(TerminalCommand::Face(face))),
+            ),
             Box::new(KittyImageMatcher),
             Box::new(KittyKeyboardMatcher),
             Box::new(MouseEventMatcher),
@@ -67,7 +70,7 @@ lazy_static! {
             Box::new(ReportSettingMatcher),
             Box::new(TermCapMatcher),
             Box::new(TermSizeMatcher),
-            Box::new(UTF8Matcher),
+            Box::new(UTF8Matcher.map(|c| TerminalEvent::Key(KeyName::Char(c).into()))),
             Box::new(BracketedPasteMatcher),
         ])
     };
@@ -146,9 +149,9 @@ impl Decoder for Utf8Decoder {
 #[derive(Debug)]
 struct MatcherAutomataInner<T> {
     /// DFA that represents all possible states of the parser
-    pub(crate) automata: DFA<TTYMatcherTag<T>>,
+    pub(crate) automata: DFA<MatcherTag<T>>,
     /// Matchers registered with TTYMatch::Index tag
-    pub(crate) matchers: Vec<Box<dyn TTYMatcher<Item = T>>>,
+    pub(crate) matchers: Vec<Box<dyn Matcher<Item = T>>>,
 }
 
 /// Compiled tty matcher automata
@@ -158,17 +161,17 @@ struct MatcherAutomata<T> {
 }
 
 impl<T: Clone + Ord> MatcherAutomata<T> {
-    fn new(matchers: impl IntoIterator<Item = Box<dyn TTYMatcher<Item = T>>>) -> Self {
+    fn new(matchers: impl IntoIterator<Item = Box<dyn Matcher<Item = T>>>) -> Self {
         let matchers: Vec<_> = matchers.into_iter().collect();
         let automata = NFA::choice(matchers.iter().enumerate().map(|(index, matcher)| {
             match matcher.matcher() {
                 Either::Left(automata) => {
                     automata
                         // this call only here to convert type as [Void] cannot be created
-                        .tags_map(|_| TTYMatcherTag::Matcher(index))
-                        .tag_stop_state(TTYMatcherTag::Matcher(index))
+                        .tags_map(|_| MatcherTag::Matcher(index))
+                        .tag_stop_state(MatcherTag::Matcher(index))
                 }
-                Either::Right(automata) => automata.tags_map(TTYMatcherTag::Item),
+                Either::Right(automata) => automata.tags_map(MatcherTag::Item),
             }
         }))
         .compile();
@@ -262,8 +265,8 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
 
                     // decode events
                     let event = match tag {
-                        TTYMatcherTag::Item(event) => Ok(event.clone()),
-                        TTYMatcherTag::Matcher(index) => self.automata.matchers[*index]
+                        MatcherTag::Item(event) => Ok(event.clone()),
+                        MatcherTag::Matcher(index) => self.automata.matchers[*index]
                             .decode(&self.buffer)
                             .map_or_else(|| Err(self.buffer.clone()), |item| Ok(item)),
                     };
@@ -300,7 +303,7 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
 
 /// Automata tags that are used to pick correct decoder for the event
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum TTYMatcherTag<T> {
+enum MatcherTag<T> {
     /// Automata already produces valid item
     Item(T),
     /// Index of the matcher that needs to be used to decode item
@@ -346,7 +349,7 @@ impl Decoder for TTYEventDecoder {
 #[derive(Clone)]
 enum Void {}
 
-trait TTYMatcher: fmt::Debug + Send + Sync {
+trait Matcher: fmt::Debug + Send + Sync {
     /// Item type decoded by matcher
     type Item;
     /// NFA that matches will handle, if tag is Void decoder is called, otherwise
@@ -355,6 +358,49 @@ trait TTYMatcher: fmt::Debug + Send + Sync {
 
     /// Decoder that should produce terminal event given matched data
     fn decode(&self, data: &[u8]) -> Option<Self::Item>;
+
+    /// Map matcher item
+    fn map<F, O>(self, func: F) -> MappedMatcher<Self, F>
+    where
+        Self: Sized,
+        F: Fn(Self::Item) -> O + Send + Sync,
+    {
+        MappedMatcher {
+            matcher: self,
+            map: func,
+        }
+    }
+}
+
+struct MappedMatcher<M, F> {
+    matcher: M,
+    map: F,
+}
+
+impl<M: fmt::Debug, F> fmt::Debug for MappedMatcher<M, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MappedMatcher")
+            .field("matcher", &self.matcher)
+            .finish()
+    }
+}
+
+impl<M, F, O> Matcher for MappedMatcher<M, F>
+where
+    M: Matcher,
+    F: Fn(M::Item) -> O + Send + Sync,
+{
+    type Item = O;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        self.matcher
+            .matcher()
+            .map_right(|nfa| nfa.tags_map(&self.map))
+    }
+
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
+        self.matcher.decode(data).map(&self.map)
+    }
 }
 
 /// Kitty Image Response
@@ -363,7 +409,7 @@ trait TTYMatcher: fmt::Debug + Send + Sync {
 #[derive(Debug)]
 struct KittyImageMatcher;
 
-impl TTYMatcher for KittyImageMatcher {
+impl Matcher for KittyImageMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -424,7 +470,7 @@ struct KittyKeyboardMatcher;
 //          NOTE: 0b1000 breaks shift+key as it no longer generated as uppercase
 pub(crate) const KEYBOARD_LEVEL: usize = 0b0101;
 
-impl TTYMatcher for KittyKeyboardMatcher {
+impl Matcher for KittyKeyboardMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -506,7 +552,7 @@ fn keyboard_decode_key(code: usize) -> Option<KeyName> {
 #[derive(Debug)]
 struct DecModeMatcher;
 
-impl TTYMatcher for DecModeMatcher {
+impl Matcher for DecModeMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -536,7 +582,7 @@ impl TTYMatcher for DecModeMatcher {
 #[derive(Debug)]
 struct DeviceAttrsMatcher;
 
-impl TTYMatcher for DeviceAttrsMatcher {
+impl Matcher for DeviceAttrsMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -564,7 +610,7 @@ impl TTYMatcher for DeviceAttrsMatcher {
 #[derive(Debug)]
 struct OSControlMatcher;
 
-impl TTYMatcher for OSControlMatcher {
+impl Matcher for OSControlMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -634,7 +680,7 @@ fn parse_color(color_str: &str) -> Option<RGBA> {
 #[derive(Debug)]
 struct ReportSettingMatcher;
 
-impl TTYMatcher for ReportSettingMatcher {
+impl Matcher for ReportSettingMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -675,8 +721,8 @@ impl TTYMatcher for ReportSettingMatcher {
 #[derive(Debug, Default)]
 struct GraphicRenditionMatcher;
 
-impl TTYMatcher for GraphicRenditionMatcher {
-    type Item = TerminalEvent;
+impl Matcher for GraphicRenditionMatcher {
+    type Item = Face;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
@@ -693,7 +739,7 @@ impl TTYMatcher for GraphicRenditionMatcher {
         let cmds = data[2..data.len() - 1].split(|c| matches!(c, b';' | b':'));
         let mut face = Face::default();
         sgr_face(&mut face, cmds);
-        Some(TerminalEvent::Command(TerminalCommand::Face(face)))
+        Some(face)
     }
 }
 
@@ -703,7 +749,7 @@ impl TTYMatcher for GraphicRenditionMatcher {
 #[derive(Debug)]
 struct MouseEventMatcher;
 
-impl TTYMatcher for MouseEventMatcher {
+impl Matcher for MouseEventMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -764,7 +810,7 @@ impl TTYMatcher for MouseEventMatcher {
 #[derive(Debug)]
 struct TermCapMatcher;
 
-impl TTYMatcher for TermCapMatcher {
+impl Matcher for TermCapMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -819,8 +865,8 @@ impl TTYMatcher for TermCapMatcher {
 #[derive(Debug)]
 struct UTF8Matcher;
 
-impl TTYMatcher for UTF8Matcher {
-    type Item = TerminalEvent;
+impl Matcher for UTF8Matcher {
+    type Item = char;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let printable = NFA::predicate(|b| (b' '..=b'~').contains(&b));
@@ -838,7 +884,7 @@ impl TTYMatcher for UTF8Matcher {
     }
 
     fn decode(&self, data: &[u8]) -> Option<Self::Item> {
-        Some(TerminalEvent::Key(KeyName::Char(utf8_decode(data)).into()))
+        Some(utf8_decode(data))
     }
 }
 
@@ -848,7 +894,7 @@ impl TTYMatcher for UTF8Matcher {
 #[derive(Debug)]
 struct CursorPositionMatcher;
 
-impl TTYMatcher for CursorPositionMatcher {
+impl Matcher for CursorPositionMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -883,7 +929,7 @@ impl TTYMatcher for CursorPositionMatcher {
 #[derive(Debug)]
 struct TermSizeMatcher;
 
-impl TTYMatcher for TermSizeMatcher {
+impl Matcher for TermSizeMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -926,7 +972,7 @@ impl TTYMatcher for TermSizeMatcher {
 #[derive(Debug)]
 struct BracketedPasteMatcher;
 
-impl TTYMatcher for BracketedPasteMatcher {
+impl Matcher for BracketedPasteMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
@@ -947,7 +993,7 @@ impl TTYMatcher for BracketedPasteMatcher {
 #[derive(Debug)]
 struct BasicEventsMatcher;
 
-impl TTYMatcher for BasicEventsMatcher {
+impl Matcher for BasicEventsMatcher {
     type Item = TerminalEvent;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
