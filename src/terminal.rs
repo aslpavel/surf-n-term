@@ -3,7 +3,7 @@ use crate::{
     encoder::ColorDepth,
     error::Error,
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
-    Face, Image, Key, KeyMod, KeyName, SurfaceMut, RGBA,
+    Face, FaceModify, Image, Key, KeyMod, KeyName, SurfaceMut, RGBA,
 };
 use either::Either;
 use serde::{Deserialize, Serialize};
@@ -265,11 +265,14 @@ pub enum TerminalAction<R> {
 
 /// Commands that can be executed by terminal
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum TerminalCommand {
     /// Put character
     Char(char),
     /// Set current face (foreground/background colors and text attributes)
     Face(Face),
+    /// Modify current face
+    FaceModify(FaceModify),
     /// Get current face
     FaceGet,
     /// Control specified DEC mode (DECSET|DECRST)
@@ -507,6 +510,7 @@ impl DecModeStatus {
 
 /// Events returned by terminal
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum TerminalEvent {
     /// Key press event
     Key(Key),

@@ -3,7 +3,7 @@ use crate::{
     automata::{DFAState, DFA, NFA},
     error::Error,
     terminal::{DecModeStatus, Mouse, Size, TerminalColor, TerminalEvent, TerminalSize},
-    Face, FaceAttrs, Key, KeyMod, KeyName, Position, TerminalCommand, RGBA,
+    Face, FaceModify, Key, KeyMod, KeyName, Position, TerminalCommand, UnderlineStyle, RGBA,
 };
 use either::Either;
 use lazy_static::lazy_static;
@@ -61,7 +61,7 @@ lazy_static! {
             Box::new(DeviceAttrsMatcher),
             Box::new(
                 GraphicRenditionMatcher
-                    .map(|face| TerminalEvent::Command(TerminalCommand::Face(face))),
+                    .map(|face| TerminalEvent::Command(TerminalCommand::FaceModify(face))),
             ),
             Box::new(KittyImageMatcher),
             Box::new(KittyKeyboardMatcher),
@@ -703,9 +703,7 @@ impl Matcher for ReportSettingMatcher {
             return None;
         }
         if payload.ends_with(b"m") {
-            let cmds = payload[..payload.len() - 1].split(|c| matches!(c, b';' | b':'));
-            let mut face = Face::default();
-            sgr_face(&mut face, cmds);
+            let face = sgr_face(&payload[..payload.len() - 1]).apply(Face::default());
             Some(TerminalEvent::FaceGet(face))
         } else {
             tracing::info!(
@@ -722,7 +720,7 @@ impl Matcher for ReportSettingMatcher {
 struct GraphicRenditionMatcher;
 
 impl Matcher for GraphicRenditionMatcher {
-    type Item = Face;
+    type Item = FaceModify;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let code = NFA::predicate(|c| matches!(c, b'0'..=b'9' | b':')).many();
@@ -736,10 +734,7 @@ impl Matcher for GraphicRenditionMatcher {
 
     fn decode(&self, data: &[u8]) -> Option<Self::Item> {
         // "\x1b[(<cmd>;?)*m"
-        let cmds = data[2..data.len() - 1].split(|c| matches!(c, b';' | b':'));
-        let mut face = Face::default();
-        sgr_face(&mut face, cmds);
-        Some(face)
+        Some(sgr_face(&data[2..data.len() - 1]))
     }
 }
 
@@ -1192,36 +1187,63 @@ fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
 }
 
 /// Apply SGR commands to the provided Face
-fn sgr_face<'a>(face: &mut Face, mut cmds: impl Iterator<Item = &'a [u8]>) {
-    while let Some(cmd) = cmds.next() {
-        match number_decode(cmd) {
-            Some(0) | None => *face = Face::default(),
-            Some(1) => face.attrs |= FaceAttrs::BOLD,
-            Some(3) => face.attrs |= FaceAttrs::ITALIC,
-            Some(4) => face.attrs |= FaceAttrs::UNDERLINE,
-            Some(5) => face.attrs |= FaceAttrs::BLINK,
-            Some(7) | Some(27) => *face = face.invert(),
-            Some(9) => face.attrs |= FaceAttrs::STRIKE,
-            Some(21) => face.attrs = face.attrs.remove(FaceAttrs::BOLD),
-            Some(23) => face.attrs = face.attrs.remove(FaceAttrs::ITALIC),
-            Some(24) => face.attrs = face.attrs.remove(FaceAttrs::UNDERLINE),
-            Some(25) => face.attrs = face.attrs.remove(FaceAttrs::BLINK),
-            Some(29) => face.attrs = face.attrs.remove(FaceAttrs::STRIKE),
-            Some(38) => face.fg = sgr_color(&mut cmds),
-            Some(48) => face.bg = sgr_color(&mut cmds),
-            Some(v) if (30..=37).contains(&v) => face.fg = Some(COLORS[v - 30]),
-            Some(v) if (90..=97).contains(&v) => face.fg = Some(COLORS[v - 82]),
-            Some(v) if (40..=48).contains(&v) => face.bg = Some(COLORS[v - 40]),
-            Some(v) if (100..=107).contains(&v) => face.bg = Some(COLORS[v - 92]),
-            _ => {
-                // TODO: SGR more codes
-                //   - de jure standard (ITU-T T.416)
-                //   - different types of underline
-                // [reference](https://github.com/csdvrx/sixel-testsuite/blob/master/ansi-vte52.sh)
-                continue;
+fn sgr_face<'a>(data: &[u8]) -> FaceModify {
+    let mut face = FaceModify::default();
+    let mut groups = data.split(|b| matches!(b, b';'));
+    while let Some(group) = groups.next() {
+        let mut args = group.split(|b| matches!(b, b':'));
+        let cmd = args.next().and_then(number_decode);
+        let args_empty = args.size_hint().0 == 0;
+        let mut sgr_color_thunk = || {
+            if args_empty {
+                sgr_color(&mut groups)
+            } else {
+                sgr_color(&mut args)
             }
+        };
+        match cmd {
+            Some(0) | None => {
+                face = FaceModify {
+                    reset: true,
+                    ..FaceModify::default()
+                }
+            }
+            // bold
+            Some(1) => face.bold = Some(true),
+            Some(21) => face.bold = Some(false),
+            // italic
+            Some(3) => face.italic = Some(true),
+            Some(23) => face.italic = Some(false),
+            // underline
+            Some(4) => match args.next().and_then(number_decode) {
+                Some(2) => face.underline = Some(UnderlineStyle::Double),
+                Some(3) => face.underline = Some(UnderlineStyle::Curly),
+                Some(4) => face.underline = Some(UnderlineStyle::Dotted),
+                Some(5) => face.underline = Some(UnderlineStyle::Dashed),
+                _ => face.underline = Some(UnderlineStyle::Straight),
+            },
+            Some(24) => face.underline = Some(UnderlineStyle::None),
+            // blink
+            Some(5) => face.blink = Some(true),
+            Some(25) => face.blink = Some(false),
+            // strike
+            Some(9) => face.strike = Some(true),
+            Some(29) => face.strike = Some(false),
+            // foreground color
+            Some(38) => face.fg = sgr_color_thunk(),
+            // background color
+            Some(48) => face.bg = sgr_color_thunk(),
+            // underline color
+            Some(58) => face.underline_color = sgr_color_thunk(),
+            // named colors
+            Some(v @ 30..=37) => face.fg = Some(COLORS[v - 30]),
+            Some(v @ 90..=97) => face.fg = Some(COLORS[v - 82]),
+            Some(v @ 40..=48) => face.bg = Some(COLORS[v - 40]),
+            Some(v @ 100..=107) => face.bg = Some(COLORS[v - 92]),
+            _ => {}
         }
     }
+    face
 }
 
 /// key=value(,key=value)*
@@ -1739,27 +1761,58 @@ mod tests {
         let mut result = Vec::new();
         TTYEventDecoder::new().decode_into(
             Cursor::new(
-                "\x1b[48;5;150m\x1b[1m\x1b[38:2:255:128:64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m",
+                "\x1b[48;5;150m\x1b[1m\x1b[38:2:255:128:64m\x1b[m\x1b[32m\x1b[1;4;91;102m\x1b[24m\x1b[4:3m\x1b[58;2;1;2;3m"
             ),
             &mut result,
         )?;
-        let face = |string: &str| -> Result<_, Error> {
-            Ok(TerminalEvent::Command(TerminalCommand::Face(
-                string.parse()?,
-            )))
-        };
-        assert_eq!(
-            result,
-            vec![
-                face("bg=#afd787")?,
-                face("bold")?,
-                face("fg=#ff8040")?,
-                face("")?,
-                face("fg=#008000")?,
-                face("bg=#00ff00,fg=#ff0000,bold,underline")?,
-                face("")?,
-            ]
-        );
+
+        assert_eq!(result.len(), 9);
+        for (item, reference) in result.into_iter().zip([
+            FaceModify {
+                bg: Some("#afd787".parse()?),
+                ..Default::default()
+            },
+            FaceModify {
+                bold: Some(true),
+                ..Default::default()
+            },
+            FaceModify {
+                fg: Some("#ff8040".parse()?),
+                ..Default::default()
+            },
+            FaceModify {
+                reset: true,
+                ..Default::default()
+            },
+            FaceModify {
+                fg: Some("#008000".parse()?),
+                ..Default::default()
+            },
+            FaceModify {
+                fg: Some("#ff0000".parse()?),
+                bg: Some("#00ff00".parse()?),
+                bold: Some(true),
+                underline: Some(UnderlineStyle::Straight),
+                ..Default::default()
+            },
+            FaceModify {
+                underline: Some(UnderlineStyle::None),
+                ..Default::default()
+            },
+            FaceModify {
+                underline: Some(UnderlineStyle::Curly),
+                ..Default::default()
+            },
+            FaceModify {
+                underline_color: Some("#010203".parse()?),
+                ..Default::default()
+            },
+        ]) {
+            assert_eq!(
+                item,
+                TerminalEvent::Command(TerminalCommand::FaceModify(reference))
+            )
+        }
 
         Ok(())
     }

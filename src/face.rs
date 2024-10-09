@@ -1,5 +1,5 @@
 //! Type describing foreground/background/style-attrs of the terminal cell
-use rasterize::SVG_COLORS;
+use rasterize::{utils::ArrayIter, SVG_COLORS};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use crate::{Color, Error, RGBA};
@@ -11,21 +11,58 @@ use std::{
     str::FromStr,
 };
 
+/// Underline style
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum UnderlineStyle {
+    #[default]
+    None,
+    Straight,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
+}
+
+impl From<UnderlineStyle> for FaceAttrs {
+    fn from(value: UnderlineStyle) -> Self {
+        FaceAttrs::pack(value, 0)
+    }
+}
+
 /// Face style attributes
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct FaceAttrs {
+    // first 3bit is underline style rest are flags
     bits: u16,
 }
 
 impl FaceAttrs {
     pub const EMPTY: Self = FaceAttrs { bits: 0 };
-    pub const BOLD: Self = FaceAttrs { bits: 1 };
-    pub const ITALIC: Self = FaceAttrs { bits: 2 };
-    pub const UNDERLINE: Self = FaceAttrs { bits: 4 };
-    pub const BLINK: Self = FaceAttrs { bits: 8 };
-    pub const REVERSE: Self = FaceAttrs { bits: 16 };
-    pub const STRIKE: Self = FaceAttrs { bits: 32 }; // aka Crossed-Out
-    const ALL: Self = FaceAttrs { bits: 63 };
+
+    pub const UNDERLINE: Self = FaceAttrs { bits: 1 };
+    pub const UNDERLINE_DOUBLE: Self = FaceAttrs { bits: 2 };
+    pub const UNDERLINE_CURLY: Self = FaceAttrs { bits: 3 };
+    pub const UNDERLINE_DOTTED: Self = FaceAttrs { bits: 4 };
+    pub const UNDERLINE_DASHED: Self = FaceAttrs { bits: 5 };
+    const UNDERLINE_BITS: u16 = 3;
+
+    pub const BOLD: Self = FaceAttrs {
+        bits: 1 << Self::UNDERLINE_BITS,
+    };
+    pub const ITALIC: Self = FaceAttrs {
+        bits: 2 << Self::UNDERLINE_BITS,
+    };
+    pub const BLINK: Self = FaceAttrs {
+        bits: 4 << Self::UNDERLINE_BITS,
+    };
+    pub const REVERSE: Self = FaceAttrs {
+        bits: 8 << Self::UNDERLINE_BITS,
+    };
+    pub const STRIKE: Self = FaceAttrs {
+        bits: 16 << Self::UNDERLINE_BITS,
+    }; // aka Crossed-Out
+
+    const ALL_FLAGS: u16 = 31;
 
     /// Empty/Default style
     pub fn is_empty(self) -> bool {
@@ -34,41 +71,91 @@ impl FaceAttrs {
 
     /// Check if self contains any of the other attributes
     pub fn contains(self, other: Self) -> bool {
-        self.bits & other.bits == other.bits
+        let (self_under, self_flags) = self.unpack();
+        let (other_under, other_flags) = other.unpack();
+        if other_under != UnderlineStyle::None && self_under != other_under {
+            return false;
+        }
+        self_flags & other_flags == other_flags
     }
 
     /// Add all attributes set in the other
     pub fn insert(self, other: Self) -> Self {
-        self | other
+        let (self_under, self_flags) = self.unpack();
+        let (other_under, other_flags) = other.unpack();
+        let under = if other_under != UnderlineStyle::None {
+            other_under
+        } else {
+            self_under
+        };
+        Self::pack(under, self_flags | other_flags)
     }
 
     /// Remove all attributes set in the other
     pub fn remove(self, other: Self) -> Self {
-        self & (other ^ Self::ALL)
+        let (self_under, self_flags) = self.unpack();
+        let (other_under, other_flags) = other.unpack();
+        let under = if other_under != UnderlineStyle::None {
+            UnderlineStyle::None
+        } else {
+            self_under
+        };
+        Self::pack(under, self_flags & (other_flags ^ Self::ALL_FLAGS))
     }
 
     /// List names of all set attributes
     pub fn names(&self) -> impl Iterator<Item = &'static str> {
-        let names = [
+        let mut iter: ArrayIter<&'static str, 6> = ArrayIter::new();
+        let (under, _) = self.unpack();
+        match under {
+            UnderlineStyle::None => (),
+            UnderlineStyle::Straight => iter.push("underline"),
+            UnderlineStyle::Double => iter.push("underline_double"),
+            UnderlineStyle::Curly => iter.push("underline_curly"),
+            UnderlineStyle::Dotted => iter.push("underline_dotted"),
+            UnderlineStyle::Dashed => iter.push("underline_dashed"),
+        }
+        for (flag, name) in [
             (Self::BOLD, "bold"),
             (Self::ITALIC, "italic"),
-            (Self::UNDERLINE, "underline"),
             (Self::BLINK, "blink"),
             (Self::REVERSE, "reverse"),
             (Self::STRIKE, "strike"),
-        ];
-        let mut index = 0;
-        let flags = *self;
-        std::iter::from_fn(move || {
-            while index < names.len() {
-                let (flag, name) = names[index];
-                index += 1;
-                if flags.contains(flag) {
-                    return Some(name);
-                }
+        ] {
+            if self.bits & flag.bits != 0 {
+                iter.push(name);
             }
-            None
-        })
+        }
+        iter
+    }
+
+    pub fn underline(&self) -> UnderlineStyle {
+        match 0b111 & self.bits {
+            1 => UnderlineStyle::Straight,
+            2 => UnderlineStyle::Double,
+            3 => UnderlineStyle::Curly,
+            4 => UnderlineStyle::Dotted,
+            5 => UnderlineStyle::Dashed,
+            _ => UnderlineStyle::None,
+        }
+    }
+
+    fn unpack(self) -> (UnderlineStyle, u16) {
+        (self.underline(), self.bits >> 3)
+    }
+
+    fn pack(underline: UnderlineStyle, flags: u16) -> Self {
+        let underline_bits = match underline {
+            UnderlineStyle::None => 0,
+            UnderlineStyle::Straight => 1,
+            UnderlineStyle::Double => 2,
+            UnderlineStyle::Curly => 3,
+            UnderlineStyle::Dotted => 4,
+            UnderlineStyle::Dashed => 5,
+        };
+        Self {
+            bits: underline_bits | (flags << 3),
+        }
     }
 }
 
@@ -76,9 +163,14 @@ impl BitAnd for FaceAttrs {
     type Output = Self;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        Self {
-            bits: self.bits & rhs.bits,
-        }
+        let (lhs_under, lhs_flags) = self.unpack();
+        let (rhs_under, rhs_flags) = rhs.unpack();
+        let under = if lhs_under == rhs_under {
+            lhs_under
+        } else {
+            UnderlineStyle::None
+        };
+        Self::pack(under, lhs_flags & rhs_flags)
     }
 }
 
@@ -92,9 +184,14 @@ impl BitOr for FaceAttrs {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        Self {
-            bits: self.bits | rhs.bits,
-        }
+        let (lhs_under, lhs_flags) = self.unpack();
+        let (rhs_under, rhs_flags) = rhs.unpack();
+        let under = if rhs_under == UnderlineStyle::None {
+            lhs_under
+        } else {
+            rhs_under
+        };
+        Self::pack(under, lhs_flags | rhs_flags)
     }
 }
 
@@ -108,9 +205,14 @@ impl BitXor for FaceAttrs {
     type Output = Self;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
-        Self {
-            bits: self.bits ^ rhs.bits,
-        }
+        let (lhs_under, lhs_flags) = self.unpack();
+        let (rhs_under, rhs_flags) = rhs.unpack();
+        let under = if rhs_under == UnderlineStyle::None {
+            lhs_under
+        } else {
+            rhs_under
+        };
+        Self::pack(under, lhs_flags ^ rhs_flags)
     }
 }
 
@@ -197,9 +299,13 @@ impl Face {
                 match key {
                     "fg" => face.fg = Some(RGBA::from_str_named(value, colors)?),
                     "bg" => face.bg = Some(RGBA::from_str_named(value, colors)?),
+                    "underline" => face.attrs |= FaceAttrs::UNDERLINE,
+                    "underline_double" => face.attrs |= FaceAttrs::UNDERLINE_DOUBLE,
+                    "underline_curly" => face.attrs |= FaceAttrs::UNDERLINE_CURLY,
+                    "underline_dotted" => face.attrs |= FaceAttrs::UNDERLINE_DOTTED,
+                    "underline_dashed" => face.attrs |= FaceAttrs::UNDERLINE_DASHED,
                     "bold" => face.attrs |= FaceAttrs::BOLD,
                     "italic" => face.attrs |= FaceAttrs::ITALIC,
-                    "underline" => face.attrs |= FaceAttrs::UNDERLINE,
                     "blink" => face.attrs |= FaceAttrs::BLINK,
                     "reverse" => face.attrs |= FaceAttrs::REVERSE,
                     "strike" => face.attrs |= FaceAttrs::STRIKE,
@@ -305,6 +411,51 @@ impl<'de, 'a> DeserializeSeed<'de> for FaceDeserializer<'a> {
     {
         let color = std::borrow::Cow::<'de, str>::deserialize(deserializer)?;
         Face::from_str_named(color.as_ref(), self.colors).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Command that modifies current face
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct FaceModify {
+    pub reset: bool,
+    pub fg: Option<RGBA>,
+    pub bg: Option<RGBA>,
+    pub underline: Option<UnderlineStyle>,
+    pub underline_color: Option<RGBA>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub blink: Option<bool>,
+    pub strike: Option<bool>,
+}
+
+impl FaceModify {
+    pub fn apply(&self, mut face: Face) -> Face {
+        if self.reset {
+            face = Face::default();
+        }
+        if let Some(fg) = self.fg {
+            face.fg = Some(fg);
+        }
+        if let Some(bg) = self.bg {
+            face.bg = Some(bg);
+        }
+        if let Some(underline) = self.underline {
+            face.attrs |= underline.into();
+        }
+        // TODO: underline_color
+        for (update, flag) in [
+            (self.bold, FaceAttrs::BOLD),
+            (self.italic, FaceAttrs::ITALIC),
+            (self.blink, FaceAttrs::BLINK),
+            (self.strike, FaceAttrs::BOLD),
+        ] {
+            match update {
+                Some(true) => face.attrs = face.attrs.insert(flag),
+                Some(false) => face.attrs = face.attrs.remove(flag),
+                _ => {}
+            }
+        }
+        face
     }
 }
 

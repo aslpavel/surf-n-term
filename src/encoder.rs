@@ -1,9 +1,13 @@
 //! Encoders
 use crate::{
     decoder::KEYBOARD_LEVEL, error::Error, Color, DecMode, FaceAttrs, LinColor, TerminalCaps,
-    TerminalColor, TerminalCommand,
+    TerminalColor, TerminalCommand, UnderlineStyle,
 };
-use std::{cmp::Ordering, io::Write, str::FromStr};
+use std::{
+    cmp::Ordering,
+    io::{self, Write},
+    str::FromStr,
+};
 
 /// Encoder interface
 pub trait Encoder {
@@ -19,9 +23,9 @@ pub trait Encoder {
 /// References:
 /// - [XTerm Control Sequences](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html)
 /// - [ANSI Escape Code](https://en.wikipedia.org/wiki/ANSI_escape_code)
-#[derive(Debug)]
 pub struct TTYEncoder {
     caps: TerminalCaps,
+    chunks: Chunks,
 }
 
 impl Default for TTYEncoder {
@@ -32,7 +36,10 @@ impl Default for TTYEncoder {
 
 impl TTYEncoder {
     pub fn new(caps: TerminalCaps) -> Self {
-        Self { caps }
+        Self {
+            caps,
+            chunks: Chunks::default(),
+        }
     }
 
     fn kitty_level<W: Write>(&self, mut out: W, level: usize) -> Result<(), Error> {
@@ -88,30 +95,104 @@ impl Encoder for TTYEncoder {
             EraseLine => out.write_all(b"\x1b[2K")?,
             EraseChars(count) => write!(out, "\x1b[{}X", count)?,
             Face(face) => {
-                out.write_all(b"\x1b[00")?;
+                self.chunks.clear();
+                self.chunks.push(b"0");
                 if let Some(fg) = face.fg {
-                    color_sgr_encode(&mut out, fg, self.caps.depth, true)?;
+                    color_sgr_encode(
+                        &mut self.chunks,
+                        fg,
+                        self.caps.depth,
+                        SGRColorType::Foreground,
+                    )?;
                 }
                 if let Some(bg) = face.bg {
-                    color_sgr_encode(&mut out, bg, self.caps.depth, false)?;
+                    color_sgr_encode(
+                        &mut self.chunks,
+                        bg,
+                        self.caps.depth,
+                        SGRColorType::Background,
+                    )?;
+                }
+                match face.attrs.underline() {
+                    UnderlineStyle::Straight => self.chunks.push(b"4"),
+                    UnderlineStyle::Double => self.chunks.push(b"4:2"),
+                    UnderlineStyle::Curly => self.chunks.push(b"4:3"),
+                    UnderlineStyle::Dotted => self.chunks.push(b"4:4"),
+                    UnderlineStyle::Dashed => self.chunks.push(b"4:5"),
+                    _ => {}
                 }
                 if !face.attrs.is_empty() {
-                    for (flag, code) in &[
-                        (FaceAttrs::BOLD, b";1"),
-                        (FaceAttrs::ITALIC, b";3"),
-                        (FaceAttrs::UNDERLINE, b";4"),
-                        (FaceAttrs::BLINK, b";5"),
-                        (FaceAttrs::REVERSE, b";7"),
-                        (FaceAttrs::STRIKE, b";9"),
+                    for (flag, code) in [
+                        (FaceAttrs::BOLD, b"1"),
+                        (FaceAttrs::ITALIC, b"3"),
+                        (FaceAttrs::BLINK, b"5"),
+                        (FaceAttrs::REVERSE, b"7"),
+                        (FaceAttrs::STRIKE, b"9"),
                     ] {
-                        if face.attrs.contains(*flag) {
-                            // false positive
-                            #[allow(clippy::explicit_auto_deref)]
-                            out.write_all(*code)?;
+                        if face.attrs.contains(flag) {
+                            self.chunks.push(code);
                         }
                     }
                 }
+                out.write_all(b"\x1b[")?;
+                self.chunks.drain(b";", &mut out)?;
                 out.write_all(b"m")?;
+            }
+            FaceModify(face_modify) => {
+                self.chunks.clear();
+                if face_modify.reset {
+                    self.chunks.push(b"0");
+                }
+                if let Some(fg) = face_modify.fg {
+                    color_sgr_encode(
+                        &mut self.chunks,
+                        fg,
+                        self.caps.depth,
+                        SGRColorType::Foreground,
+                    )?;
+                }
+                if let Some(bg) = face_modify.bg {
+                    color_sgr_encode(
+                        &mut self.chunks,
+                        bg,
+                        self.caps.depth,
+                        SGRColorType::Background,
+                    )?;
+                }
+                match face_modify.underline {
+                    None => {}
+                    Some(UnderlineStyle::None) => self.chunks.push(b"24"),
+                    Some(UnderlineStyle::Straight) => self.chunks.push(b"4"),
+                    Some(UnderlineStyle::Double) => self.chunks.push(b"4:2"),
+                    Some(UnderlineStyle::Curly) => self.chunks.push(b"4:3"),
+                    Some(UnderlineStyle::Dotted) => self.chunks.push(b"4:4"),
+                    Some(UnderlineStyle::Dashed) => self.chunks.push(b"4:5"),
+                }
+                if let Some(color) = face_modify.underline_color {
+                    color_sgr_encode(
+                        &mut self.chunks,
+                        color,
+                        self.caps.depth,
+                        SGRColorType::Underline,
+                    )?;
+                }
+                for (flag, on, off) in [
+                    (face_modify.bold, b"1", b"21"),
+                    (face_modify.italic, b"3", b"23"),
+                    (face_modify.blink, b"5", b"25"),
+                    (face_modify.strike, b"9", b"29"),
+                ] {
+                    match flag {
+                        None => {}
+                        Some(true) => self.chunks.push(on),
+                        Some(false) => self.chunks.push(off),
+                    }
+                }
+                if !self.chunks.is_empty() {
+                    out.write_all(b"\x1b[")?;
+                    self.chunks.drain(b";", &mut out)?;
+                    out.write_all(b"m")?;
+                }
             }
             FaceGet => {
                 // DECRQSS - Request Selection or Setting with description set to `m`
@@ -170,6 +251,68 @@ impl Encoder for TTYEncoder {
             }
         }
 
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct Chunks {
+    buffer: Vec<u8>,
+    offsets: Vec<usize>,
+}
+
+impl Chunks {
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.offsets.clear();
+    }
+
+    pub fn mark(&mut self) {
+        self.offsets.push(self.buffer.len());
+    }
+
+    pub fn push(&mut self, chunk: &[u8]) {
+        self.buffer.extend(chunk);
+        self.mark();
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
+        let mut index = 0;
+        let mut start = 0;
+        std::iter::from_fn(move || {
+            if index >= self.offsets.len() {
+                return None;
+            }
+            let end = self.offsets[index];
+            let chunk = &self.buffer[start..end];
+            start = end;
+            index += 1;
+            Some(chunk)
+        })
+    }
+
+    pub fn drain(&mut self, sep: &[u8], mut out: impl Write) -> io::Result<()> {
+        for (index, chunk) in self.iter().enumerate() {
+            if index != 0 {
+                out.write_all(sep)?;
+            }
+            out.write_all(chunk)?
+        }
+        self.clear();
+        Ok(())
+    }
+}
+
+impl Write for Chunks {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buffer.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
@@ -299,12 +442,18 @@ fn nearest(v: f32, vs: &[f32]) -> usize {
     }
 }
 
+pub enum SGRColorType {
+    Foreground,
+    Background,
+    Underline,
+}
+
 /// Encode color as SGR sequence
-pub fn color_sgr_encode<C: Color, W: Write>(
-    mut out: W,
+fn color_sgr_encode<C: Color>(
+    chunks: &mut Chunks,
     color: C,
     depth: ColorDepth,
-    foreground: bool,
+    sgr_color_type: SGRColorType,
 ) -> Result<(), Error>
 where
     LinColor: From<C>,
@@ -312,12 +461,16 @@ where
     match depth {
         ColorDepth::TrueColor => {
             let [r, g, b] = color.to_rgb();
-            if foreground {
-                out.write_all(b";38")?;
-            } else {
-                out.write_all(b";48")?;
+            match sgr_color_type {
+                SGRColorType::Foreground => chunks.push(b"38"),
+                SGRColorType::Background => chunks.push(b"48"),
+                SGRColorType::Underline => chunks.push(b"58"),
             }
-            write!(out, ";2;{};{};{}", r, g, b)?;
+            chunks.push(b"2");
+            for c in [r, g, b] {
+                write!(chunks, "{}", c)?;
+                chunks.mark();
+            }
         }
         ColorDepth::EightBit => {
             let color = LinColor::from(color);
@@ -340,12 +493,14 @@ where
                 16 + 36 * c_red + 6 * c_green + c_blue
             };
 
-            if foreground {
-                out.write_all(b";38")?;
-            } else {
-                out.write_all(b";48")?;
+            match sgr_color_type {
+                SGRColorType::Foreground => chunks.push(b"38"),
+                SGRColorType::Background => chunks.push(b"48"),
+                SGRColorType::Underline => chunks.push(b"58"),
             }
-            write!(out, ";5;{}", index)?;
+            chunks.push(b"5");
+            write!(chunks, "{}", index)?;
+            chunks.mark();
         }
         ColorDepth::Gray => {
             let luma = color.luma();
@@ -355,8 +510,13 @@ where
                 2 => 37,
                 _ => 97,
             };
-            let index = if foreground { index } else { index + 10 };
-            write!(out, ";{}", index)?;
+            let index = match sgr_color_type {
+                SGRColorType::Foreground => index,
+                SGRColorType::Background => index + 10,
+                SGRColorType::Underline => return Ok(()),
+            };
+            write!(chunks, "{}", index)?;
+            chunks.mark();
         }
     }
     Ok(())
@@ -384,22 +544,46 @@ mod tests {
         Ok(())
     }
 
+    fn tty_encode_assert(
+        encoder: &mut TTYEncoder,
+        cmd: TerminalCommand,
+        reference: &str,
+    ) -> Result<(), Error> {
+        let mut out = Vec::new();
+        encoder.encode(&mut out, cmd)?;
+        assert_eq!(std::str::from_utf8(out.as_ref()).as_deref(), Ok(reference));
+        Ok(())
+    }
+
     #[test]
     fn test_gray_sgr() -> Result<(), Error> {
         let mut encoder = TTYEncoder::new(TerminalCaps {
             depth: ColorDepth::Gray,
             ..TerminalCaps::default()
         });
-        let mut out = Vec::new();
-        encoder.encode(
-            &mut out,
+
+        tty_encode_assert(
+            &mut encoder,
             TerminalCommand::Face("bg=#ebdbb2,fg=#282828".parse()?),
+            "\x1b[0;30;107m",
         )?;
 
-        assert_eq!(
-            std::str::from_utf8(out.as_ref()).as_deref(),
-            Ok("\x1b[00;30;107m")
-        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_tty_encoder() -> Result<(), Error> {
+        let mut encoder = TTYEncoder::new(TerminalCaps {
+            depth: ColorDepth::Gray,
+            ..TerminalCaps::default()
+        });
+
+        tty_encode_assert(
+            &mut encoder,
+            TerminalCommand::Face("underline_curly".parse()?),
+            "\x1b[0;4:3m",
+        )?;
+
         Ok(())
     }
 }
