@@ -135,6 +135,10 @@ impl Cell {
                     cursor.row += 1;
                     return None;
                 }
+                '\r' => {
+                    cursor.col = 0;
+                    return None;
+                }
                 '\t' => {
                     cursor.col += (8 - cursor.col % 8).min(max_width.saturating_sub(cursor.col));
                     size.width = max(size.width, cursor.col);
@@ -1365,9 +1369,17 @@ mod tests {
         assert_eq!(size, Size::new(1, 5));
 
         // first cell second line
-        let pos = Cell::new_char(face, '*').layout(ctx, max_width, false, &mut size, &mut cursor);
-        assert_eq!(pos, Some(Position::new(1, 0)));
-        assert_eq!(cursor, Position::new(1, 1));
+        for (index, c) in "****".chars().enumerate() {
+            let pos = Cell::new_char(face, c).layout(ctx, max_width, false, &mut size, &mut cursor);
+            assert_eq!(pos, Some(Position::new(1, index)));
+            assert_eq!(cursor, Position::new(1, 1 + index));
+            assert_eq!(size, Size::new(2, 5));
+        }
+
+        // carriage return
+        let pos = Cell::new_char(face, '\r').layout(ctx, max_width, false, &mut size, &mut cursor);
+        assert_eq!(pos, None);
+        assert_eq!(cursor, Position::new(1, 0));
         assert_eq!(size, Size::new(2, 5));
     }
 
