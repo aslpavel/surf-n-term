@@ -519,6 +519,8 @@ pub trait ImageHandler: Send + Sync {
     /// Draw image
     ///
     /// Send an appropriate terminal escape sequence so the image would be rendered.
+    /// Position argument `pos` assumed to be current position, and handler
+    /// is not trying to change it.
     fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error>;
 
     /// Erase image at specified position

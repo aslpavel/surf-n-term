@@ -562,7 +562,7 @@ pub trait CellWrite {
     /// Returns [std::io::Write] that can decode UTF8 characters
     fn utf8_writer(&mut self) -> Utf8CellWriter<&mut Self> {
         Utf8CellWriter {
-            write: self,
+            parent: self,
             decoder: Utf8Decoder::new(),
         }
     }
@@ -570,7 +570,7 @@ pub trait CellWrite {
     /// Returns [std::io::Write] that can decode TTY escape sequences
     fn tty_writer(&mut self) -> TTYCellWriter<&mut Self> {
         TTYCellWriter {
-            write: self,
+            parent: self,
             decoder: TTYCommandDecoder::new(),
         }
     }
@@ -607,8 +607,14 @@ impl<W: CellWrite + ?Sized> CellWrite for &mut W {
 }
 
 pub struct Utf8CellWriter<W> {
-    write: W,
+    parent: W,
     decoder: Utf8Decoder,
+}
+
+impl<W> Utf8CellWriter<W> {
+    pub fn parent(&mut self) -> &mut W {
+        &mut self.parent
+    }
 }
 
 impl<W> std::io::Write for Utf8CellWriter<W>
@@ -618,7 +624,7 @@ where
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut cur = std::io::Cursor::new(buf);
         while let Some(ch) = self.decoder.decode(&mut cur)? {
-            if !self.write.put_char(ch) {
+            if !self.parent.put_char(ch) {
                 return Ok(buf.len());
             }
         }
@@ -631,8 +637,14 @@ where
 }
 
 pub struct TTYCellWriter<W> {
-    write: W,
+    parent: W,
     decoder: TTYCommandDecoder,
+}
+
+impl<W> TTYCellWriter<W> {
+    pub fn parent(&mut self) -> &mut W {
+        &mut self.parent
+    }
 }
 
 impl<W> std::io::Write for TTYCellWriter<W>
@@ -648,12 +660,15 @@ where
         {
             match cmd {
                 TerminalCommand::Char(c) => {
-                    if !self.write.put_char(c) {
+                    if !self.parent.put_char(c) {
                         return Ok(buf.len());
                     }
                 }
                 TerminalCommand::FaceModify(face_modify) => {
-                    self.write.set_face(face_modify.apply(self.write.face()));
+                    self.parent.set_face(face_modify.apply(self.parent.face()));
+                }
+                TerminalCommand::Image(image, _) => {
+                    self.parent.put_image(image);
                 }
                 _ => continue,
             }
@@ -1627,6 +1642,59 @@ mod tests {
         for (line, col) in cols.into_iter().enumerate() {
             assert_eq!((col - 1) % 8, 0, "column {} % 8 != 0 at line {}", col, line);
         }
+        Ok(())
+    }
+
+    #[derive(Default)]
+    struct DummyCellWrite {
+        face: Face,
+        wraps: bool,
+        cells: Vec<Cell>,
+    }
+
+    impl DummyCellWrite {
+        fn take(&mut self) -> Vec<Cell> {
+            std::mem::take(&mut self.cells)
+        }
+    }
+
+    impl CellWrite for DummyCellWrite {
+        fn face(&self) -> Face {
+            self.face
+        }
+
+        fn set_face(&mut self, face: Face) -> Face {
+            std::mem::replace(&mut self.face, face)
+        }
+
+        fn wraps(&self) -> bool {
+            self.wraps
+        }
+
+        fn set_wraps(&mut self, wraps: bool) -> bool {
+            std::mem::replace(&mut self.wraps, wraps)
+        }
+
+        fn put_cell(&mut self, cell: Cell) -> bool {
+            self.cells.push(cell);
+            true
+        }
+    }
+
+    #[test]
+    fn test_cell_tty_writer() -> Result<(), Error> {
+        let mut cell_write = DummyCellWrite::default();
+        let mut tty_writer = cell_write.tty_writer();
+
+        write!(tty_writer.by_ref(), "\x1b[91mA\x1b[mB")?;
+        assert_eq!(
+            tty_writer.parent().take(),
+            vec![
+                Cell::new_char("fg=#ff0000".parse()?, 'A'),
+                Cell::new_char(Face::default(), 'B'),
+            ]
+        );
+
         Ok(())
     }
 }
