@@ -1,5 +1,7 @@
 use super::{AlongAxis, Axis, BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout};
-use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt};
+use crate::{
+    Cell, CellWrite, Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt,
+};
 use std::cmp::{max, min, Ordering};
 
 #[derive(Debug)]
@@ -57,9 +59,9 @@ impl View for ScrollBar {
         let bg = Face::new(None, self.face.bg, FaceAttrs::EMPTY);
         for index in 0..major {
             if index < offset || index >= offset + size {
-                writer.put_char(' ', bg);
+                writer.put_cell(Cell::new_char(bg, ' '));
             } else {
-                writer.put_char(' ', fg);
+                writer.put_cell(Cell::new_char(fg, ' '));
             }
         }
         Ok(())

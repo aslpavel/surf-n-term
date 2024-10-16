@@ -1,6 +1,6 @@
 use surf_n_term::{
     view::{Align, Container, Margins, Text, View, ViewContext, ViewLayoutStore},
-    Cell, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
+    Cell, CellWrite, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
     TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
 };
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
@@ -31,24 +31,27 @@ fn stats_view(
     let term_size = term.size().unwrap_or_default();
     let cell_size = term_size.cells_in_pixels(Size::new(1, 1));
     let text = Text::new()
-        .push_str("Count     ", Some(name))
-        .push_fmt(&format_args!("{}\n", event_count))
-        .push_str("Events    ", Some(name))
-        .push_fmt(&format_args!("{:?}\n", event))
-        .push_str("Received  ", Some(name))
-        .push_fmt(&format_args!("{}\n", term.stats().recv))
-        .push_str("Send      ", Some(name))
-        .push_fmt(&format_args!("{}\n", term.stats().send))
-        .push_str("Term size ", Some(name))
-        .push_fmt(&format_args!(
-            "{}x{} {}x{} ({}x{})\n",
-            term_size.cells.height,
-            term_size.cells.width,
-            term_size.pixels.height,
-            term_size.pixels.height,
-            cell_size.height,
-            cell_size.width
-        ))
+        .put_fmt("Count     ", Some(name))
+        .put_fmt(&format_args!("{}\n", event_count), None)
+        .put_fmt("Events    ", Some(name))
+        .put_fmt(&format_args!("{:?}\n", event), None)
+        .put_fmt("Received  ", Some(name))
+        .put_fmt(&format_args!("{}\n", term.stats().recv), None)
+        .put_fmt("Send      ", Some(name))
+        .put_fmt(&format_args!("{}\n", term.stats().send), None)
+        .put_fmt("Term size ", Some(name))
+        .put_fmt(
+            &format_args!(
+                "{}x{} {}x{} ({}x{})\n",
+                term_size.cells.height,
+                term_size.cells.width,
+                term_size.pixels.height,
+                term_size.pixels.height,
+                cell_size.height,
+                cell_size.width
+            ),
+            None,
+        )
         .take();
     Ok(Container::new(text)
         .with_margins(Margins {

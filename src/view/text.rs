@@ -6,7 +6,7 @@ use serde::{
 
 use super::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{
-    glyph::GlyphDeserializer, surface::ViewBounds, Cell, Error, Face, FaceDeserializer, Glyph,
+    glyph::GlyphDeserializer, surface::ViewBounds, Cell, CellWrite, Error, Face, FaceDeserializer,
     Position, Size, TerminalSurface, TerminalSurfaceExt,
 };
 use std::{collections::HashMap, fmt::Write as _};
@@ -21,7 +21,7 @@ impl View for str {
         let mut surf = layout.apply_to(surf);
         let mut writer = surf.writer(ctx);
         self.chars().for_each(|c| {
-            writer.put_char(c, Face::default());
+            writer.put_char(c);
         });
         Ok(())
     }
@@ -65,10 +65,9 @@ impl View for String {
 
 #[derive(Clone, Default, Debug)]
 pub struct Text {
-    cells: Vec<Cell>,
+    pub(crate) cells: Vec<Cell>,
     wraps: bool,
-    // face used write next symbol (not actual face of the text)
-    face: Face,
+    face: Face, // face used write next symbol (not actual face of the text)
 }
 
 impl Text {
@@ -97,87 +96,6 @@ impl Text {
         self.face = Face::default();
     }
 
-    /// Get current value of wraps flag
-    pub fn wraps(&self) -> bool {
-        self.wraps
-    }
-
-    /// Create new surface with update wraps flag
-    pub fn with_wraps(self, wraps: bool) -> Self {
-        Self { wraps, ..self }
-    }
-
-    /// Set wraps flag
-    pub fn set_wraps(&mut self, wraps: bool) -> &mut Self {
-        self.wraps = wraps;
-        self
-    }
-
-    /// Currently set face
-    pub fn face(&self) -> &Face {
-        &self.face
-    }
-
-    /// Overlay face for the length of the scope
-    pub fn with_face(&mut self, face: Face, scope: impl FnOnce(&mut Self)) -> &mut Self {
-        let face_old = self.face;
-        scope(self.set_face(face_old.overlay(&face)));
-        self.set_face(face_old);
-        self
-    }
-
-    /// Set face that will to add new cells
-    pub fn set_face(&mut self, face: Face) -> &mut Self {
-        self.face = face;
-        self
-    }
-
-    /// Append character to the end of the [Text]
-    pub fn put_char(&mut self, c: char) -> &mut Self {
-        self.cells.push(Cell::new_char(self.face, c));
-        self
-    }
-
-    /// Append a given string to the end of [Text]
-    pub fn push_str(&mut self, str: &str, face: Option<Face>) -> &mut Self {
-        self.with_face(face.unwrap_or_default(), |text| {
-            str.chars().for_each(|c| {
-                text.put_char(c);
-            })
-        });
-        self
-    }
-
-    /// Append glyph to the end of the [Text]
-    pub fn put_glyph(&mut self, glyph: Glyph) -> &mut Self {
-        self.cells.push(Cell::new_glyph(self.face, glyph));
-        self
-    }
-
-    /// Put cell
-    pub fn put_cell(&mut self, cell: Cell) -> &mut Self {
-        let face = self.face.overlay(&cell.face());
-        self.cells.push(cell.with_face(face));
-        self
-    }
-
-    /// Append text to the end of the [Text]
-    pub fn push_text(&mut self, text: &Text) -> &mut Self {
-        text.cells.iter().cloned().for_each(|cell| {
-            self.put_cell(cell);
-        });
-        self
-    }
-
-    /// Append format argument to the end of the [Text]
-    pub fn push_fmt<T>(&mut self, value: &T) -> &mut Self
-    where
-        T: std::fmt::Display + ?Sized,
-    {
-        write!(self, "{}", value).expect("in memory write failed");
-        self
-    }
-
     /// Mark range of cell with the provided face
     pub fn mark(&mut self, face: Face, bounds: impl ViewBounds) -> &mut Self {
         if let Some((start, end)) = bounds.view_bounds(self.cells.len()) {
@@ -191,6 +109,30 @@ impl Text {
     /// Take current value replacing it with the default
     pub fn take(&mut self) -> Self {
         std::mem::replace(self, Text::new())
+    }
+}
+
+impl CellWrite for Text {
+    fn face(&self) -> Face {
+        self.face
+    }
+
+    fn set_face(&mut self, face: Face) -> Face {
+        std::mem::replace(&mut self.face, face)
+    }
+
+    fn wraps(&self) -> bool {
+        self.wraps
+    }
+
+    fn set_wraps(&mut self, wraps: bool) -> bool {
+        std::mem::replace(&mut self.wraps, wraps)
+    }
+
+    fn put_cell(&mut self, cell: Cell) -> bool {
+        let face = self.face.overlay(&cell.face());
+        self.cells.push(cell.with_face(face));
+        true
     }
 }
 
@@ -221,7 +163,7 @@ impl View for Text {
         let mut surf = layout.apply_to(surf);
         let mut writer = surf.writer(ctx).with_wraps(self.wraps);
         self.cells.iter().for_each(|cell| {
-            writer.put(cell.clone());
+            writer.put_cell(cell.clone());
         });
         Ok(())
     }
@@ -266,7 +208,7 @@ impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
         ) -> Result<(), Error> {
             match value {
                 Value::String(string) => {
-                    text.push_str(string, None);
+                    text.put_fmt(string, None);
                 }
                 Value::Object(map) => {
                     let face = match map.get("face") {
@@ -329,7 +271,7 @@ mod tests {
         let tag = "[text basic]";
         let size = Size::new(5, 10);
         let ctx = ViewContext::dummy();
-        let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
+        let mut text = Text::new().with_face("fg=#ebdbb2".parse()?);
         let mut layout_store = ViewLayoutStore::new();
 
         writeln!(&mut text, "11")?;
@@ -389,7 +331,7 @@ mod tests {
         let tag = "[text tab]";
         let size = Size::new(6, 20);
         let ctx = ViewContext::dummy();
-        let mut text = Text::new().set_face("fg=#ebdbb2".parse()?).take();
+        let mut text = Text::new().with_face("fg=#ebdbb2".parse()?);
         let mut layout_store = ViewLayoutStore::new();
 
         writeln!(&mut text, ".\t|")?;

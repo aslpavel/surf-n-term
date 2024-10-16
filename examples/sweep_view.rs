@@ -2,8 +2,8 @@ use std::time::Duration;
 use surf_n_term::{
     render::TerminalRenderer,
     view::{Align, Axis, Container, Flex, Frame, ScrollBar, Text, View, ViewContext},
-    Color, Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal, TerminalCommand,
-    TerminalSurfaceExt, RGBA,
+    CellWrite, Color, Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal,
+    TerminalCommand, TerminalSurfaceExt, RGBA,
 };
 
 const HIGHT: usize = 10;
@@ -50,22 +50,22 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     let input_view = Flex::row()
         .add_child(
             Text::new()
-                .set_face(prompt_face)
-                .put_glyph(icon)
-                .push_str("Input ", None)
-                .push_str(" ", Some(prompt_face.invert().with_bg(Some(bg))))
+                .with_face(prompt_face)
+                .with_glyph(icon)
+                .put_fmt("Input ", None)
+                .put_fmt(" ", Some(prompt_face.invert().with_bg(Some(bg))))
                 .take(),
         )
         .add_flex_child(
             1.0,
-            Container::new(Text::new().push_str("query", Some(input_face)).take())
+            Container::new(Text::new().put_fmt("query", Some(input_face)).take())
                 .with_horizontal(Align::Expand)
                 .with_color(bg),
         )
         .add_child(
             Text::new()
-                .push_str("", Some(prompt_face.invert()))
-                .push_str(" 30/127 1us [fuzzy] ", Some(prompt_face))
+                .put_fmt("", Some(prompt_face.invert()))
+                .put_fmt(" 30/127 1us [fuzzy] ", Some(prompt_face))
                 .take(),
         );
 
@@ -75,18 +75,18 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
         .fold(Flex::column(), |list, (index, item)| {
             let (tag, face) = if index == 1 {
                 let tag = Text::new()
-                    .push_str(" ●  ", Some(list_selected_face.with_fg(Some(accent))))
+                    .put_fmt(" ●  ", Some(list_selected_face.with_fg(Some(accent))))
                     .take();
                 (tag, list_selected_face)
             } else {
-                let tag = Text::new().push_str("    ", Some(list_default_face)).take();
+                let tag = Text::new().put_fmt("    ", Some(list_default_face)).take();
                 (tag, list_default_face)
             };
             list.add_child(
                 Container::new(
                     Flex::row().add_child(tag).add_flex_child(
                         1.0,
-                        Container::new(Text::new().push_str(item, Some(face)).take())
+                        Container::new(Text::new().put_fmt(item, Some(face)).take())
                             .with_horizontal(Align::Expand)
                             .with_face(face),
                     ),

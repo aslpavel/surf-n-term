@@ -7,6 +7,7 @@ use crate::{
 };
 use either::Either;
 use lazy_static::lazy_static;
+use smallvec::SmallVec;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -72,6 +73,13 @@ lazy_static! {
             Box::new(TermSizeMatcher),
             Box::new(UTF8Matcher.map(|c| TerminalEvent::Key(KeyName::Char(c).into()))),
             Box::new(BracketedPasteMatcher),
+        ])
+    };
+    static ref TTY_COMMAND_AUTOMATA: MatcherAutomata<TerminalCommand> = {
+        MatcherAutomata::new([
+            Box::new(GraphicRenditionMatcher.map(TerminalCommand::FaceModify))
+                as Box<dyn Matcher<Item = TerminalCommand>>,
+            Box::new(UTF8Matcher.map(TerminalCommand::Char)),
         ])
     };
 }
@@ -190,6 +198,8 @@ impl<T> Deref for MatcherAutomata<T> {
     }
 }
 
+type MatcherBuffer = SmallVec<[u8; 32]>;
+
 /// TTY Decoder
 #[derive(Debug)]
 struct MatcherDecoder<T> {
@@ -197,19 +207,19 @@ struct MatcherDecoder<T> {
     /// Current DFA state of the parser
     automata_state: DFAState,
     /// Bytes consumed since the initialization of DFA
-    buffer: Vec<u8>,
+    buffer: MatcherBuffer,
     /// Rescheduled data, that needs to be parsed again in **reversed order**
     /// This data is used when possible match was found but longer one failed
     /// to materialize, hence we need to resubmit data consumed after first match.
-    rescheduled: Vec<u8>,
+    rescheduled: SmallVec<[u8; 16]>,
     /// Possible match is filled when we have automata in the accepting state
     /// but it is not terminal (transition to other state is possible). Contains
     /// item and amount of data in the buffer when this item was found.
-    item_candidate: Option<(Result<T, Vec<u8>>, usize)>,
+    item_candidate: Option<(Result<T, MatcherBuffer>, usize)>,
 }
 
 impl<T: Clone + Ord> Decoder for MatcherDecoder<T> {
-    type Item = Result<T, Vec<u8>>;
+    type Item = Result<T, MatcherBuffer>;
     type Error = Error;
 
     fn decode<B: BufRead>(&mut self, mut input: B) -> Result<Option<Self::Item>, Self::Error> {
@@ -250,7 +260,7 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
     }
 
     /// Process single byte
-    fn decode_byte(&mut self, byte: u8) -> Option<Result<T, Vec<u8>>> {
+    fn decode_byte(&mut self, byte: u8) -> Option<Result<T, MatcherBuffer>> {
         self.buffer.push(byte);
         match self.automata.automata.transition(self.automata_state, byte) {
             Some(state) => {
@@ -261,7 +271,7 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
                         .tags
                         .iter()
                         .next()
-                        .expect("[TTYDecoder] found untagged accepting state");
+                        .expect("[MatcherDecoder] found untagged accepting state");
 
                     // decode events
                     let event = match tag {
@@ -291,7 +301,7 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
     }
 
     /// Take last successfully parsed event
-    fn take_candidate(&mut self) -> Option<Result<T, Vec<u8>>> {
+    fn take_candidate(&mut self) -> Option<Result<T, MatcherBuffer>> {
         self.item_candidate.take().map(|(event, size)| {
             self.rescheduled.extend(self.buffer.drain(size..).rev());
             self.buffer.clear();
@@ -333,16 +343,56 @@ impl Decoder for TTYEventDecoder {
     type Error = Error;
 
     fn decode<B: BufRead>(&mut self, buf: B) -> Result<Option<Self::Item>, Self::Error> {
-        Ok(self.matcher.decode(buf)?.map(|item| match item {
-            Ok(event) => event,
-            Err(reject) => {
+        let event = self
+            .matcher
+            .decode(buf)?
+            .transpose()
+            .unwrap_or_else(|reject| {
                 tracing::info!(
-                    "[TTYDecoder.decode] unhandled: {}",
+                    "[TTYEventDecoder.decode] unhandled: {}",
                     String::from_utf8_lossy(&reject)
                 );
-                TerminalEvent::Raw(reject)
-            }
-        }))
+                Some(TerminalEvent::Raw(reject.into_vec()))
+            });
+        Ok(event)
+    }
+}
+
+pub struct TTYCommandDecoder {
+    matcher: MatcherDecoder<TerminalCommand>,
+}
+
+impl Default for TTYCommandDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TTYCommandDecoder {
+    pub fn new() -> Self {
+        Self {
+            matcher: MatcherDecoder::new(TTY_COMMAND_AUTOMATA.clone()),
+        }
+    }
+}
+
+impl Decoder for TTYCommandDecoder {
+    type Item = TerminalCommand;
+    type Error = Error;
+
+    fn decode<B: BufRead>(&mut self, buf: B) -> Result<Option<Self::Item>, Self::Error> {
+        let cmd = self
+            .matcher
+            .decode(buf)?
+            .transpose()
+            .unwrap_or_else(|reject| {
+                tracing::info!(
+                    "[TTYEventDecoder.decode] unhandled: {}",
+                    String::from_utf8_lossy(&reject)
+                );
+                Some(TerminalCommand::Raw(reject.into_vec()))
+            });
+        Ok(cmd)
     }
 }
 
@@ -1168,7 +1218,7 @@ fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
         2 => {
             // true color
             //
-            // It can container either three or four components
+            // It can contain either three or four components
             // in the case of four first component is ignored
             match [
                 cmds.next().and_then(number_decode),
@@ -1187,7 +1237,7 @@ fn sgr_color<'a>(mut cmds: impl Iterator<Item = &'a [u8]>) -> Option<RGBA> {
 }
 
 /// Apply SGR commands to the provided Face
-fn sgr_face<'a>(data: &[u8]) -> FaceModify {
+fn sgr_face(data: &[u8]) -> FaceModify {
     let mut face = FaceModify::default();
     let mut groups = data.split(|b| matches!(b, b';'));
     while let Some(group) = groups.next() {

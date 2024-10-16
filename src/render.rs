@@ -1,11 +1,11 @@
 //! Terminal rendering logic
 use crate::{
-    decoder::Decoder,
+    decoder::{Decoder, TTYCommandDecoder, Utf8Decoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
     view::{
-        BoxConstraint, IntoView, Layout, Tree, TreeId, TreeMut, View, ViewContext, ViewLayoutStore,
-        ViewMutLayout,
+        BoxConstraint, IntoView, Layout, Text, Tree, TreeId, TreeMut, View, ViewContext,
+        ViewLayoutStore, ViewMutLayout,
     },
     Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
     SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps, TerminalCommand,
@@ -430,6 +430,242 @@ impl TerminalRenderer {
     }
 }
 
+pub trait CellWrite {
+    /// Get current face
+    fn face(&self) -> Face;
+
+    /// Set current face, returns previous face
+    fn set_face(&mut self, face: Face) -> Face;
+
+    /// Return self with updated face
+    fn with_face(mut self, face: Face) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_face(face);
+        self
+    }
+
+    /// Get wraps flag
+    fn wraps(&self) -> bool;
+
+    /// Set wraps flag, returns previous value
+    fn set_wraps(&mut self, wraps: bool) -> bool;
+
+    /// Return self with updated wraps flag
+    fn with_wraps(mut self, wraps: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_wraps(wraps);
+        self
+    }
+
+    /// Create scope that reverts face and wraps flags on exit
+    fn scope(&mut self, scope: impl FnOnce(&mut Self)) -> &mut Self {
+        let face = self.face();
+        let wraps = self.wraps();
+        scope(self);
+        self.set_wraps(wraps);
+        self.set_face(face);
+        self
+    }
+
+    /// Put cell
+    ///
+    /// Returns `false` when all further puts will be ignored (out of space)
+    fn put_cell(&mut self, cell: Cell) -> bool;
+
+    fn with_cell(mut self, cell: Cell) -> Self
+    where
+        Self: Sized,
+    {
+        self.put_cell(cell);
+        self
+    }
+
+    /// Put character
+    fn put_char(&mut self, character: char) -> bool {
+        self.put_cell(Cell::new_char(self.face(), character))
+    }
+
+    fn with_char(mut self, character: char) -> Self
+    where
+        Self: Sized,
+    {
+        self.put_char(character);
+        self
+    }
+
+    /// Put glyph
+    fn put_glyph(&mut self, glyph: Glyph) -> bool {
+        self.put_cell(Cell::new_glyph(self.face(), glyph))
+    }
+
+    fn with_glyph(mut self, glyph: Glyph) -> Self
+    where
+        Self: Sized,
+    {
+        self.put_glyph(glyph);
+        self
+    }
+
+    /// Put image
+    fn put_image(&mut self, image: Image) -> bool {
+        self.put_cell(Cell::new_image(image))
+    }
+
+    fn with_image(mut self, image: Image) -> Self
+    where
+        Self: Sized,
+    {
+        self.put_image(image);
+        self
+    }
+
+    /// Put anything that is format-able (Note: that [std::format_args] is also [std::fmt::Display])
+    fn put_fmt<T>(&mut self, value: &T, mut face: Option<Face>) -> &mut Self
+    where
+        T: std::fmt::Display + ?Sized,
+    {
+        face = face.map(|face| self.set_face(face));
+        let _ = write!(self.utf8_writer(), "{}", value);
+        face.map(|face| self.set_face(face));
+        self
+    }
+
+    fn with_fmt<T>(mut self, value: &T, face: Option<Face>) -> Self
+    where
+        T: std::fmt::Display + ?Sized,
+        Self: Sized,
+    {
+        self.put_fmt(value, face);
+        self
+    }
+
+    /// Put [Text]
+    fn put_text(&mut self, text: &Text) -> &mut Self {
+        text.cells.iter().cloned().for_each(|cell| {
+            self.put_cell(cell);
+        });
+        self
+    }
+
+    fn with_text(mut self, text: &Text) -> Self
+    where
+        Self: Sized,
+    {
+        self.put_text(text);
+        self
+    }
+
+    /// Returns [std::io::Write] that can decode UTF8 characters
+    fn utf8_writer(&mut self) -> Utf8CellWriter<&mut Self> {
+        Utf8CellWriter {
+            write: self,
+            decoder: Utf8Decoder::new(),
+        }
+    }
+
+    /// Returns [std::io::Write] that can decode TTY escape sequences
+    fn tty_writer(&mut self) -> TTYCellWriter<&mut Self> {
+        TTYCellWriter {
+            write: self,
+            decoder: TTYCommandDecoder::new(),
+        }
+    }
+
+    /// Create a reference of self
+    fn by_ref(&mut self) -> &mut Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+}
+
+impl<W: CellWrite + ?Sized> CellWrite for &mut W {
+    fn face(&self) -> Face {
+        (**self).face()
+    }
+
+    fn set_face(&mut self, face: Face) -> Face {
+        (**self).set_face(face)
+    }
+
+    fn wraps(&self) -> bool {
+        (**self).wraps()
+    }
+
+    fn set_wraps(&mut self, wraps: bool) -> bool {
+        (**self).set_wraps(wraps)
+    }
+
+    fn put_cell(&mut self, cell: Cell) -> bool {
+        (**self).put_cell(cell)
+    }
+}
+
+pub struct Utf8CellWriter<W> {
+    write: W,
+    decoder: Utf8Decoder,
+}
+
+impl<W> std::io::Write for Utf8CellWriter<W>
+where
+    W: CellWrite,
+{
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut cur = std::io::Cursor::new(buf);
+        while let Some(ch) = self.decoder.decode(&mut cur)? {
+            if !self.write.put_char(ch) {
+                return Ok(buf.len());
+            }
+        }
+        Ok(cur.position() as usize)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub struct TTYCellWriter<W> {
+    write: W,
+    decoder: TTYCommandDecoder,
+}
+
+impl<W> std::io::Write for TTYCellWriter<W>
+where
+    W: CellWrite,
+{
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut cur = std::io::Cursor::new(buf);
+        while let Some(cmd) = self
+            .decoder
+            .decode(&mut cur)
+            .map_err(std::io::Error::other)?
+        {
+            match cmd {
+                TerminalCommand::Char(c) => {
+                    if !self.write.put_char(c) {
+                        return Ok(buf.len());
+                    }
+                }
+                TerminalCommand::FaceModify(face_modify) => {
+                    self.write.set_face(face_modify.apply(self.write.face()));
+                }
+                _ => continue,
+            }
+        }
+        Ok(cur.position() as usize)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Terminal surface extension trait
 pub trait TerminalSurfaceExt: SurfaceMut<Item = Cell> {
     /// Draw box
@@ -561,38 +797,6 @@ impl<'a> TerminalWriter<'a> {
         }
     }
 
-    /// Get currently set face
-    pub fn face(&self) -> Face {
-        self.face
-    }
-
-    /// Create new surface with updated face
-    pub fn with_face(self, face: Face) -> Self {
-        Self { face, ..self }
-    }
-
-    /// Set current face
-    pub fn set_face(&mut self, face: Face) -> &mut Self {
-        self.face = face;
-        self
-    }
-
-    /// Get current value of wraps flag
-    pub fn wraps(&self) -> bool {
-        self.wraps
-    }
-
-    /// Create new surface with update wraps flag
-    pub fn with_wraps(self, wraps: bool) -> Self {
-        Self { wraps, ..self }
-    }
-
-    /// Set wraps flag
-    pub fn set_wraps(&mut self, wraps: bool) -> &mut Self {
-        self.wraps = wraps;
-        self
-    }
-
     /// Get current cursor position
     pub fn cursor(&self) -> Position {
         self.cursor
@@ -611,31 +815,45 @@ impl<'a> TerminalWriter<'a> {
     pub fn size(&self) -> Size {
         self.surf.size()
     }
+}
 
-    /// Put cell
-    pub fn put(&mut self, cell: Cell) -> bool {
+impl<'a> CellWrite for TerminalWriter<'a> {
+    fn face(&self) -> Face {
+        self.face
+    }
+
+    fn set_face(&mut self, face: Face) -> Face {
+        std::mem::replace(&mut self.face, face)
+    }
+
+    fn wraps(&self) -> bool {
+        self.wraps
+    }
+
+    fn set_wraps(&mut self, wraps: bool) -> bool {
+        std::mem::replace(&mut self.wraps, wraps)
+    }
+
+    fn put_cell(&mut self, cell: Cell) -> bool {
         if !self.ctx.has_glyphs() {
             // glyph string fallback
             if let CellKind::Glyph(glyph) = &cell.kind {
                 return glyph
                     .fallback_str()
                     .chars()
-                    .all(|c| self.put_char(c, cell.face));
+                    .all(|c| self.put_cell(Cell::new_char(cell.face, c)));
             }
         }
 
-        // layout cell
+        let face = self.face.overlay(&cell.face);
         let cursor_start = self.cursor;
-        let pos = cell.layout(
+        if let Some(pos) = cell.layout(
             &self.ctx,
             self.size().width,
             self.wraps,
             &mut self.size,
             &mut self.cursor,
-        );
-
-        let face = self.face.overlay(&cell.face);
-        if let Some(pos) = pos {
+        ) {
             // normal cell
             if let Some(cell_ref) = self.surf.get_mut(pos) {
                 cell_ref.overlay(cell.with_face(face));
@@ -643,50 +861,36 @@ impl<'a> TerminalWriter<'a> {
             } else {
                 false
             }
-        } else {
-            if cursor_start != self.cursor {
-                // cursor advanced: '\t', '\n'
-                let shape = self.surf.shape();
-                let data = self.surf.data_mut();
+        } else if cursor_start != self.cursor {
+            // cursor has been moved by special character, and we want to fill
+            // skipped cells with current background color
+            let shape = self.surf.shape();
+            let data = self.surf.data_mut();
 
-                let start = shape.offset(cursor_start);
-                let end = shape.offset(self.cursor);
+            let start = shape.offset(cursor_start);
+            let end = shape.offset(self.cursor);
 
-                let blank = Cell::new_char(face, ' ');
-                for row in cursor_start.row..min(self.cursor.row + 1, shape.height) {
-                    for col in 0..shape.width {
-                        let offset = shape.offset(Position::new(row, col));
-                        if (start..end).contains(&offset) {
-                            data[offset].overlay(blank.clone());
-                        }
+            let blank = Cell::new_char(face, ' ');
+            for row in cursor_start.row..min(self.cursor.row + 1, shape.height) {
+                for col in 0..shape.width {
+                    let offset = shape.offset(Position::new(row, col));
+                    if (start..end).contains(&offset) {
+                        data[offset].overlay(blank.clone());
                     }
                 }
             }
             true
+        } else {
+            true
         }
-    }
-
-    /// Put character
-    pub fn put_char(&mut self, character: char, face: Face) -> bool {
-        self.put(Cell::new_char(face, character))
-    }
-
-    /// Put glyph
-    pub fn put_glyph(&mut self, glyph: Glyph, face: Face) -> bool {
-        self.put(Cell::new_glyph(face, glyph))
-    }
-
-    /// Put image
-    pub fn put_image(&mut self, image: Image) -> bool {
-        self.put(Cell::new_image(image))
     }
 }
 
 impl<'a> std::io::Write for TerminalWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut cur = std::io::Cursor::new(buf);
-        while let Some(glyph) = self.decoder.decode(&mut cur)? {
-            if !self.put_char(glyph, self.face) {
+        while let Some(ch) = self.decoder.decode(&mut cur)? {
+            if !self.put_char(ch) {
                 return Ok(buf.len());
             }
         }
@@ -1407,13 +1611,17 @@ mod tests {
 
         let mut cols = Vec::new();
         for index in 0..22 {
+            writer.set_face(underline_face);
             (0..index).for_each(|_| {
-                writer.put_char('_', underline_face);
+                writer.put_char('_');
             });
-            writer.put_char('\t', tab_face);
-            writer.put_char('X', mark_face);
+            writer.set_face(tab_face);
+            writer.put_char('\t');
+            writer.set_face(mark_face);
+            writer.put_char('X');
             cols.push(writer.cursor().col);
-            writer.put_char('\n', Face::default());
+            writer.set_face(Face::default());
+            writer.put_char('\n');
         }
         print!("[render] tab writer: {:?}", render.surface().debug());
         for (line, col) in cols.into_iter().enumerate() {

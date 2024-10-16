@@ -320,6 +320,8 @@ pub enum TerminalCommand {
     DeviceAttrs,
     /// Set kitty keyboard protocol level
     KeyboardLevel(usize),
+    /// Write raw data to terminal
+    Raw(Vec<u8>),
 }
 
 impl TerminalCommand {

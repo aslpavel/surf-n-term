@@ -249,6 +249,7 @@ impl Encoder for TTYEncoder {
             KeyboardLevel(level) => {
                 self.kitty_level(out, level)?;
             }
+            Raw(data) => out.write_all(&data)?,
         }
 
         Ok(())

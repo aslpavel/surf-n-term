@@ -58,7 +58,7 @@ pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImage
 pub use keys::{Key, KeyChord, KeyMap, KeyMod, KeyName};
 pub use rasterize;
 pub use rasterize::{Color, LinColor, RGBA};
-pub use render::{Cell, TerminalSurface, TerminalSurfaceExt, TerminalWriter};
+pub use render::{Cell, CellWrite, TerminalSurface, TerminalSurfaceExt, TerminalWriter};
 pub use surface::{
     Shape, Surface, SurfaceIter, SurfaceMut, SurfaceMutIter, SurfaceMutView, SurfaceOwned,
     SurfaceOwnedView, SurfaceView,
