@@ -2,27 +2,42 @@ use super::{AlongAxis, Axis, BoxConstraint, Layout, View, ViewContext, ViewLayou
 use crate::{
     Cell, CellWrite, Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt,
 };
-use std::cmp::{max, min, Ordering};
+use std::cmp::max;
+
+/// Represent current position
+///
+/// offset - fraction (0.0..1.0) scrolled from the begging
+/// visible - fraction (0.0..1.0) visible on the screen
+#[derive(Debug)]
+pub struct ScrollBarPosition {
+    pub offset: f64,
+    pub visible: f64,
+}
+
+impl ScrollBarPosition {
+    pub fn from_counts(total: usize, offset: usize, visible: usize) -> Self {
+        let total = total as f64;
+        Self {
+            offset: offset as f64 / total,
+            visible: visible as f64 / total,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct ScrollBar {
     direction: Axis,
     face: Face,
-    total: usize,
-    offset: usize,
-    visible: usize,
+    position: ScrollBarPosition,
 }
 
 impl ScrollBar {
-    /// Create scroll bar along the `axis`. For something that has `total` the number
-    /// of entries with the current `offset`, and the number of `visible` values.
-    pub fn new(direction: Axis, face: Face, total: usize, offset: usize, visible: usize) -> Self {
+    /// Create scroll bar along the `axis`
+    pub fn new(direction: Axis, face: Face, position: ScrollBarPosition) -> Self {
         Self {
             direction,
             face,
-            total,
-            offset: min(total.saturating_sub(visible), offset),
-            visible: min(total, visible),
+            position,
         }
     }
 }
@@ -39,18 +54,11 @@ impl View for ScrollBar {
             return Ok(());
         }
 
-        let (size, offset) = match self.total.cmp(&1) {
-            Ordering::Greater => {
-                let major = major as f64;
-                let total = self.total as f64;
-                let offset = self.offset as f64;
-                let visible = self.visible as f64;
-                let size = (major * visible / total).clamp(1.0, major).round();
-                let offset = ((major - size) * offset / (total - visible - 1.0).max(1.0)).round();
-                (size as usize, offset.min(major - size) as usize)
-            }
-            Ordering::Equal => (major, 0),
-            Ordering::Less => (0, 0),
+        let (size, offset) = {
+            let major = major as f64;
+            let size = (major * self.position.visible).clamp(1.0, major).round();
+            let offset = ((major - size) * self.position.offset).round();
+            (size as usize, offset as usize)
         };
 
         let mut surf = layout.apply_to(surf);
@@ -97,9 +105,10 @@ mod tests {
         let bar = ScrollBar::new(
             Axis::Horizontal,
             Face::new(fg, bg, FaceAttrs::EMPTY),
-            100,
-            20,
-            30,
+            ScrollBarPosition {
+                offset: 0.2,
+                visible: 0.3,
+            },
         );
         let ctx = &ViewContext::dummy();
         let size = Size::new(5, 20);
@@ -114,15 +123,15 @@ mod tests {
         print!("{:?}", bar.debug(size));
 
         let surf = render(ctx, &bar, size)?;
-        surf.view(0u32, 0..4u32)
+        surf.view(0u32, 0..3u32)
             .iter()
             .enumerate()
             .for_each(|(index, cell)| assert_eq!(cell.face().bg, bg, "at {index}"));
-        surf.view(0u32, 4..10u32)
+        surf.view(0u32, 3..9u32)
             .iter()
             .enumerate()
             .for_each(|(index, cell)| assert_eq!(cell.face().bg, fg, "at {index}"));
-        surf.view(0u32, 10..size.width)
+        surf.view(0u32, 9..size.width)
             .iter()
             .enumerate()
             .for_each(|(index, cell)| assert_eq!(cell.face().bg, bg, "at {index}"));

@@ -1,7 +1,9 @@
 use std::time::Duration;
 use surf_n_term::{
     render::TerminalRenderer,
-    view::{Align, Axis, Container, Flex, Frame, ScrollBar, Text, View, ViewContext},
+    view::{
+        Align, Axis, Container, Flex, Frame, ScrollBar, ScrollBarPosition, Text, View, ViewContext,
+    },
     CellWrite, Color, Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal,
     TerminalCommand, TerminalSurfaceExt, RGBA,
 };
@@ -100,7 +102,14 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
             1.0,
             Container::new(items_list).with_horizontal(Align::Expand),
         )
-        .add_child(ScrollBar::new(Axis::Vertical, scrollbar_face, 127, 40, 30));
+        .add_child(ScrollBar::new(
+            Axis::Vertical,
+            scrollbar_face,
+            ScrollBarPosition {
+                offset: 0.3150,
+                visible: 0.2362,
+            },
+        ));
 
     let result = Container::new(
         Flex::column()

@@ -14,7 +14,7 @@ pub use flex::{Flex, Justify};
 
 mod scrollbar;
 use rasterize::{RGBADeserializer, SVG_COLORS};
-pub use scrollbar::ScrollBar;
+pub use scrollbar::{ScrollBar, ScrollBarPosition};
 
 mod text;
 use serde_json::Value;

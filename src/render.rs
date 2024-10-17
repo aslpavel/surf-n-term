@@ -560,7 +560,12 @@ pub trait CellWrite {
     }
 
     /// Returns [std::io::Write] that can decode UTF8 characters
-    fn utf8_writer(&mut self) -> Utf8CellWriter<&mut Self> {
+    ///
+    /// Use together with `.by_ref` for no-owning version
+    fn utf8_writer(self) -> Utf8CellWriter<Self>
+    where
+        Self: Sized,
+    {
         Utf8CellWriter {
             parent: self,
             decoder: Utf8Decoder::new(),
@@ -568,7 +573,12 @@ pub trait CellWrite {
     }
 
     /// Returns [std::io::Write] that can decode TTY escape sequences
-    fn tty_writer(&mut self) -> TTYCellWriter<&mut Self> {
+    ///
+    /// Use together with `.by_ref` for no-owning version
+    fn tty_writer(self) -> TTYCellWriter<Self>
+    where
+        Self: Sized,
+    {
         TTYCellWriter {
             parent: self,
             decoder: TTYCommandDecoder::new(),
@@ -923,7 +933,7 @@ pub struct TerminalSurfaceDebug<'a> {
 
 impl<'a> TerminalSurfaceDebug<'a> {
     /// Write rendered surface to the output
-    fn save<W: Write + Send>(&self, output: W) -> Result<W, Error> {
+    pub fn save<W: Write + Send>(&self, output: W) -> Result<W, Error> {
         // init capabilities
         let capabilities = TerminalCaps {
             depth: crate::encoder::ColorDepth::TrueColor,
@@ -1683,8 +1693,7 @@ mod tests {
 
     #[test]
     fn test_cell_tty_writer() -> Result<(), Error> {
-        let mut cell_write = DummyCellWrite::default();
-        let mut tty_writer = cell_write.tty_writer();
+        let mut tty_writer = DummyCellWrite::default().tty_writer();
 
         write!(tty_writer.by_ref(), "\x1b[91mA\x1b[mB")?;
         assert_eq!(
