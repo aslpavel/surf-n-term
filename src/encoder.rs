@@ -93,6 +93,7 @@ impl Encoder for TTYEncoder {
             EraseLineRight => out.write_all(b"\x1b[K")?,
             EraseLineLeft => out.write_all(b"\x1b[1K")?,
             EraseLine => out.write_all(b"\x1b[2K")?,
+            EraseScreen => out.write_all(b"\x1b[2J")?,
             EraseChars(count) => write!(out, "\x1b[{}X", count)?,
             Face(face) => {
                 self.chunks.clear();

@@ -295,6 +295,8 @@ pub enum TerminalCommand {
     EraseLineRight,
     /// Erase line using current background color
     EraseLine,
+    /// Erase entire screen
+    EraseScreen,
     /// Erase specified amount of characters to the right from current cursor position
     EraseChars(usize),
     /// Scroll, positive is up and negative is down
@@ -635,8 +637,16 @@ impl TerminalSize {
     /// Size of the cell in pixels
     pub fn pixels_per_cell(&self) -> Size {
         Size {
-            height: self.pixels.height / self.cells.height,
-            width: self.pixels.width / self.cells.width,
+            height: if self.cells.height > 0 {
+                self.pixels.height / self.cells.height
+            } else {
+                0
+            },
+            width: if self.cells.width > 0 {
+                self.pixels.width / self.cells.width
+            } else {
+                0
+            },
         }
     }
 

@@ -208,12 +208,12 @@ where
             if let Some(face) = child.face {
                 let mut surf = match self.direction {
                     Axis::Horizontal => {
-                        let start = child_layout.pos().col;
+                        let start = child_layout.position().col;
                         let end = start + child_layout.size().width;
                         surf.view_mut(.., start..end)
                     }
                     Axis::Vertical => {
-                        let start = child_layout.pos().row;
+                        let start = child_layout.position().row;
                         let end = start + child_layout.size().height;
                         surf.view_mut(start..end, ..)
                     }
@@ -322,7 +322,7 @@ where
                 let mut child_layout =
                     child_layout_opt.expect("not all flex children are allocated");
                 let child_size = child_layout.size();
-                child_layout.set_pos(Position::from_axes(
+                child_layout.set_position(Position::from_axes(
                     self.direction,
                     major_offset,
                     child.align.align(self.direction.minor(child_size), minor),

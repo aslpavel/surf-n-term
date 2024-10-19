@@ -219,7 +219,7 @@ impl<V: View> View for Container<V> {
         self.child
             .layout(ctx, child_constraint, child_layout.view_mut())?;
         let child_size = child_layout.size();
-        child_layout.set_pos(Position {
+        child_layout.set_position(Position {
             row: self
                 .align_vertical
                 .align(child_size.height, child_size_max.height)

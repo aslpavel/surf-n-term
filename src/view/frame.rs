@@ -200,7 +200,7 @@ impl<V: View> View for Frame<V> {
         );
         let mut child_layout = layout.push_default();
         self.view.layout(ctx, ct, child_layout.view_mut())?;
-        child_layout.set_pos(Position::new(1, 1));
+        child_layout.set_position(Position::new(1, 1));
         let size = Size {
             height: child_layout.size().height + 2,
             width: child_layout.size().width + 2,

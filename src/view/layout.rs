@@ -58,12 +58,12 @@ impl Layout {
     }
 
     /// Get layout position
-    pub fn pos(&self) -> Position {
+    pub fn position(&self) -> Position {
         self.pos
     }
 
     /// Set layout position
-    pub fn set_pos(&mut self, pos: Position) -> &mut Self {
+    pub fn set_position(&mut self, pos: Position) -> &mut Self {
         self.pos = pos;
         self
     }
