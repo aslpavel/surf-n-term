@@ -118,6 +118,22 @@ pub trait View: Send + Sync {
     {
         Tag::new(tag, self)
     }
+
+    /// Convert into left side of [Either] view
+    fn left_view<R>(self) -> Either<Self, R>
+    where
+        Self: Sized,
+    {
+        Either::Left(self)
+    }
+
+    /// Convert into right side of [Either] view
+    fn right_view<L>(self) -> Either<L, Self>
+    where
+        Self: Sized,
+    {
+        Either::Right(self)
+    }
 }
 
 impl<'a, V: View + ?Sized> View for &'a V {
