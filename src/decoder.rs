@@ -40,20 +40,7 @@ pub trait Decoder {
 }
 
 lazy_static! {
-    static ref UTF8DFA: DFA<()> = {
-        let printable = NFA::predicate(|b| b >> 7 == 0b0);
-        let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
-        let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
-        let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
-        let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-        NFA::choice([
-            printable,
-            utf8_two + utf8_tail.clone(),
-            utf8_three + utf8_tail.clone() + utf8_tail.clone(),
-            utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
-        ])
-        .compile()
-    };
+    static ref UTF8DFA: DFA<()> = utf8_nfa(UTF8Mode::Canonical).compile();
     static ref TTY_EVENT_AUTOMATA: MatcherAutomata<TerminalEvent> = {
         MatcherAutomata::new([
             Box::new(BasicEventsMatcher) as Box<dyn Matcher<Item = TerminalEvent>>,
@@ -71,7 +58,10 @@ lazy_static! {
             Box::new(ReportSettingMatcher),
             Box::new(TermCapMatcher),
             Box::new(TermSizeMatcher),
-            Box::new(UTF8Matcher.map(|c| TerminalEvent::Key(KeyName::Char(c).into()))),
+            Box::new(
+                UTF8Matcher::new(UTF8Mode::Printable)
+                    .map(|c| TerminalEvent::Key(KeyName::Char(c).into())),
+            ),
             Box::new(BracketedPasteMatcher),
         ])
     };
@@ -79,7 +69,7 @@ lazy_static! {
         MatcherAutomata::new([
             Box::new(GraphicRenditionMatcher.map(TerminalCommand::FaceModify))
                 as Box<dyn Matcher<Item = TerminalCommand>>,
-            Box::new(UTF8Matcher.map(TerminalCommand::Char)),
+            Box::new(UTF8Matcher::new(UTF8Mode::NotEscape).map(TerminalCommand::Char)),
         ])
     };
 }
@@ -211,7 +201,7 @@ struct MatcherDecoder<T> {
     /// Rescheduled data, that needs to be parsed again in **reversed order**
     /// This data is used when possible match was found but longer one failed
     /// to materialize, hence we need to resubmit data consumed after first match.
-    rescheduled: SmallVec<[u8; 16]>,
+    rescheduled: MatcherBuffer,
     /// Possible match is filled when we have automata in the accepting state
     /// but it is not terminal (transition to other state is possible). Contains
     /// item and amount of data in the buffer when this item was found.
@@ -290,9 +280,11 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
             }
             None => {
                 let event = self.take_candidate().unwrap_or_else(|| {
-                    self.rescheduled.push(byte); // re-schedule current byte for parsing
+                    if self.buffer.len() > 1 {
+                        self.rescheduled.push(byte); // re-schedule current byte for parsing
+                        self.buffer.pop();
+                    }
                     self.automata_state = self.automata.automata.start();
-                    self.buffer.pop();
                     Err(std::mem::take(&mut self.buffer))
                 });
                 Some(event)
@@ -300,13 +292,13 @@ impl<T: Clone + Ord> MatcherDecoder<T> {
         }
     }
 
-    /// Take last successfully parsed event
+    /// Take last successfully parsed item
     fn take_candidate(&mut self) -> Option<Result<T, MatcherBuffer>> {
-        self.item_candidate.take().map(|(event, size)| {
+        self.item_candidate.take().map(|(item, size)| {
             self.rescheduled.extend(self.buffer.drain(size..).rev());
             self.buffer.clear();
             self.automata_state = self.automata.automata.start();
-            event
+            item
         })
     }
 }
@@ -348,8 +340,11 @@ impl Decoder for TTYEventDecoder {
             .decode(buf)?
             .transpose()
             .unwrap_or_else(|reject| {
+                if reject.is_empty() {
+                    return None;
+                }
                 tracing::info!(
-                    "[TTYEventDecoder.decode] unhandled: {}",
+                    "[TTYEventDecoder.decode] unhandled: {:?}",
                     String::from_utf8_lossy(&reject)
                 );
                 Some(TerminalEvent::Raw(reject.into_vec()))
@@ -386,8 +381,11 @@ impl Decoder for TTYCommandDecoder {
             .decode(buf)?
             .transpose()
             .unwrap_or_else(|reject| {
+                if reject.is_empty() {
+                    return None;
+                }
                 tracing::info!(
-                    "[TTYEventDecoder.decode] unhandled: {}",
+                    "[TTYEventDecoder.decode] unhandled: {:?}",
                     String::from_utf8_lossy(&reject)
                 );
                 Some(TerminalCommand::Raw(reject.into_vec()))
@@ -908,24 +906,21 @@ impl Matcher for TermCapMatcher {
 ///
 /// Mostly utf8, but one-byte codes are restricted to the printable set
 #[derive(Debug)]
-struct UTF8Matcher;
+struct UTF8Matcher {
+    mode: UTF8Mode,
+}
+
+impl UTF8Matcher {
+    fn new(mode: UTF8Mode) -> Self {
+        Self { mode }
+    }
+}
 
 impl Matcher for UTF8Matcher {
     type Item = char;
 
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
-        let printable = NFA::predicate(|b| (b' '..=b'~').contains(&b));
-        let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
-        let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
-        let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
-        let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
-        let nfa = NFA::choice([
-            printable,
-            utf8_two + utf8_tail.clone(),
-            utf8_three + utf8_tail.clone() + utf8_tail.clone(),
-            utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
-        ]);
-        Either::Left(nfa)
+        Either::Left(utf8_nfa(self.mode))
     }
 
     fn decode(&self, data: &[u8]) -> Option<Self::Item> {
@@ -1345,6 +1340,31 @@ fn utf8_decode(slice: &[u8]) -> char {
         code |= (*byte as u32) & 63;
     }
     unsafe { std::char::from_u32_unchecked(code) }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum UTF8Mode {
+    Canonical,
+    Printable,
+    NotEscape,
+}
+
+fn utf8_nfa<T: Clone>(mode: UTF8Mode) -> NFA<T> {
+    let utf8_one = match mode {
+        UTF8Mode::Canonical => NFA::predicate(|b| b >> 7 == 0b0),
+        UTF8Mode::Printable => NFA::predicate(|b| (b' '..=b'~').contains(&b)),
+        UTF8Mode::NotEscape => NFA::predicate(|b| b >> 7 == 0b0 && b != b'\x1b'),
+    };
+    let utf8_two = NFA::predicate(|b| b >> 5 == 0b110);
+    let utf8_three = NFA::predicate(|b| b >> 4 == 0b1110);
+    let utf8_four = NFA::predicate(|b| b >> 3 == 0b11110);
+    let utf8_tail = NFA::predicate(|b| b >> 6 == 0b10);
+    NFA::choice([
+        utf8_one,
+        utf8_two + utf8_tail.clone(),
+        utf8_three + utf8_tail.clone() + utf8_tail.clone(),
+        utf8_four + utf8_tail.clone() + utf8_tail.clone() + utf8_tail,
+    ])
 }
 
 /// Decode hex encoded slice

@@ -670,9 +670,7 @@ where
         {
             match cmd {
                 TerminalCommand::Char(c) => {
-                    if !self.parent.put_char(c) {
-                        return Ok(buf.len());
-                    }
+                    self.parent.put_char(c);
                 }
                 TerminalCommand::FaceModify(face_modify) => {
                     self.parent.set_face(face_modify.apply(self.parent.face()));
@@ -1693,11 +1691,11 @@ mod tests {
 
     #[test]
     fn test_cell_tty_writer() -> Result<(), Error> {
-        let mut tty_writer = DummyCellWrite::default().tty_writer();
+        let mut target = DummyCellWrite::default();
 
-        write!(tty_writer.by_ref(), "\x1b[91mA\x1b[mB")?;
+        write!(target.by_ref().tty_writer(), "\x1b[91mA\x1b[mB")?;
         assert_eq!(
-            tty_writer.parent().take(),
+            target.take(),
             vec![
                 Cell::new_char("fg=#ff0000".parse()?, 'A'),
                 Cell::new_char(Face::default(), 'B'),
