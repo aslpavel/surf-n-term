@@ -886,19 +886,19 @@ impl<'a> CellWrite for TerminalWriter<'a> {
             }
         } else if cursor_start != self.cursor {
             // cursor has been moved by special character, and we want to fill
-            // skipped cells with current background color
+            // skipped cells with current face
             let shape = self.surf.shape();
             let data = self.surf.data_mut();
 
             let start = shape.offset(cursor_start);
             let end = shape.offset(self.cursor);
 
-            let blank = Cell::new_char(face, ' ');
             for row in cursor_start.row..min(self.cursor.row + 1, shape.height) {
                 for col in 0..shape.width {
                     let offset = shape.offset(Position::new(row, col));
                     if (start..end).contains(&offset) {
-                        data[offset].overlay(blank.clone());
+                        let cell = &mut data[offset];
+                        cell.face = cell.face.overlay(&face);
                     }
                 }
             }
