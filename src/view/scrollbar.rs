@@ -79,15 +79,63 @@ impl View for ScrollBar {
         &self,
         _ctx: &ViewContext,
         ct: BoxConstraint,
-        mut layout: ViewMutLayout<'_>,
+        layout: ViewMutLayout<'_>,
     ) -> Result<(), Error> {
-        let major = self.direction.major(ct.max());
-        let minor = max(self.direction.minor(ct.min()), 1);
-        *layout = Layout::new()
-            .with_size(Size::from_axes(self.direction, major, 1))
-            .with_position(Position::from_axes(self.direction, 0, minor - 1));
-        Ok(())
+        scroll_bar_layout(self.direction, ct, layout)
     }
+}
+
+/// Scroll bar that evaluates position during render
+pub struct ScrollBarFn<F> {
+    direction: Axis,
+    face: Face,
+    position: F,
+}
+
+impl<F> ScrollBarFn<F> {
+    pub fn new(direction: Axis, face: Face, position: F) -> Self {
+        Self {
+            direction,
+            face,
+            position,
+        }
+    }
+}
+
+impl<F> View for ScrollBarFn<F>
+where
+    F: Fn() -> ScrollBarPosition + Send + Sync,
+{
+    fn render(
+        &self,
+        ctx: &ViewContext,
+        surf: TerminalSurface<'_>,
+        layout: ViewLayout<'_>,
+    ) -> Result<(), Error> {
+        ScrollBar::new(self.direction, self.face, (self.position)()).render(ctx, surf, layout)
+    }
+
+    fn layout(
+        &self,
+        _ctx: &ViewContext,
+        ct: BoxConstraint,
+        layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
+        scroll_bar_layout(self.direction, ct, layout)
+    }
+}
+
+fn scroll_bar_layout(
+    direction: Axis,
+    ct: BoxConstraint,
+    mut layout: ViewMutLayout<'_>,
+) -> Result<(), Error> {
+    let major = direction.major(ct.max());
+    let minor = max(direction.minor(ct.min()), 1);
+    *layout = Layout::new()
+        .with_size(Size::from_axes(direction, major, 1))
+        .with_position(Position::from_axes(direction, 0, minor - 1));
+    Ok(())
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ pub use flex::{Flex, Justify};
 
 mod scrollbar;
 use rasterize::{RGBADeserializer, SVG_COLORS};
-pub use scrollbar::{ScrollBar, ScrollBarPosition};
+pub use scrollbar::{ScrollBar, ScrollBarFn, ScrollBarPosition};
 
 mod text;
 use serde_json::Value;
@@ -196,6 +196,7 @@ impl<T: View + ?Sized> View for Arc<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct ViewDebug<V> {
     view: V,
     size: Size,
@@ -216,6 +217,7 @@ impl<V: View> std::fmt::Debug for ViewDebug<V> {
     }
 }
 
+#[derive(Clone)]
 pub struct TraceLayout<V, T> {
     view: V,
     trace: T,
@@ -531,6 +533,7 @@ where
 
 /// View that does not effect rendering only adds tag as `Layout::data`
 /// for generated layout.
+#[derive(Clone)]
 pub struct Tag<T, V> {
     view: V,
     tag: T,
@@ -678,12 +681,13 @@ pub trait ViewCache: Send + Sync {
     fn get(&self, uid: i64) -> Option<ArcView<'static>>;
 }
 
-impl ViewCache for Arc<dyn ViewCache> {
+impl<T: ViewCache + ?Sized> ViewCache for Arc<T> {
     fn get(&self, uid: i64) -> Option<ArcView<'static>> {
         (**self).get(uid)
     }
 }
 
+#[derive(Clone)]
 struct ViewCached {
     cache: Option<Arc<dyn ViewCache>>,
     uid: i64,

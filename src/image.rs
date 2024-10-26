@@ -542,7 +542,7 @@ pub trait ImageHandler: Send + Sync {
     fn handle(&mut self, out: &mut dyn Write, event: &TerminalEvent) -> Result<bool, Error>;
 }
 
-impl ImageHandler for Box<dyn ImageHandler> {
+impl<T: ImageHandler + ?Sized> ImageHandler for Box<T> {
     fn kind(&self) -> ImageHandlerKind {
         (**self).kind()
     }
