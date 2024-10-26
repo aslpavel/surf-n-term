@@ -297,10 +297,10 @@ mod tests {
         let mut queue = IOQueue::new();
         assert!(queue.is_empty());
 
-        queue.write(b"on")?;
-        queue.write(b"e")?;
+        queue.write_all(b"on")?;
+        queue.write_all(b"e")?;
         queue.flush()?;
-        queue.write(b",two")?;
+        queue.write_all(b",two")?;
         queue.flush()?;
         assert!(!queue.is_empty());
 
@@ -315,11 +315,11 @@ mod tests {
         assert!(queue.is_empty());
 
         // make `BufRead` implementation
-        queue.write(b"one\nt")?;
+        queue.write_all(b"one\nt")?;
         queue.flush()?;
-        queue.write(b"wo\nth")?;
+        queue.write_all(b"wo\nth")?;
         queue.flush()?;
-        queue.write(b"ree\n")?;
+        queue.write_all(b"ree\n")?;
         let lines = queue.lines().collect::<Result<Vec<_>, _>>()?;
         assert_eq!(
             lines,

@@ -540,7 +540,7 @@ mod tests {
         assert_eq!(base64.finish()?, b"dGVy");
 
         let mut base64 = Base64Encoder::new(Vec::new());
-        base64.write(b"ab")?;
+        base64.write_all(b"ab")?;
         assert_eq!(base64.finish()?, b"YWI=");
 
         Ok(())

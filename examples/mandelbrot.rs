@@ -162,7 +162,7 @@ fn main() -> Result<(), Error> {
 
         let ctx = ViewContext::new(term)?;
         if ascii {
-            view.draw_view(&ctx, Some(&mut layout_store), &imgs[index].ascii_view())?;
+            view.draw_view(&ctx, Some(&mut layout_store), imgs[index].ascii_view())?;
         } else {
             view.draw_view(&ctx, Some(&mut layout_store), &imgs[index])?;
         }

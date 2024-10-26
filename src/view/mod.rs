@@ -136,7 +136,7 @@ pub trait View: Send + Sync {
     }
 }
 
-impl<'a, V: View + ?Sized> View for &'a V {
+impl<V: View + ?Sized> View for &V {
     fn render(
         &self,
         ctx: &ViewContext,
@@ -639,7 +639,7 @@ impl View for RGBA {
     }
 }
 
-impl<'a> View for SurfaceView<'a, Cell> {
+impl View for SurfaceView<'_, Cell> {
     fn render(
         &self,
         _ctx: &ViewContext,
@@ -761,7 +761,7 @@ impl<'a> ViewDeserializer<'a> {
     }
 }
 
-impl<'de, 'a> de::DeserializeSeed<'de> for &'a ViewDeserializer<'_> {
+impl<'de> de::DeserializeSeed<'de> for &ViewDeserializer<'_> {
     type Value = ArcView<'static>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -876,7 +876,7 @@ mod tests {
         let color_arc: ArcView<'static> = Arc::new(color);
 
         witness(color);
-        witness(&color);
+        witness(color);
         witness(&color as &dyn View);
         witness(&color_boxed);
         witness(color_boxed);

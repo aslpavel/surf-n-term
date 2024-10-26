@@ -13,7 +13,7 @@ struct Child<'a> {
     align: Align,
 }
 
-impl<'a> fmt::Debug for Child<'a> {
+impl fmt::Debug for Child<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Child")
             .field("flex", &self.flex)

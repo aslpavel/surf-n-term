@@ -163,7 +163,7 @@ pub trait Terminal: Write + Send {
     fn capabilities(&self) -> &TerminalCaps;
 }
 
-impl<'a, T: Terminal + ?Sized> Terminal for &'a mut T {
+impl<T: Terminal + ?Sized> Terminal for &mut T {
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         (**self).execute(cmd)
     }
@@ -221,7 +221,7 @@ impl Default for TerminalCaps {
 
 pub struct TerminalDrain<'a>(&'a mut dyn Terminal);
 
-impl<'a> Iterator for TerminalDrain<'a> {
+impl Iterator for TerminalDrain<'_> {
     type Item = TerminalEvent;
 
     fn next(&mut self) -> Option<Self::Item> {

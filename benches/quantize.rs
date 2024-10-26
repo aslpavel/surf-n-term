@@ -103,7 +103,7 @@ fn linear_to_srgb(color: LinColor) -> RGBA {
     }
 
     let [r, g, b, a]: [f32; 4] = color.into();
-    if a < std::f32::EPSILON {
+    if a < f32::EPSILON {
         RGBA::new(0, 0, 0, 0)
     } else {
         let a = clamp(a, 0.0, 1.0);
@@ -125,7 +125,7 @@ fn srgb_and_linear_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("srgb_and_linear");
     group
         .sampling_mode(SamplingMode::Flat)
-        .throughput(Throughput::Elements(1024 as u64))
+        .throughput(Throughput::Elements(1024_u64))
         .bench_function("naive", |b| {
             b.iter(|| {
                 for color in colors.iter() {

@@ -133,7 +133,7 @@ where
     }
 }
 
-impl<'a> IntoView for &'a Offscreen {
+impl IntoView for &Offscreen {
     type View = OffscreenView;
 
     fn into_view(self) -> Self::View {

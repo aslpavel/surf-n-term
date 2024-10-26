@@ -1,3 +1,4 @@
+#![allow(clippy::reversed_empty_ranges)] // those range are not actually empty
 use surf_n_term::{
     view::{Align, Container, Margins, Text, View, ViewContext, ViewLayoutStore},
     Cell, CellWrite, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
@@ -101,7 +102,7 @@ fn main() -> Result<(), Error> {
 
         match event {
             None => return Ok(TerminalAction::Wait),
-            Some(event) if &event == &q || &event == &ctrlc => return Ok(TerminalAction::Quit(())),
+            Some(event) if event == q || event == ctrlc => return Ok(TerminalAction::Quit(())),
             Some(event) => {
                 // update mouse position
                 match event {

@@ -500,7 +500,7 @@ impl<'a, T> Iterator for SurfacePosMutIter<'a, T> {
     }
 }
 
-impl<'a, S> Surface for &'a S
+impl<S> Surface for &S
 where
     S: Surface + ?Sized,
 {
@@ -515,7 +515,7 @@ where
     }
 }
 
-impl<'a, S> Surface for &'a mut S
+impl<S> Surface for &mut S
 where
     S: Surface + ?Sized,
 {
@@ -530,7 +530,7 @@ where
     }
 }
 
-impl<'a, S> SurfaceMut for &'a mut S
+impl<S> SurfaceMut for &mut S
 where
     S: SurfaceMut + ?Sized,
 {
@@ -1011,8 +1011,8 @@ mod tests {
         );
 
         assert_eq!(
-            (&surf).view(3.., 1..).view(..2, ..3).shape(),
-            (&surf).view(3..5, 1..4).shape(),
+            surf.view(3.., 1..).view(..2, ..3).shape(),
+            surf.view(3..5, 1..4).shape(),
         );
     }
 

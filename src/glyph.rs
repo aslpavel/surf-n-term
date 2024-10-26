@@ -489,7 +489,7 @@ impl<'de> Deserialize<'de> for GlyphFrame {
     }
 }
 
-impl<'de, 'a> de::DeserializeSeed<'de> for &'a GlyphFrameDeserializer<'_> {
+impl<'de> de::DeserializeSeed<'de> for &GlyphFrameDeserializer<'_> {
     type Value = GlyphFrame;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -500,7 +500,7 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a GlyphFrameDeserializer<'_> {
     }
 }
 
-impl<'de, 'a> de::Visitor<'de> for &'a GlyphFrameDeserializer<'_> {
+impl<'de> de::Visitor<'de> for &GlyphFrameDeserializer<'_> {
     type Value = GlyphFrame;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -575,7 +575,7 @@ impl<'de> Deserialize<'de> for Glyph {
     }
 }
 
-impl<'de, 'a> de::DeserializeSeed<'de> for &'a GlyphDeserializer<'_> {
+impl<'de> de::DeserializeSeed<'de> for &GlyphDeserializer<'_> {
     type Value = Glyph;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -586,7 +586,7 @@ impl<'de, 'a> de::DeserializeSeed<'de> for &'a GlyphDeserializer<'_> {
     }
 }
 
-impl<'de, 'a> de::Visitor<'de> for &'a GlyphDeserializer<'_> {
+impl<'de> de::Visitor<'de> for &GlyphDeserializer<'_> {
     type Value = Glyph;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

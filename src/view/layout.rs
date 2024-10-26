@@ -185,7 +185,7 @@ pub trait Tree {
     }
 }
 
-impl<'a, T: Tree> Tree for &'a T {
+impl<T: Tree> Tree for &T {
     type Value = T::Value;
 
     fn id(&self) -> TreeId {
@@ -197,7 +197,7 @@ impl<'a, T: Tree> Tree for &'a T {
     }
 }
 
-impl<'a, T: Tree> Tree for &'a mut T {
+impl<T: Tree> Tree for &mut T {
     type Value = T::Value;
 
     fn id(&self) -> TreeId {
@@ -339,7 +339,7 @@ pub trait TreeMut: Tree {
     }
 }
 
-impl<'a, T: TreeMut> TreeMut for &'a mut T {
+impl<T: TreeMut> TreeMut for &mut T {
     fn store_mut(&mut self) -> &mut TreeStore<Self::Value> {
         (**self).store_mut()
     }
@@ -368,7 +368,7 @@ impl<'a, T> TreeView<'a, T> {
     }
 }
 
-impl<'a, T> Deref for TreeView<'a, T> {
+impl<T> Deref for TreeView<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -376,7 +376,7 @@ impl<'a, T> Deref for TreeView<'a, T> {
     }
 }
 
-impl<'a, T> Tree for TreeView<'a, T> {
+impl<T> Tree for TreeView<'_, T> {
     type Value = T;
 
     fn id(&self) -> TreeId {
@@ -388,7 +388,7 @@ impl<'a, T> Tree for TreeView<'a, T> {
     }
 }
 
-impl<'a, T: Debug> Debug for TreeView<'a, T> {
+impl<T: Debug> Debug for TreeView<'_, T> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn debug_rec<T: Debug>(
             this: TreeView<'_, T>,
@@ -407,7 +407,7 @@ impl<'a, T: Debug> Debug for TreeView<'a, T> {
     }
 }
 
-impl<'a, T, O> PartialEq<O> for TreeView<'a, T>
+impl<T, O> PartialEq<O> for TreeView<'_, T>
 where
     T: PartialEq,
     O: Tree<Value = T>,
@@ -434,7 +434,7 @@ where
     }
 }
 
-impl<'a, T: Eq> Eq for TreeView<'a, T> {}
+impl<T: Eq> Eq for TreeView<'_, T> {}
 
 pub struct TreeMutView<'a, T> {
     store: &'a mut TreeStore<T>,
@@ -458,7 +458,7 @@ impl<'a, T> TreeMutView<'a, T> {
     }
 }
 
-impl<'a, T> Deref for TreeMutView<'a, T> {
+impl<T> Deref for TreeMutView<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -466,13 +466,13 @@ impl<'a, T> Deref for TreeMutView<'a, T> {
     }
 }
 
-impl<'a, T> DerefMut for TreeMutView<'a, T> {
+impl<T> DerefMut for TreeMutView<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.value_mut()
     }
 }
 
-impl<'a, T> Tree for TreeMutView<'a, T> {
+impl<T> Tree for TreeMutView<'_, T> {
     type Value = T;
 
     fn id(&self) -> TreeId {
@@ -484,19 +484,19 @@ impl<'a, T> Tree for TreeMutView<'a, T> {
     }
 }
 
-impl<'a, T> TreeMut for TreeMutView<'a, T> {
+impl<T> TreeMut for TreeMutView<'_, T> {
     fn store_mut(&mut self) -> &mut TreeStore<T> {
         self.store
     }
 }
 
-impl<'a, T: Debug> Debug for TreeMutView<'a, T> {
+impl<T: Debug> Debug for TreeMutView<'_, T> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.view().fmt(fmt)
     }
 }
 
-impl<'a, T, O> PartialEq<O> for TreeMutView<'a, T>
+impl<T, O> PartialEq<O> for TreeMutView<'_, T>
 where
     T: PartialEq,
     O: Tree<Value = T>,

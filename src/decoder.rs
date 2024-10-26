@@ -1683,15 +1683,15 @@ mod tests {
 
         // partial
         let c = b"\xd1\x8f"; // я
-        cursor.get_mut().write(&c[..1])?;
+        cursor.get_mut().write_all(&c[..1])?;
         assert_eq!(decoder.decode(&mut cursor)?, None);
-        cursor.get_mut().write(&c[1..])?;
+        cursor.get_mut().write_all(&c[1..])?;
         assert_eq!(decoder.decode(&mut cursor)?, Some('я'));
 
         // invalid
-        cursor.get_mut().write(&c[..1])?;
+        cursor.get_mut().write_all(&c[..1])?;
         assert_eq!(decoder.decode(&mut cursor)?, None);
-        cursor.get_mut().write(&c[..1])?;
+        cursor.get_mut().write_all(&c[..1])?;
         assert!(decoder.decode(&mut cursor).is_err());
 
         // valid after invalid

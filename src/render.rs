@@ -840,7 +840,7 @@ impl<'a> TerminalWriter<'a> {
     }
 }
 
-impl<'a> CellWrite for TerminalWriter<'a> {
+impl CellWrite for TerminalWriter<'_> {
     fn face(&self) -> Face {
         self.face
     }
@@ -909,7 +909,7 @@ impl<'a> CellWrite for TerminalWriter<'a> {
     }
 }
 
-impl<'a> std::io::Write for TerminalWriter<'a> {
+impl std::io::Write for TerminalWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut cur = std::io::Cursor::new(buf);
         while let Some(ch) = self.decoder.decode(&mut cur)? {
@@ -929,7 +929,7 @@ pub struct TerminalSurfaceDebug<'a> {
     surf: SurfaceView<'a, Cell>,
 }
 
-impl<'a> TerminalSurfaceDebug<'a> {
+impl TerminalSurfaceDebug<'_> {
     /// Write rendered surface to the output
     pub fn save<W: Write + Send>(&self, output: W) -> Result<W, Error> {
         // init capabilities
@@ -1015,7 +1015,7 @@ impl<'a> TerminalSurfaceDebug<'a> {
     }
 }
 
-impl<'a> Debug for TerminalSurfaceDebug<'a> {
+impl Debug for TerminalSurfaceDebug<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut cur = std::io::Cursor::new(self.save(Vec::new()).map_err(|_| std::fmt::Error)?);
         let mut decoder = crate::decoder::Utf8Decoder::new();
@@ -1629,7 +1629,7 @@ mod tests {
 
         let mut view = render.surface().view_owned(.., 1..);
         let mut writer = view.writer(&ctx).with_face(guide_face);
-        write!(writer, "01234567890123456789\n")?;
+        writeln!(writer, "01234567890123456789")?;
         writer.set_face(Face::default());
 
         let mut cols = Vec::new();

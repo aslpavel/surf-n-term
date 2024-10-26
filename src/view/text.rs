@@ -192,7 +192,7 @@ pub struct TextDeserializer<'a> {
     pub colors: &'a HashMap<String, RGBA>,
 }
 
-impl<'de, 'a> DeserializeSeed<'de> for TextDeserializer<'a> {
+impl<'de> DeserializeSeed<'de> for TextDeserializer<'_> {
     type Value = Text;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>

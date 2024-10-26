@@ -29,7 +29,7 @@ tracing = "^0.1"
 unicode-width = "^0.2"
 either = "^1.13"
 
-rasterize = "^0.4"
+rasterize = "^0.4.2"
 # rasterize = { path = "../rasterize", default-features = false, features = ["serde"]}
 
 [dev-dependencies]

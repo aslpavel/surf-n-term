@@ -402,7 +402,7 @@ pub struct FaceDeserializer<'a> {
     pub colors: &'a HashMap<String, RGBA>,
 }
 
-impl<'de, 'a> DeserializeSeed<'de> for FaceDeserializer<'a> {
+impl<'de> DeserializeSeed<'de> for FaceDeserializer<'_> {
     type Value = Face;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
