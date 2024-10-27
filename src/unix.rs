@@ -766,7 +766,7 @@ pub struct PollEvents<'a> {
     matched: &'a HashMap<RawFd, PollEvent>,
 }
 
-impl<'a> PollEvents<'a> {
+impl PollEvents<'_> {
     pub fn get(&self, fd: impl AsFd) -> PollEvent {
         let fd = fd.as_fd().as_raw_fd();
         self.matched
