@@ -7,7 +7,7 @@ pub enum Error {
     Quit,
     IOError(std::io::Error),
     FmtError(std::fmt::Error),
-    NixError(nix::Error),
+    RustixError(rustix::io::Errno),
     NotATTY,
     ParseError(&'static str, String),
     FeatureNotSupported,
@@ -31,7 +31,7 @@ impl std::error::Error for Error {
             Quit => None,
             IOError(ref error) => Some(error),
             FmtError(ref error) => Some(error),
-            NixError(ref error) => Some(error),
+            RustixError(ref error) => Some(error),
             SvgParseError(ref error) => Some(error),
             ColorError(ref error) => Some(error),
             NotATTY => None,
@@ -56,9 +56,9 @@ impl From<std::fmt::Error> for Error {
     }
 }
 
-impl From<nix::Error> for Error {
-    fn from(error: nix::Error) -> Self {
-        Self::NixError(error)
+impl From<rustix::io::Errno> for Error {
+    fn from(error: rustix::io::Errno) -> Self {
+        Self::RustixError(error)
     }
 }
 

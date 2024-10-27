@@ -14,11 +14,14 @@ use crate::{
     DecMode, ImageHandler,
 };
 use crate::{Position, TerminalCaps, RGBA};
+use rustix::event::FdSetElement;
 use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},
     iterator::{backend::SignalDelivery, exfiltrator::SignalOnly},
 };
-use std::os::fd::{BorrowedFd, FromRawFd, OwnedFd};
+use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::{
     collections::{HashSet, VecDeque},
     fs::File,
@@ -31,22 +34,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod nix {
-    pub use libc::{winsize, TIOCGWINSZ};
-    pub use nix::{
-        errno::Errno,
-        fcntl::{fcntl, open, FcntlArg, OFlag},
-        sys::{
-            select::{select, FdSet},
-            stat::Mode,
-            termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
-            time::TimeVal,
-        },
-        unistd::{isatty, read, write},
-        Error,
-    };
-}
-
 pub struct UnixTerminal {
     tty: Tty,
     encoder: TTYEncoder,
@@ -55,7 +42,7 @@ pub struct UnixTerminal {
     events_queue: VecDeque<TerminalEvent>,
     waker_read: UnixStream,
     waker: TerminalWaker,
-    termios_saved: nix::Termios,
+    termios_saved: rustix::termios::Termios,
     signal_delivery: SignalDelivery<UnixStream, SignalOnly>,
     stats: TerminalStats,
     tee: Option<BufWriter<File>>,
@@ -64,53 +51,58 @@ pub struct UnixTerminal {
     // if it is not None we are going to use escape sequence to detect
     // terminal size, otherwise ioctl is used.
     size: Option<TerminalSize>,
+    poll: Poll,
 }
 
 impl UnixTerminal {
     /// Create new terminal by opening `/dev/tty` device.
     pub fn new() -> Result<Self, Error> {
-        let tty_raw_fd = match nix::open("/dev/tty", nix::OFlag::O_RDWR, nix::Mode::empty()) {
-            Ok(tty_raw_fd) => tty_raw_fd,
-            Err(error) => {
-                // LLDB is not creating /dev/tty for child processes
-                tracing::error!(
-                    "[UnixTerminal.new] failed to open terminal at /dev/tty with error {error:?}"
-                );
-                tracing::error!("[UnixTerminal.new] trying to fallback back to /dev/stdin");
-                nix::open("/dev/stdin", nix::OFlag::O_RDWR, nix::Mode::empty())?
-            }
-        };
-        let tty_fd = unsafe {
-            // Safety: opened here with open syscall
-            OwnedFd::from_raw_fd(tty_raw_fd)
-        };
+        let tty_fd = rustix::fs::open(
+            "/dev/tty",
+            rustix::fs::OFlags::RDWR,
+            rustix::fs::Mode::empty(),
+        )
+        .or_else(|error| {
+            // LLDB is not creating /dev/tty for child processes
+            tracing::error!(
+                "[UnixTerminal.new] failed to open terminal at /dev/tty with error {error:?}"
+            );
+            tracing::error!("[UnixTerminal.new] trying to fallback back to /dev/stdin");
+            rustix::fs::open(
+                "/dev/stdin",
+                rustix::fs::OFlags::RDWR,
+                rustix::fs::Mode::empty(),
+            )
+        })?;
         Self::new_from_fd(tty_fd)
     }
 
     /// Open terminal by a given device path
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let tty_raw_fd = nix::open(path.as_ref(), nix::OFlag::O_RDWR, nix::Mode::empty())?;
-        let tty_fd = unsafe {
-            // Safety: opened here with open syscall
-            OwnedFd::from_raw_fd(tty_raw_fd)
-        };
-        Self::new_from_fd(tty_fd)
+        Self::new_from_fd(rustix::fs::open(
+            path.as_ref(),
+            rustix::fs::OFlags::RDWR,
+            rustix::fs::Mode::empty(),
+        )?)
     }
 
     /// Create new terminal from raw file descriptor pointing to a tty.
     pub fn new_from_fd(tty_fd: OwnedFd) -> Result<Self, Error> {
         let tty = Tty::new(tty_fd);
         tty.set_nonblocking(true)?;
-        if !nix::isatty(tty.as_raw_fd())? {
+        if !rustix::termios::isatty(&tty) {
             return Err(Error::NotATTY);
         }
 
+        let mut poll = Poll::new();
+        poll.register(PollEvent::new(&tty).with_readable(true))?;
+
         // switching terminal into a raw mode
         // [Entering Raw Mode](https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html)
-        let termios_saved = nix::tcgetattr(&tty)?;
+        let termios_saved = rustix::termios::tcgetattr(&tty)?;
         let mut termios = termios_saved.clone();
-        nix::cfmakeraw(&mut termios);
-        nix::tcsetattr(&tty, nix::SetArg::TCSAFLUSH, &termios)?;
+        termios.make_raw();
+        rustix::termios::tcsetattr(&tty, rustix::termios::OptionalActions::Flush, &termios)?;
 
         // signal delivery
         let (signal_read, signal_write) = UnixStream::pair()?;
@@ -120,6 +112,7 @@ impl UnixTerminal {
             SignalOnly,
             [SIGWINCH, SIGTERM, SIGINT, SIGQUIT],
         )?;
+        poll.register(PollEvent::new(signal_delivery.get_read()).with_readable(true))?;
 
         // self-pipe trick to implement waker
         let (waker_read, waker_write) = UnixStream::pair()?;
@@ -128,11 +121,12 @@ impl UnixTerminal {
         let waker = TerminalWaker::new(move || {
             const WAKE: &[u8] = b"\x00";
             // use write syscall instead of locking so it would be safe to use in a signal handler
-            match nix::write(waker_write.as_fd(), WAKE) {
-                Ok(_) | Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => Ok(()),
+            match rustix::io::write(&waker_write, WAKE) {
+                Ok(_) | Err(rustix::io::Errno::INTR | rustix::io::Errno::AGAIN) => Ok(()),
                 Err(error) => Err(error.into()),
             }
         });
+        poll.register(PollEvent::new(&waker_read).with_readable(true))?;
 
         let capabilities = TerminalCaps::default();
         let mut term = Self {
@@ -150,6 +144,7 @@ impl UnixTerminal {
             image_handler: Box::new(DummyImageHandler),
             capabilities,
             size: None,
+            poll,
         };
 
         capabilities_detect(&mut term)?;
@@ -181,22 +176,17 @@ impl UnixTerminal {
     /// condition is detected we are falling back to escape sequence if it detected to
     /// work.
     fn size_ioctl(&self) -> Result<TerminalSize, Error> {
-        unsafe {
-            let mut winsize: nix::winsize = std::mem::zeroed();
-            if libc::ioctl(self.tty.as_raw_fd(), nix::TIOCGWINSZ, &mut winsize) < 0 {
-                return Err(nix::Error::last().into());
-            }
-            Ok(TerminalSize {
-                cells: Size {
-                    height: winsize.ws_row as usize,
-                    width: winsize.ws_col as usize,
-                },
-                pixels: Size {
-                    height: winsize.ws_ypixel as usize,
-                    width: winsize.ws_xpixel as usize,
-                },
-            })
-        }
+        let winsize = rustix::termios::tcgetwinsize(&self.tty)?;
+        Ok(TerminalSize {
+            cells: Size {
+                height: winsize.ws_row as usize,
+                width: winsize.ws_col as usize,
+            },
+            pixels: Size {
+                height: winsize.ws_ypixel as usize,
+                width: winsize.ws_xpixel as usize,
+            },
+        })
     }
 
     /// Close all descriptors free all the resources
@@ -243,7 +233,11 @@ impl UnixTerminal {
         self.signal_delivery.handle().close();
 
         // restore terminal settings
-        nix::tcsetattr(&self.tty, nix::SetArg::TCSAFLUSH, &self.termios_saved)?;
+        rustix::termios::tcsetattr(
+            &self.tty,
+            rustix::termios::OptionalActions::Flush,
+            &self.termios_saved,
+        )?;
 
         Ok(())
     }
@@ -402,56 +396,45 @@ impl Terminal for UnixTerminal {
         let timeout_instant = timeout.map(|dur| Instant::now() + dur);
         while !self.write_queue.is_empty() || self.events_queue.is_empty() {
             // process timeout
-            let mut delay = match timeout_instant {
+            let delay = match timeout_instant {
                 Some(timeout_instant) => {
                     let now = Instant::now();
                     if timeout_instant < now {
                         if first_loop {
                             // execute first loop even if timeout is 0
-                            Some(timeval_from_duration(Duration::new(0, 0)))
+                            Some(Duration::new(0, 0))
                         } else {
                             break;
                         }
                     } else {
-                        Some(timeval_from_duration(timeout_instant - now))
+                        Some(timeout_instant - now)
                     }
                 }
                 None => None,
             };
 
-            // We have to use [nix::select] here as under MacOS the only way to poll
-            // `/dev/tty` is to use select. [nix::poll] for example would return POLLNVAL
-            let (waker_readable, signal_readable, tty_readable, tty_writable) = {
-                let signal_read = self.signal_delivery.get_read();
-
-                // update descriptors sets
-                let mut read_set = nix::FdSet::new();
-                read_set.insert(self.tty.as_fd());
-                read_set.insert(signal_read.as_fd());
-                read_set.insert(self.waker_read.as_fd());
-                let mut write_set = nix::FdSet::new();
-                if !self.write_queue.is_empty() {
-                    write_set.insert(self.tty.as_fd());
+            let tty_write = PollEvent::new(&self.tty).with_writable(!self.write_queue.is_empty());
+            self.poll.register(tty_write)?;
+            let (waker, signal, tty) = match self.poll.wait(delay) {
+                Ok(events) => {
+                    tracing::trace!(count = events.len(), "[UnixTerminal.poll] events");
+                    (
+                        events.get(&self.waker_read),
+                        events.get(self.signal_delivery.get_read()),
+                        events.get(&self.tty),
+                    )
                 }
-
-                // wait for descriptors
-                let select = nix::select(None, &mut read_set, &mut write_set, None, &mut delay);
-                match select {
-                    Err(nix::Errno::EINTR | nix::Errno::EAGAIN) => continue,
-                    Err(error) => return Err(error.into()),
-                    Ok(count) => tracing::trace!(%count, "[UnixTerminal.poll] events"),
-                };
-
-                (
-                    read_set.contains(self.waker_read.as_fd()),
-                    read_set.contains(signal_read.as_fd()),
-                    read_set.contains(self.tty.as_fd()),
-                    write_set.contains(self.tty.as_fd()),
-                )
+                Err(error) => {
+                    if matches!(error.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock) {
+                        continue;
+                    } else {
+                        return Err(error.into());
+                    }
+                }
             };
 
             // process pending output
-            if tty_writable {
+            if tty.is_writable() {
                 let tee = self.tee.as_mut();
                 let send = self.write_queue.consume_with(|slice| {
                     let size = guard_io(self.tty.write(slice), 0)?;
@@ -462,7 +445,7 @@ impl Terminal for UnixTerminal {
             }
 
             // process signals
-            if signal_readable {
+            if signal.is_readable() {
                 for signal in self.signal_delivery.pending() {
                     match signal {
                         SIGWINCH => {
@@ -482,7 +465,7 @@ impl Terminal for UnixTerminal {
             }
 
             // process waker
-            if waker_readable {
+            if waker.is_readable() {
                 let mut buf = [0u8; 1024];
                 if guard_io(self.waker_read.read(&mut buf), 0)? != 0 {
                     self.events_queue.push_back(TerminalEvent::Wake);
@@ -490,7 +473,7 @@ impl Terminal for UnixTerminal {
             }
 
             // process pending input
-            if tty_readable {
+            if tty.is_readable() {
                 let mut buf = [0u8; 1024];
                 let recv = guard_io(self.tty.read(&mut buf), 0)?;
                 if recv == 0 {
@@ -594,12 +577,8 @@ fn guard_io<T>(result: Result<T, std::io::Error>, otherwise: T) -> Result<T, std
     }
 }
 
-fn timeval_from_duration(dur: Duration) -> nix::TimeVal {
-    use ::nix::sys::time::TimeValLike;
-    nix::TimeVal::milliseconds(dur.as_millis() as i64)
-}
-
 /// TTY Handle
+#[derive(Debug)]
 struct Tty {
     fd: OwnedFd,
 }
@@ -609,11 +588,10 @@ impl Tty {
         Self { fd }
     }
 
-    pub fn set_nonblocking(&self, nonblocking: bool) -> Result<(), nix::Error> {
-        let fd = self.as_raw_fd();
-        let mut flags = nix::OFlag::from_bits_truncate(nix::fcntl(fd, nix::FcntlArg::F_GETFL)?);
-        flags.set(nix::OFlag::O_NONBLOCK, nonblocking);
-        nix::fcntl(fd, nix::FcntlArg::F_SETFL(flags))?;
+    pub fn set_nonblocking(&self, nonblocking: bool) -> Result<(), Error> {
+        let mut flags = rustix::fs::fcntl_getfl(self)?;
+        flags.set(rustix::fs::OFlags::NONBLOCK, nonblocking);
+        rustix::fs::fcntl_setfl(self, flags)?;
         Ok(())
     }
 }
@@ -632,7 +610,7 @@ impl AsFd for Tty {
 
 impl Write for Tty {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        nix::write(self, buf).map_err(|err| std::io::Error::from_raw_os_error(err as i32))
+        rustix::io::write(self, buf).map_err(std::io::Error::from)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -642,7 +620,162 @@ impl Write for Tty {
 
 impl Read for Tty {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        nix::read(self.as_raw_fd(), buf)
-            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
+        rustix::io::read(self, buf).map_err(std::io::Error::from)
+    }
+}
+
+// We have to use `select` in the implementation as under MacOS the only way to
+// poll `/dev/tty` is to use select. `poll` for example would return `POLLNVAL`
+#[derive(Default)]
+struct Poll {
+    registred: HashMap<RawFd, PollEvent>,
+    fd_count: usize,
+    fd_max: RawFd,
+    read_set: Vec<rustix::event::FdSetElement>,
+    write_set: Vec<rustix::event::FdSetElement>,
+    matched: HashMap<RawFd, PollEvent>,
+}
+
+impl Poll {
+    fn new() -> Self {
+        Default::default()
+    }
+
+    fn register(&mut self, event: PollEvent) -> Result<(), std::io::Error> {
+        let event_registred = self.registred.entry(event.fd).or_insert_with(|| {
+            self.fd_count += 1;
+            self.fd_max = self.fd_max.max(event.fd);
+            let set_len = rustix::event::fd_set_num_elements(self.fd_count, self.fd_max + 1);
+            if self.read_set.len() != set_len {
+                self.read_set.resize_with(set_len, FdSetElement::default);
+                self.write_set.resize_with(set_len, FdSetElement::default);
+            }
+            PollEvent::from_fd(event.fd)
+        });
+        if event.readable.is_some() {
+            event_registred.readable = event.readable;
+        }
+        if event.writable.is_some() {
+            event_registred.writable = event.writable;
+        }
+        Ok(())
+    }
+
+    fn wait(&mut self, timeout: Option<Duration>) -> Result<PollEvents<'_>, std::io::Error> {
+        // setup sets
+        self.read_set.fill(Default::default());
+        self.write_set.fill(Default::default());
+        self.registred.retain(|_, event| {
+            if event.is_readable() {
+                rustix::event::fd_set_insert(&mut self.read_set, event.fd);
+            }
+            if event.is_writable() {
+                rustix::event::fd_set_insert(&mut self.write_set, event.fd);
+            }
+            !event.is_unset()
+        });
+
+        // select
+        let timeout = timeout.map(|dur| rustix::fs::Timespec {
+            tv_sec: dur.as_secs() as rustix::fs::Secs,
+            tv_nsec: dur.subsec_nanos() as rustix::fs::Nsecs,
+        });
+        unsafe {
+            rustix::event::select(
+                self.fd_max + 1,
+                Some(&mut self.read_set),
+                Some(&mut self.write_set),
+                None,
+                timeout.as_ref(),
+            )?;
+        }
+
+        // collect result
+        self.matched.clear();
+        for fd in rustix::event::FdSetIter::new(&self.read_set) {
+            let event = self
+                .matched
+                .entry(fd)
+                .or_insert_with(|| PollEvent::from_fd(fd));
+            event.readable = Some(true);
+        }
+        for fd in rustix::event::FdSetIter::new(&self.write_set) {
+            let event = self
+                .matched
+                .entry(fd)
+                .or_insert_with(|| PollEvent::from_fd(fd));
+            event.writable = Some(true);
+        }
+        Ok(PollEvents {
+            matched: &self.matched,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PollEvent {
+    fd: RawFd,
+    readable: Option<bool>,
+    writable: Option<bool>,
+}
+
+impl PollEvent {
+    pub fn new(fd: impl AsFd) -> Self {
+        Self {
+            fd: fd.as_fd().as_raw_fd(),
+            readable: None,
+            writable: None,
+        }
+    }
+
+    fn from_fd(fd: RawFd) -> Self {
+        Self {
+            fd,
+            readable: None,
+            writable: None,
+        }
+    }
+
+    pub fn with_readable(self, read: bool) -> Self {
+        Self {
+            readable: Some(read),
+            ..self
+        }
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.readable.unwrap_or(false)
+    }
+
+    pub fn with_writable(self, write: bool) -> Self {
+        Self {
+            writable: Some(write),
+            ..self
+        }
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.writable.unwrap_or(false)
+    }
+
+    pub fn is_unset(&self) -> bool {
+        !self.is_writable() && !self.is_readable()
+    }
+}
+pub struct PollEvents<'a> {
+    matched: &'a HashMap<RawFd, PollEvent>,
+}
+
+impl<'a> PollEvents<'a> {
+    pub fn get(&self, fd: impl AsFd) -> PollEvent {
+        let fd = fd.as_fd().as_raw_fd();
+        self.matched
+            .get(&fd)
+            .cloned()
+            .unwrap_or_else(|| PollEvent::from_fd(fd))
+    }
+
+    pub fn len(&self) -> usize {
+        self.matched.len()
     }
 }
