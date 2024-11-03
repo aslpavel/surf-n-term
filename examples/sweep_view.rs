@@ -2,7 +2,8 @@ use std::time::Duration;
 use surf_n_term::{
     render::TerminalRenderer,
     view::{
-        Align, Axis, Container, Flex, Frame, ScrollBar, ScrollBarPosition, Text, View, ViewContext,
+        Align, Axis, Container, Flex, FlexChild, FlexRef, Frame, ScrollBar, ScrollBarPosition,
+        Text, View, ViewContext,
     },
     CellWrite, Color, Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal,
     TerminalCommand, TerminalSurfaceExt, RGBA,
@@ -49,27 +50,28 @@ fn sweep_view<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<impl View 
     let prompt_face = Face::new(Some(bg), Some(accent), FaceAttrs::EMPTY);
 
     // prompt | input | status
-    let input_view = Flex::row()
-        .add_child(
+    let input_view = FlexRef::new((
+        FlexChild::new(
             Text::new()
                 .with_face(prompt_face)
                 .with_glyph(icon)
                 .put_fmt("Input ", None)
                 .put_fmt(" ", Some(prompt_face.invert().with_bg(Some(bg))))
                 .take(),
-        )
-        .add_flex_child(
-            1.0,
+        ),
+        FlexChild::new(
             Container::new(Text::new().put_fmt("query", Some(input_face)).take())
                 .with_horizontal(Align::Expand)
                 .with_color(bg),
         )
-        .add_child(
+        .flex(1.0),
+        FlexChild::new(
             Text::new()
                 .put_fmt("", Some(prompt_face.invert()))
                 .put_fmt(" 30/127 1us [fuzzy] ", Some(prompt_face))
                 .take(),
-        );
+        ),
+    ));
 
     let items_list = items
         .into_iter()

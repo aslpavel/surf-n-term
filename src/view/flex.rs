@@ -6,14 +6,67 @@ use crate::{Error, Face, Position, Size, SurfaceMut, TerminalSurface, TerminalSu
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{cmp::max, fmt};
 
-struct Child<'a> {
-    view: Box<dyn View + 'a>,
+pub struct FlexChild<V> {
+    view: V,
     flex: Option<f64>,
     face: Option<Face>,
     align: Align,
 }
 
-impl fmt::Debug for Child<'_> {
+impl<V> FlexChild<V> {
+    pub fn new(view: V) -> Self {
+        Self {
+            view,
+            flex: None,
+            face: None,
+            align: Align::Start,
+        }
+    }
+
+    pub fn align(self, align: Align) -> Self {
+        Self { align, ..self }
+    }
+
+    pub fn flex(self, flex: f64) -> Self {
+        Self {
+            flex: Some(flex),
+            ..self
+        }
+    }
+
+    pub fn face(self, face: Face) -> Self {
+        Self {
+            face: Some(face),
+            ..self
+        }
+    }
+
+    pub fn as_dyn(&self) -> FlexChild<&'_ dyn View>
+    where
+        V: View,
+    {
+        FlexChild {
+            view: &self.view,
+            flex: self.flex,
+            face: self.face,
+            align: self.align,
+        }
+    }
+
+    pub fn boxed<'a>(self) -> FlexChild<Box<dyn View + 'a>>
+    where
+        V: View + 'a,
+    {
+        FlexChild {
+            view: Box::new(self.view),
+            flex: self.flex,
+            face: self.face,
+            align: self.align,
+        }
+    }
+}
+
+impl<V> fmt::Debug for FlexChild<V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Child")
             .field("flex", &self.flex)
@@ -39,11 +92,76 @@ pub enum Justify {
     SpaceEvenly,
 }
 
+pub struct FlexRef<A> {
+    direction: Axis,
+    justify: Justify,
+    children: A,
+}
+
+impl<A> FlexRef<A> {
+    pub fn new(children: A) -> Self {
+        Self {
+            direction: Axis::Horizontal,
+            justify: Justify::Start,
+            children,
+        }
+    }
+
+    /// Create flex with horizontal major axis
+    pub fn row(children: A) -> Self {
+        Self::new(children).direction(Axis::Horizontal)
+    }
+
+    /// Create flex with vertical major axis
+    pub fn column(children: A) -> Self {
+        Self::new(children).direction(Axis::Vertical)
+    }
+
+    pub fn direction(self, direction: Axis) -> Self {
+        Self { direction, ..self }
+    }
+
+    /// How to justify/align children along major axis
+    pub fn justify(self, justify: Justify) -> Self {
+        Self { justify, ..self }
+    }
+}
+
+impl<A> View for FlexRef<A>
+where
+    A: FlexArray + Send + Sync,
+{
+    fn render(
+        &self,
+        ctx: &ViewContext,
+        surf: TerminalSurface<'_>,
+        layout: ViewLayout<'_>,
+    ) -> Result<(), Error> {
+        flex_render(self.direction, &self.children, ctx, surf, layout)
+    }
+
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
+        flex_layout(
+            self.direction,
+            self.justify,
+            &self.children,
+            ctx,
+            ct,
+            layout,
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct Flex<'a> {
     direction: Axis,
     justify: Justify,
-    children: Vec<Child<'a>>,
+    children: Vec<FlexChild<Box<dyn View + 'a>>>,
 }
 
 impl<'a> Flex<'a> {
@@ -89,7 +207,7 @@ impl<'a> Flex<'a> {
         face: Option<Face>,
         align: Align,
     ) {
-        self.children.push(Child {
+        self.children.push(FlexChild {
             view: child.into_view().boxed(),
             flex: flex.and_then(|flex| (flex > 0.0).then_some(flex)),
             face,
@@ -140,7 +258,7 @@ impl<'a> Flex<'a> {
                 let mut children = Vec::with_capacity(values.len());
                 for value in values {
                     if value.get("type").is_some() {
-                        children.push(Child {
+                        children.push(FlexChild {
                             view: seed.deserialize(value)?.boxed(),
                             flex: None,
                             face: None,
@@ -163,7 +281,7 @@ impl<'a> Flex<'a> {
                                 "child must include view attribute".to_owned(),
                             )
                         })?;
-                        children.push(Child {
+                        children.push(FlexChild {
                             view: seed.deserialize(view)?.boxed(),
                             flex,
                             face,
@@ -198,152 +316,279 @@ where
         surf: TerminalSurface<'_>,
         layout: ViewLayout<'_>,
     ) -> Result<(), Error> {
-        let mut surf = layout.apply_to(surf);
-        for (child, child_layout) in self.children.iter().zip(layout.children()) {
-            if child_layout.size().is_empty() {
-                continue;
-            }
-
-            // fill allocated space
-            if let Some(face) = child.face {
-                let mut surf = match self.direction {
-                    Axis::Horizontal => {
-                        let start = child_layout.position().col;
-                        let end = start + child_layout.size().width;
-                        surf.view_mut(.., start..end)
-                    }
-                    Axis::Vertical => {
-                        let start = child_layout.position().row;
-                        let end = start + child_layout.size().height;
-                        surf.view_mut(start..end, ..)
-                    }
-                };
-                surf.erase(face);
-            }
-
-            child.view.render(ctx, surf.as_mut(), child_layout)?;
-        }
-        Ok(())
+        flex_render(self.direction, self.children.as_slice(), ctx, surf, layout)
     }
 
     fn layout(
         &self,
         ctx: &ViewContext,
         ct: BoxConstraint,
-        mut layout: ViewMutLayout<'_>,
+        layout: ViewMutLayout<'_>,
     ) -> Result<(), Error> {
-        let mut flex_total = 0.0;
-        let mut major_non_flex = 0;
-        let mut minor = self.direction.minor(ct.min());
-        let ct_loosen = ct.loosen();
+        flex_layout(
+            self.direction,
+            self.justify,
+            self.children.as_slice(),
+            ctx,
+            ct,
+            layout,
+        )
+    }
+}
 
-        // layout non-flex
-        for child in self.children.iter() {
-            let mut child_layout = layout.push_default();
-            match child.flex {
-                None => {
-                    child.view.layout(ctx, ct_loosen, child_layout.view_mut())?;
-                    major_non_flex += self.direction.major(child_layout.size());
-                    minor = max(minor, self.direction.minor(child_layout.size()));
+pub fn flex_layout(
+    direction: Axis,
+    justify: Justify,
+    children: impl FlexArray,
+    ctx: &ViewContext,
+    ct: BoxConstraint,
+    mut layout: ViewMutLayout<'_>,
+) -> Result<(), Error> {
+    let mut flex_total = 0.0;
+    let mut major_non_flex = 0;
+    let mut minor = direction.minor(ct.min());
+    let ct_loosen = ct.loosen();
+
+    // layout non-flex
+    for child in children.iter() {
+        let mut child_layout = layout.push_default();
+        match child.flex {
+            None => {
+                child.view.layout(ctx, ct_loosen, child_layout.view_mut())?;
+                major_non_flex += direction.major(child_layout.size());
+                minor = max(minor, direction.minor(child_layout.size()));
+            }
+            Some(flex) => flex_total += flex,
+        }
+    }
+
+    // layout flex
+    let mut major_remain = direction.major(ct.max()).saturating_sub(major_non_flex);
+    let mut major_flex = 0;
+    if major_remain > 0 && flex_total > 0.0 {
+        let mut child_layout_opt = layout.child_mut();
+        for child in children.iter() {
+            let mut child_layout = child_layout_opt.expect("not all flex children are allocated");
+            if let Some(flex) = child.flex {
+                // compute available flex
+                let child_major_max = ((major_remain as f64) * flex / flex_total).round() as usize;
+                flex_total -= flex;
+                if child_major_max != 0 {
+                    // layout child
+                    let child_ct = direction.constraint(ct_loosen, 0, child_major_max);
+                    child.view.layout(ctx, child_ct, child_layout.view_mut())?;
+                    let child_major = direction.major(child_layout.size());
+                    let child_minor = direction.minor(child_layout.size());
+
+                    // update counters
+                    major_remain -= child_major;
+                    major_flex += child_major;
+                    minor = max(minor, child_minor);
                 }
-                Some(flex) => flex_total += flex,
+            }
+            child_layout_opt = child_layout.sibling();
+        }
+    }
+
+    // unused space to be filled
+    let unused = direction
+        .major(ct.max())
+        .saturating_sub(major_non_flex + major_flex);
+    let (space_side, space_between) = if unused > 0 {
+        match justify {
+            Justify::Start => (0, 0),
+            Justify::Center => (unused / 2, 0),
+            Justify::End => (unused, 0),
+            Justify::SpaceBetween => {
+                let space_between = if children.len() <= 1 {
+                    unused
+                } else {
+                    unused / (children.len() - 1)
+                };
+                (0, space_between)
+            }
+            Justify::SpaceEvenly => {
+                let space = unused / (children.len() + 1);
+                (space, space)
+            }
+            Justify::SpaceAround => {
+                let space = unused / children.len();
+                (space / 2, space)
             }
         }
+    } else {
+        (0, 0)
+    };
 
-        // layout flex
-        let mut major_remain = self
-            .direction
-            .major(ct.max())
-            .saturating_sub(major_non_flex);
-        let mut major_flex = 0;
-        if major_remain > 0 && flex_total > 0.0 {
-            let mut child_layout_opt = layout.child_mut();
-            for child in self.children.iter() {
-                let mut child_layout =
-                    child_layout_opt.expect("not all flex children are allocated");
-                if let Some(flex) = child.flex {
-                    // compute available flex
-                    let child_major_max =
-                        ((major_remain as f64) * flex / flex_total).round() as usize;
-                    flex_total -= flex;
-                    if child_major_max != 0 {
-                        // layout child
-                        let child_ct = self.direction.constraint(ct_loosen, 0, child_major_max);
-                        child.view.layout(ctx, child_ct, child_layout.view_mut())?;
-                        let child_major = self.direction.major(child_layout.size());
-                        let child_minor = self.direction.minor(child_layout.size());
+    // calculate positions
+    let mut major_offset = space_side;
+    if !children.is_empty() {
+        let mut child_layout_opt = layout.child_mut();
+        for child in children.iter() {
+            let mut child_layout = child_layout_opt.expect("not all flex children are allocated");
+            let child_size = child_layout.size();
+            child_layout.set_position(Position::from_axes(
+                direction,
+                major_offset,
+                child.align.align(direction.minor(child_size), minor),
+            ));
 
-                        // update counters
-                        major_remain -= child_major;
-                        major_flex += child_major;
-                        minor = max(minor, child_minor);
-                    }
-                }
-                child_layout_opt = child_layout.sibling();
-            }
+            major_offset += child_size.major(direction);
+            major_offset += space_between;
+
+            child_layout_opt = child_layout.sibling();
+        }
+    }
+
+    // set layout
+    *layout = Layout::new().with_size(ct.clamp(Size::from_axes(direction, major_offset, minor)));
+    Ok(())
+}
+
+pub fn flex_render(
+    direction: Axis,
+    children: impl FlexArray,
+    ctx: &ViewContext,
+    surf: TerminalSurface<'_>,
+    layout: ViewLayout<'_>,
+) -> Result<(), Error> {
+    let mut surf = layout.apply_to(surf);
+    for (child, child_layout) in children.iter().zip(layout.children()) {
+        if child_layout.size().is_empty() {
+            continue;
         }
 
-        // unused space to be filled
-        let unused = self
-            .direction
-            .major(ct.max())
-            .saturating_sub(major_non_flex + major_flex);
-        let (space_side, space_between) = if unused > 0 {
-            match self.justify {
-                Justify::Start => (0, 0),
-                Justify::Center => (unused / 2, 0),
-                Justify::End => (unused, 0),
-                Justify::SpaceBetween => {
-                    let space_between = if self.children.len() <= 1 {
-                        unused
-                    } else {
-                        unused / (self.children.len() - 1)
-                    };
-                    (0, space_between)
+        // fill allocated space
+        if let Some(face) = child.face {
+            let mut surf = match direction {
+                Axis::Horizontal => {
+                    let start = child_layout.position().col;
+                    let end = start + child_layout.size().width;
+                    surf.view_mut(.., start..end)
                 }
-                Justify::SpaceEvenly => {
-                    let space = unused / (self.children.len() + 1);
-                    (space, space)
+                Axis::Vertical => {
+                    let start = child_layout.position().row;
+                    let end = start + child_layout.size().height;
+                    surf.view_mut(start..end, ..)
                 }
-                Justify::SpaceAround => {
-                    let space = unused / self.children.len();
-                    (space / 2, space)
-                }
-            }
-        } else {
-            (0, 0)
-        };
-
-        // calculate positions
-        let mut major_offset = space_side;
-        if !self.children.is_empty() {
-            let mut child_layout_opt = layout.child_mut();
-            for child in self.children.iter() {
-                let mut child_layout =
-                    child_layout_opt.expect("not all flex children are allocated");
-                let child_size = child_layout.size();
-                child_layout.set_position(Position::from_axes(
-                    self.direction,
-                    major_offset,
-                    child.align.align(self.direction.minor(child_size), minor),
-                ));
-
-                major_offset += child_size.major(self.direction);
-                major_offset += space_between;
-
-                child_layout_opt = child_layout.sibling();
-            }
+            };
+            surf.erase(face);
         }
 
-        // set layout
-        *layout =
-            Layout::new().with_size(ct.clamp(Size::from_axes(self.direction, major_offset, minor)));
-        Ok(())
+        child.view.render(ctx, surf.as_mut(), child_layout)?;
+    }
+    Ok(())
+}
+
+pub trait FlexArray {
+    fn len(&self) -> usize;
+
+    fn get(&self, index: usize) -> Option<FlexChild<&dyn View>>;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn iter(&self) -> FlexArrayIter<'_, Self> {
+        FlexArrayIter {
+            index: 0,
+            array: self,
+        }
+    }
+}
+
+impl<'a, T> FlexArray for &'a T
+where
+    T: FlexArray + ?Sized,
+{
+    fn len(&self) -> usize {
+        (**self).len()
+    }
+
+    fn get(&self, index: usize) -> Option<FlexChild<&dyn View>> {
+        (**self).get(index)
+    }
+}
+
+impl<'a, V: View> FlexArray for &'a [FlexChild<V>] {
+    fn len(&self) -> usize {
+        <[_]>::len(self)
+    }
+    fn get(&self, index: usize) -> Option<FlexChild<&dyn View>> {
+        <[_]>::get(self, index).map(|child| child.as_dyn())
+    }
+}
+
+impl<V: View, const N: usize> FlexArray for [FlexChild<V>; N] {
+    fn len(&self) -> usize {
+        N
+    }
+    fn get(&self, index: usize) -> Option<FlexChild<&dyn View>> {
+        <[_]>::get(self, index).map(|child| child.as_dyn())
+    }
+}
+
+impl<V: View> FlexArray for Vec<FlexChild<V>> {
+    fn len(&self) -> usize {
+        <[_]>::len(self.as_slice())
+    }
+
+    fn get(&self, index: usize) -> Option<FlexChild<&dyn View>> {
+        <[_]>::get(self.as_slice(), index).map(|child| child.as_dyn())
+    }
+}
+
+macro_rules! impl_flex_array_tuple {
+    ($($idx:tt $name:ident),+) => (
+        impl<$($name: View),*> FlexArray for ($(FlexChild<$name>,)*) {
+            fn len(&self) -> usize {
+                [$($idx,)*].len()
+            }
+            fn get(&self, index: usize) -> Option<FlexChild<&dyn View>> {
+                match index {
+                    $($idx => Some(self.$idx.as_dyn()),)*
+                    _ => None,
+                }
+            }
+        }
+    );
+}
+
+impl_flex_array_tuple!(0 A);
+impl_flex_array_tuple!(0 A, 1 B);
+impl_flex_array_tuple!(0 A, 1 B, 2 C);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 7 H);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 7 H, 8 I);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 7 H, 8 I, 9 J);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 7 H, 8 I, 9 J, 10 K);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 7 H, 8 I, 9 J, 10 K, 11 L);
+impl_flex_array_tuple!(0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 7 H, 8 I, 9 J, 10 K, 11 L, 12 M);
+
+pub struct FlexArrayIter<'a, A: ?Sized> {
+    index: usize,
+    array: &'a A,
+}
+
+impl<'a, A: FlexArray> Iterator for FlexArrayIter<'a, A> {
+    type Item = FlexChild<&'a dyn View>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.array.len() <= self.index {
+            return None;
+        }
+        self.index += 1;
+        self.array.get(self.index - 1)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use rasterize::RGBA;
+
     use super::*;
     use crate::view::{Text, ViewLayoutStore};
 
@@ -428,6 +673,16 @@ mod tests {
         let result_layout = flex.layout_new(&ctx, BoxConstraint::loose(size), &mut result_store)?;
         assert_eq!(reference_layout, result_layout);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_flex_ref() -> Result<(), Error> {
+        let _: Box<dyn View> = FlexRef::row((
+            FlexChild::new("#ff0000".parse::<RGBA>()?),
+            FlexChild::new("#00ff00".parse::<RGBA>()?),
+        ))
+        .boxed();
         Ok(())
     }
 }

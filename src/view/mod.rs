@@ -9,8 +9,8 @@ pub use layout::{
 mod container;
 pub use container::{Align, Container, Margins};
 
-mod flex;
-pub use flex::{Flex, Justify};
+pub mod flex;
+pub use flex::{Flex, FlexChild, FlexRef, Justify};
 
 mod scrollbar;
 use rasterize::{RGBADeserializer, SVG_COLORS};
