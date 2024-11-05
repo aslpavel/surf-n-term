@@ -531,6 +531,35 @@ where
     }
 }
 
+impl<V: View> View for Option<V> {
+    fn render(
+        &self,
+        ctx: &ViewContext,
+        surf: TerminalSurface<'_>,
+        layout: ViewLayout<'_>,
+    ) -> Result<(), Error> {
+        if let Some(view) = self.as_ref() {
+            view.render(ctx, surf, layout)?
+        }
+        Ok(())
+    }
+
+    fn layout(
+        &self,
+        ctx: &ViewContext,
+        ct: BoxConstraint,
+        mut layout: ViewMutLayout<'_>,
+    ) -> Result<(), Error> {
+        match self.as_ref() {
+            Some(view) => view.layout(ctx, ct, layout)?,
+            None => {
+                *layout = Layout::new();
+            }
+        }
+        Ok(())
+    }
+}
+
 /// View that does not effect rendering only adds tag as `Layout::data`
 /// for generated layout.
 #[derive(Clone)]

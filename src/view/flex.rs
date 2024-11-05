@@ -3,6 +3,7 @@ use super::{
     ViewDeserializer, ViewLayout, ViewMutLayout,
 };
 use crate::{Error, Face, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt};
+use either::Either;
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{cmp::max, fmt};
 
@@ -63,6 +64,15 @@ impl<V> FlexChild<V> {
             face: self.face,
             align: self.align,
         }
+    }
+}
+
+impl<V> From<V> for FlexChild<V::View>
+where
+    V: IntoView,
+{
+    fn from(view: V) -> Self {
+        FlexChild::new(view.into_view())
     }
 }
 
@@ -510,6 +520,26 @@ where
     }
 }
 
+impl<L, R> FlexArray for Either<L, R>
+where
+    L: FlexArray,
+    R: FlexArray,
+{
+    fn len(&self) -> usize {
+        match &self {
+            Either::Left(left) => left.len(),
+            Either::Right(right) => right.len(),
+        }
+    }
+
+    fn get(&self, index: usize) -> Option<FlexChild<&dyn View>> {
+        match &self {
+            Either::Left(left) => left.get(index),
+            Either::Right(right) => right.get(index),
+        }
+    }
+}
+
 impl<'a, V: View> FlexArray for &'a [FlexChild<V>] {
     fn len(&self) -> usize {
         <[_]>::len(self)
@@ -679,7 +709,7 @@ mod tests {
     #[test]
     fn test_flex_ref() -> Result<(), Error> {
         let _: Box<dyn View> = FlexRef::row((
-            FlexChild::new("#ff0000".parse::<RGBA>()?),
+            "#ff0000".parse::<RGBA>()?.into(),
             FlexChild::new("#00ff00".parse::<RGBA>()?),
         ))
         .boxed();
