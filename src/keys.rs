@@ -406,6 +406,7 @@ pub enum KeyMapResult<V> {
 }
 
 /// Collection of key bindings
+#[derive(Clone)]
 pub struct KeyMap<V> {
     mapping: BTreeMap<Key, Result<V, KeyMap<V>>>,
 }
