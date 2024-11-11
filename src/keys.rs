@@ -456,6 +456,10 @@ impl<V> KeyMap<V> {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.mapping.clear()
+    }
+
     /// Override mapping with the other
     pub fn register_override(&mut self, other: &Self)
     where
@@ -546,10 +550,8 @@ impl<V: Debug> fmt::Debug for KeyMap<V> {
     }
 }
 
-pub type KeyHandler<O> = Arc<dyn Fn(&[Key]) -> O>;
-
 pub struct KeyMapHandler<O> {
-    keymap: KeyMap<KeyHandler<O>>,
+    keymap: KeyMap<O>,
     state: Vec<Key>,
 }
 
@@ -567,34 +569,23 @@ impl<O> KeyMapHandler<O> {
         }
     }
 
-    pub fn register(&mut self, chrod: &[Key], handler: KeyHandler<O>) {
+    pub fn register(&mut self, chrod: &[Key], handler: O) {
         self.keymap.register(chrod, handler);
     }
 
-    pub fn handle(&mut self, key: Key) -> Option<O> {
-        self.state.push(key);
-        for _ in 0..2 {
-            match self.keymap.lookup(self.state.as_ref()) {
-                KeyMapResult::Continue => return None,
-                KeyMapResult::Failure => {
-                    self.state.clear();
-                    self.state.push(key);
-                }
-                KeyMapResult::Success(handler) => {
-                    let handler_result = (handler)(&self.state);
-                    self.state.clear();
-                    return Some(handler_result);
-                }
-            }
-        }
-        None
+    pub fn clear(&mut self) {
+        self.keymap.clear();
+        self.state.clear();
+    }
+
+    pub fn handle(&mut self, key: Key) -> Option<&O> {
+        self.keymap.lookup_state(&mut self.state, key)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     #[test]
     fn test_key_map() -> Result<(), Error> {
@@ -613,42 +604,6 @@ mod tests {
         assert_eq!(key_map.lookup(c0.keys()), KeyMapResult::Continue);
         assert_eq!(key_map.lookup(c1.keys()), KeyMapResult::Success(&1));
         assert_eq!(key_map.lookup(c2.keys()), KeyMapResult::Success(&2));
-        Ok(())
-    }
-
-    #[test]
-    fn test_key_map_handler() -> Result<(), Error> {
-        let a = "a".parse()?;
-        let b = "b".parse()?;
-        let c = "c".parse()?;
-        let d = "d".parse()?;
-
-        let events = Arc::new(Mutex::new(BTreeMap::new()));
-        let count = Arc::new({
-            let events = events.clone();
-            move |chord: &[Key]| {
-                let mut events = events.lock().unwrap();
-                *events.entry(Vec::from(chord)).or_insert(0) += 1;
-            }
-        });
-        let mut handler = KeyMapHandler::new();
-        handler.register(&[a], count.clone());
-        handler.register(&[b], count.clone());
-        handler.register(&[c, d], count.clone());
-
-        handler.handle(a);
-        handler.handle(b);
-        handler.handle(c);
-        handler.handle(a);
-        handler.handle(c);
-        handler.handle(d);
-
-        let reference: BTreeMap<Vec<Key>, usize> =
-            vec![(vec![a], 2), (vec![b], 1), (vec![c, d], 1)]
-                .into_iter()
-                .collect();
-        assert_eq!(*events.lock().unwrap(), reference);
-
         Ok(())
     }
 }

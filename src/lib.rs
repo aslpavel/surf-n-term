@@ -55,7 +55,7 @@ pub use error::Error;
 pub use face::{Face, FaceAttrs, FaceDeserializer, FaceModify, UnderlineStyle};
 pub use glyph::{BBox, FillRule, Glyph, Path};
 pub use image::{ColorPalette, Image, ImageHandler, KittyImageHandler, SixelImageHandler};
-pub use keys::{Key, KeyChord, KeyMap, KeyMod, KeyName};
+pub use keys::{Key, KeyChord, KeyMap, KeyMapHandler, KeyMod, KeyName};
 pub use rasterize;
 pub use rasterize::{Color, LinColor, RGBA};
 pub use render::{Cell, CellWrite, TerminalSurface, TerminalSurfaceExt, TerminalWriter};
