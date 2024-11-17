@@ -157,6 +157,16 @@ impl<'a> From<&'a str> for Text {
     }
 }
 
+impl FromIterator<Cell> for Text {
+    fn from_iter<T: IntoIterator<Item = Cell>>(iter: T) -> Self {
+        let mut text = Text::new();
+        iter.into_iter().for_each(|cell| {
+            text.put_cell(cell);
+        });
+        text
+    }
+}
+
 impl View for Text {
     fn render(
         &self,
