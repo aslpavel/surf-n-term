@@ -545,7 +545,7 @@ pub trait CellWrite {
 
     /// Put [Text]
     fn put_text(&mut self, text: &Text) -> &mut Self {
-        text.cells.iter().cloned().for_each(|cell| {
+        text.cells().iter().cloned().for_each(|cell| {
             self.put_cell(cell);
         });
         self

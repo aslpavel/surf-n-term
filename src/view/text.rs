@@ -65,7 +65,7 @@ impl View for String {
 
 #[derive(Clone, Default, Debug)]
 pub struct Text {
-    pub(crate) cells: Vec<Cell>,
+    cells: Vec<Cell>,
     wraps: bool,
     face: Face, // face used write next symbol (not actual face of the text)
 }
@@ -109,6 +109,10 @@ impl Text {
     /// Take current value replacing it with the default
     pub fn take(&mut self) -> Self {
         std::mem::replace(self, Text::new())
+    }
+
+    pub fn cells(&self) -> &[Cell] {
+        &self.cells
     }
 }
 

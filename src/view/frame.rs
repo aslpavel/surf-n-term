@@ -9,7 +9,7 @@ use rasterize::{
 use std::{
     collections::HashMap,
     hash::Hasher,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 /// Create a frame with rounded corners and a border around a view
@@ -23,9 +23,8 @@ pub struct Frame<V> {
 }
 
 type Fragments = Arc<[Cell; 9]>;
-lazy_static::lazy_static! {
-    static ref FRAGMENTS: Mutex<HashMap<u64, Fragments>> = Default::default();
-}
+static FRAGMENTS: LazyLock<Mutex<HashMap<u64, Fragments>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl<V> Frame<V> {
     /// Create new frame

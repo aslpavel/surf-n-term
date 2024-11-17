@@ -6,14 +6,13 @@ use crate::{
     Face, FaceModify, Key, KeyMod, KeyName, Position, TerminalCommand, UnderlineStyle, RGBA,
 };
 use either::Either;
-use lazy_static::lazy_static;
 use smallvec::SmallVec;
 use std::{
     collections::BTreeMap,
     fmt,
     io::{BufRead, Read},
     ops::Deref,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 /// Decoder interface
@@ -39,40 +38,38 @@ pub trait Decoder {
     }
 }
 
-lazy_static! {
-    static ref UTF8DFA: DFA<()> = utf8_nfa(UTF8Mode::Canonical).compile();
-    static ref TTY_EVENT_AUTOMATA: MatcherAutomata<TerminalEvent> = {
-        MatcherAutomata::new([
-            Box::new(BasicEventsMatcher) as Box<dyn Matcher<Item = TerminalEvent>>,
-            Box::new(CursorPositionMatcher),
-            Box::new(DecModeMatcher),
-            Box::new(DeviceAttrsMatcher),
-            Box::new(
-                GraphicRenditionMatcher
-                    .map(|face| TerminalEvent::Command(TerminalCommand::FaceModify(face))),
-            ),
-            Box::new(KittyImageMatcher),
-            Box::new(KittyKeyboardMatcher),
-            Box::new(MouseEventMatcher),
-            Box::new(OSControlMatcher),
-            Box::new(ReportSettingMatcher),
-            Box::new(TermCapMatcher),
-            Box::new(TermSizeMatcher),
-            Box::new(
-                UTF8Matcher::new(UTF8Mode::Printable)
-                    .map(|c| TerminalEvent::Key(KeyName::Char(c).into())),
-            ),
-            Box::new(BracketedPasteMatcher),
-        ])
-    };
-    static ref TTY_COMMAND_AUTOMATA: MatcherAutomata<TerminalCommand> = {
-        MatcherAutomata::new([
-            Box::new(GraphicRenditionMatcher.map(TerminalCommand::FaceModify))
-                as Box<dyn Matcher<Item = TerminalCommand>>,
-            Box::new(UTF8Matcher::new(UTF8Mode::NotEscape).map(TerminalCommand::Char)),
-        ])
-    };
-}
+static UTF8DFA: LazyLock<DFA<()>> = LazyLock::new(|| utf8_nfa(UTF8Mode::Canonical).compile());
+static TTY_EVENT_AUTOMATA: LazyLock<MatcherAutomata<TerminalEvent>> = LazyLock::new(|| {
+    MatcherAutomata::new([
+        Box::new(BasicEventsMatcher) as Box<dyn Matcher<Item = TerminalEvent>>,
+        Box::new(CursorPositionMatcher),
+        Box::new(DecModeMatcher),
+        Box::new(DeviceAttrsMatcher),
+        Box::new(
+            GraphicRenditionMatcher
+                .map(|face| TerminalEvent::Command(TerminalCommand::FaceModify(face))),
+        ),
+        Box::new(KittyImageMatcher),
+        Box::new(KittyKeyboardMatcher),
+        Box::new(MouseEventMatcher),
+        Box::new(OSControlMatcher),
+        Box::new(ReportSettingMatcher),
+        Box::new(TermCapMatcher),
+        Box::new(TermSizeMatcher),
+        Box::new(
+            UTF8Matcher::new(UTF8Mode::Printable)
+                .map(|c| TerminalEvent::Key(KeyName::Char(c).into())),
+        ),
+        Box::new(BracketedPasteMatcher),
+    ])
+});
+static TTY_COMMAND_AUTOMATA: LazyLock<MatcherAutomata<TerminalCommand>> = LazyLock::new(|| {
+    MatcherAutomata::new([
+        Box::new(GraphicRenditionMatcher.map(TerminalCommand::FaceModify))
+            as Box<dyn Matcher<Item = TerminalCommand>>,
+        Box::new(UTF8Matcher::new(UTF8Mode::NotEscape).map(TerminalCommand::Char)),
+    ])
+});
 
 /// UTF-8 decoder
 pub struct Utf8Decoder {
