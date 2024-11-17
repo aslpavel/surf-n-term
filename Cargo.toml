@@ -28,7 +28,7 @@ rasterize = "^0.4.2"
 [dependencies.rustix]
 # switch to published version once select is there
 git = "https://github.com/bytecodealliance/rustix.git"
-rev = "7d4a719f33495c45ba74a3a8fb7a16bf737f8036"
+rev = "0565616570e20b34b711e87c1c7b6612d3aae093"
 features = ["event", "fs", "termios"]
 
 [dev-dependencies]
