@@ -31,7 +31,7 @@ fn load_png(path: impl AsRef<std::path::Path>) -> Result<SurfaceOwned<RGBA>, Err
             });
             Ok(surf)
         }
-        color_type => return Err(format!("Unsupported color type: {color_type:?}").into()),
+        color_type => Err(format!("Unsupported color type: {color_type:?}").into()),
     }
 }
 

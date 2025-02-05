@@ -399,7 +399,7 @@ impl GlyphFrame {
 
         // border
         if let Some(border_color) = self.border_color {
-            let mut subpaths = Vec::new();
+            let mut path = Path::empty();
             let stroke_style = StrokeStyle {
                 line_cap: LineCap::Round,
                 ..Default::default()
@@ -413,7 +413,7 @@ impl GlyphFrame {
                     width: bw_top,
                     ..stroke_style
                 });
-            subpaths.extend(top_path);
+            path.extend(&top_path);
             // right
             let mut right_build = PathBuilder::new();
             right_build.move_to((hx - br_tr, ly));
@@ -428,7 +428,7 @@ impl GlyphFrame {
                 width: bw_right,
                 ..stroke_style
             });
-            subpaths.extend(right_path);
+            path.extend(&right_path);
             // bottom
             let bottom_path = PathBuilder::new()
                 .move_to((hx - br_br, hy))
@@ -438,7 +438,7 @@ impl GlyphFrame {
                     width: bw_bottom,
                     ..stroke_style
                 });
-            subpaths.extend(bottom_path);
+            path.extend(&bottom_path);
             // left
             let mut left_build = PathBuilder::new();
             left_build.move_to((lx + br_bl, hy));
@@ -453,8 +453,7 @@ impl GlyphFrame {
                 width: bw_left,
                 ..stroke_style
             });
-            subpaths.extend(left_path);
-            let path = Path::new(subpaths);
+            path.extend(&left_path);
 
             let border_color = LinColor::from(border_color);
             for pixel in

@@ -507,7 +507,7 @@ pub trait FlexArray {
     }
 }
 
-impl<'a, T> FlexArray for &'a T
+impl<T> FlexArray for &T
 where
     T: FlexArray + ?Sized,
 {
@@ -540,7 +540,7 @@ where
     }
 }
 
-impl<'a, V: View> FlexArray for &'a [FlexChild<V>] {
+impl<V: View> FlexArray for &[FlexChild<V>] {
     fn len(&self) -> usize {
         <[_]>::len(self)
     }
