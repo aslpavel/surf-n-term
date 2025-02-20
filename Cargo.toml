@@ -22,7 +22,7 @@ tracing = "^0.1"
 unicode-width = "^0.2"
 either = "^1.13"
 
-rasterize = "^0.5.1"
+rasterize = "^0.6"
 # rasterize = { path = "../rasterize", default-features = false, features = ["serde"]}
 
 [dependencies.rustix]
