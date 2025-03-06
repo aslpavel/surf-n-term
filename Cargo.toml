@@ -8,7 +8,7 @@ license = "MIT"
 name = "surf_n_term"
 readme = "README.md"
 repository = "https://github.com/aslpavel/surf-n-term.git"
-version = "0.17.9"
+version = "0.18.0"
 
 [dependencies]
 fnv = "^1.0"
@@ -21,15 +21,10 @@ smallvec = "^1.11"
 tracing = "^0.1"
 unicode-width = "^0.2"
 either = "^1.13"
+rustix = { version = "^1.0", features = ["event", "fs", "termios"] }
 
 rasterize = "^0.6"
 # rasterize = { path = "../rasterize", default-features = false, features = ["serde"]}
-
-[dependencies.rustix]
-# switch to published version once select is there
-git = "https://github.com/bytecodealliance/rustix.git"
-rev = "c2ac858c42c4a5609901b804d0032e3387264222"
-features = ["event", "fs", "termios"]
 
 [dev-dependencies]
 criterion = { version = "^0.5", features = ["html_reports"] }
