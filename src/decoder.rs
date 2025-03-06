@@ -1440,13 +1440,10 @@ impl<R: Read> Base64Decoder<R> {
             if size == 0 {
                 break;
             } else if size != 4 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    Error::ParseError(
-                        "Base64Decoder",
-                        "input length is not dividable by 4".to_owned(),
-                    ),
-                ));
+                return Err(std::io::Error::other(Error::ParseError(
+                    "Base64Decoder",
+                    "input length is not dividable by 4".to_owned(),
+                )));
             }
             let out = Self::decode_u8x4(input);
             let out_size = Self::decode_size(input);
