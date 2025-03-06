@@ -1,9 +1,9 @@
 //! Main interface to interact with terminal
 use crate::{
+    Face, FaceModify, Image, Key, KeyMod, KeyName, RGBA, SurfaceMut,
     encoder::ColorDepth,
     error::Error,
     render::{TerminalRenderer, TerminalSurface, TerminalSurfaceExt},
-    Face, FaceModify, Image, Key, KeyMod, KeyName, SurfaceMut, RGBA,
 };
 use either::Either;
 use serde::{Deserialize, Serialize};

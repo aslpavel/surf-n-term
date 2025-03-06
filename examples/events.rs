@@ -2,7 +2,7 @@ use std::{error::Error, io::Write, time::Duration};
 use surf_n_term::{
     DecMode, SystemTerminal, Terminal, TerminalColor, TerminalCommand, TerminalEvent,
 };
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 fn header(term: &mut dyn Terminal, content: impl std::fmt::Display) -> Result<(), Box<dyn Error>> {
     term.execute(TerminalCommand::Face("fg=#b8bb26,bg=#3c3836,bold".parse()?))?;

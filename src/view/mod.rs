@@ -32,13 +32,13 @@ pub use offscreen::Offscreen;
 pub use either::{self, Either};
 
 use crate::{
-    encoder::ColorDepth, glyph::GlyphDeserializer, image::ImageAsciiView, Cell, Error, Face,
-    FaceAttrs, FaceDeserializer, Image, Position, Size, Surface, SurfaceMut, SurfaceOwned,
-    SurfaceView, Terminal, TerminalSurface, TerminalSurfaceExt, RGBA,
+    Cell, Error, Face, FaceAttrs, FaceDeserializer, Image, Position, RGBA, Size, Surface,
+    SurfaceMut, SurfaceOwned, SurfaceView, Terminal, TerminalSurface, TerminalSurfaceExt,
+    encoder::ColorDepth, glyph::GlyphDeserializer, image::ImageAsciiView,
 };
 use serde::{
-    de::{self, DeserializeSeed},
     Deserialize, Deserializer, Serialize,
+    de::{self, DeserializeSeed},
 };
 use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
 

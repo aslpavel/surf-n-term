@@ -1,5 +1,5 @@
 use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode, Throughput,
+    BenchmarkId, Criterion, SamplingMode, Throughput, black_box, criterion_group, criterion_main,
 };
 use std::{
     fs::File,
@@ -7,10 +7,10 @@ use std::{
     path::Path,
 };
 use surf_n_term::{
-    common::{clamp, Random},
     Color, LinColor, Shape, Size,
+    common::{Random, clamp},
 };
-use surf_n_term::{ColorPalette, Image, Surface, RGBA};
+use surf_n_term::{ColorPalette, Image, RGBA, Surface};
 
 /// This not really a ppm loader it is not doing proper validation of anything
 fn load_ppm(path: impl AsRef<Path>) -> Result<Image, Box<dyn std::error::Error>> {

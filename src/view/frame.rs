@@ -1,6 +1,6 @@
 use super::{BoxConstraint, Layout, Tree, TreeMut, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{
-    Cell, Error, Face, Image, Position, Shape, Size, Surface, SurfaceMut, TerminalSurface, RGBA,
+    Cell, Error, Face, Image, Position, RGBA, Shape, Size, Surface, SurfaceMut, TerminalSurface,
 };
 use rasterize::{
     BBox, Color, FillRule, Image as RImage, LinColor, LineCap, LineJoin, PathBuilder, Point,

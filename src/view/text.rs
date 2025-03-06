@@ -1,13 +1,13 @@
 use rasterize::{RGBA, SVG_COLORS};
 use serde::{
-    de::{self, DeserializeSeed},
     Deserialize, Deserializer,
+    de::{self, DeserializeSeed},
 };
 
 use super::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout};
 use crate::{
-    glyph::GlyphDeserializer, surface::ViewBounds, Cell, CellWrite, Error, Face, FaceDeserializer,
-    Position, Size, TerminalSurface, TerminalSurfaceExt,
+    Cell, CellWrite, Error, Face, FaceDeserializer, Position, Size, TerminalSurface,
+    TerminalSurfaceExt, glyph::GlyphDeserializer, surface::ViewBounds,
 };
 use std::{collections::HashMap, fmt::Write as _};
 
@@ -251,7 +251,7 @@ impl<'de> DeserializeSeed<'de> for TextDeserializer<'_> {
                     return Err(Error::ParseError(
                         "Text",
                         "expected: {map|list|str}".to_owned(),
-                    ))
+                    ));
                 }
             }
             Ok(())

@@ -3,8 +3,8 @@ use super::{
     ViewMutLayout,
 };
 use crate::{
-    common::LockExt, surface::ViewBounds, Cell, Error, Shape, Size, Surface, SurfaceMut,
-    SurfaceMutView, SurfaceView, TerminalSurface,
+    Cell, Error, Shape, Size, Surface, SurfaceMut, SurfaceMutView, SurfaceView, TerminalSurface,
+    common::LockExt, surface::ViewBounds,
 };
 use std::{
     ops::{Deref, DerefMut},

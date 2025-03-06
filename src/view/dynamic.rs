@@ -52,8 +52,8 @@ where
 mod tests {
     use super::*;
     use crate::{
-        view::{tests::render, Align, Container},
-        Position, Size, Surface, RGBA,
+        Position, RGBA, Size, Surface,
+        view::{Align, Container, tests::render},
     };
 
     #[test]

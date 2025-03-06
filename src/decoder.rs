@@ -1,9 +1,9 @@
 //! Decoders
 use crate::{
-    automata::{DFAState, DFA, NFA},
+    Face, FaceModify, Key, KeyMod, KeyName, Position, RGBA, TerminalCommand, UnderlineStyle,
+    automata::{DFA, DFAState, NFA},
     error::Error,
     terminal::{DecModeStatus, Mouse, Size, TerminalColor, TerminalEvent, TerminalSize},
-    Face, FaceModify, Key, KeyMod, KeyName, Position, TerminalCommand, UnderlineStyle, RGBA,
 };
 use either::Either;
 use smallvec::SmallVec;
@@ -1374,7 +1374,7 @@ pub fn hex_decode(slice: &[u8]) -> impl Iterator<Item = u8> + '_ {
     };
     slice
         .chunks(2)
-        .map(move |pair| Some(value(pair[0])? << 4 | value(pair[1])?))
+        .map(move |pair| Some((value(pair[0])? << 4) | value(pair[1])?))
         .take_while(|value| value.is_some())
         .flatten()
 }

@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput};
+use criterion::{Bencher, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use surf_n_term::{
     common::Rnd,

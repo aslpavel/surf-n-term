@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{common::clamp, Position, Size};
+use crate::{Position, Size, common::clamp};
 
 /// Shape object describing layout of data in the surface object
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]

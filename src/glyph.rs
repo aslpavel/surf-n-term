@@ -1,17 +1,17 @@
 use crate::{
+    Cell, Color, Error, Face, Image, LinColor, Position, RGBA, Size, Surface, SurfaceMut,
+    SurfaceMutView, SurfaceOwned, TerminalSize, TerminalSurface, TerminalSurfaceExt,
     view::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout},
-    Cell, Color, Error, Face, Image, LinColor, Position, Size, Surface, SurfaceMut, SurfaceMutView,
-    SurfaceOwned, TerminalSize, TerminalSurface, TerminalSurfaceExt, RGBA,
 };
 use rasterize::{
     ActiveEdgeRasterizer, Align, Image as _, LineCap, PathBuilder, Point, RGBADeserializer,
-    Rasterizer, Scalar, Scene, StrokeStyle, Transform, SVG_COLORS,
+    Rasterizer, SVG_COLORS, Scalar, Scene, StrokeStyle, Transform,
 };
-pub use rasterize::{BBox, FillRule, Path, EPSILON};
+pub use rasterize::{BBox, EPSILON, FillRule, Path};
 use serde::{
+    Deserialize, Serialize,
     de::{self, DeserializeSeed, IgnoredAny},
     ser::SerializeMap,
-    Deserialize, Serialize,
 };
 use std::{
     borrow::Cow,

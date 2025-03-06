@@ -254,7 +254,7 @@ impl Rnd {
 
     /// Generate random u32 value
     pub fn next_u32(&mut self) -> u32 {
-        (self.step() & 0xffff) << 16 | (self.step() & 0xffff)
+        ((self.step() & 0xffff) << 16) | (self.step() & 0xffff)
     }
 
     pub fn next_u8x4(&mut self) -> [u8; 4] {

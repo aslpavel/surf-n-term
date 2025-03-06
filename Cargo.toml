@@ -1,7 +1,7 @@
 [package]
 authors = ["Pavel Aslanov <asl.pavel@gmail.com>"]
 description = "Posix terminal rendering library"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/aslpavel/surf-n-term"
 include = ["**/*.rs", "**/Cargo.toml", "**/README.md"]
 license = "MIT"

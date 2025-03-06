@@ -1,6 +1,6 @@
 //! Type describing foreground/background/style-attrs of the terminal cell
-use rasterize::{utils::ArrayIter, SVG_COLORS};
-use serde::{de::DeserializeSeed, Deserialize, Serialize};
+use rasterize::{SVG_COLORS, utils::ArrayIter};
+use serde::{Deserialize, Serialize, de::DeserializeSeed};
 
 use crate::{Color, Error, RGBA};
 use std::{

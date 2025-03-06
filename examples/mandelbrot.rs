@@ -4,9 +4,9 @@ use std::{
     time::Duration,
 };
 use surf_n_term::{
-    view::{ViewContext, ViewLayoutStore},
     Color, Error, Image, LinColor, Size, Surface, SurfaceOwned, SystemTerminal, Terminal,
     TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    view::{ViewContext, ViewLayoutStore},
 };
 
 #[derive(Copy, Clone, Default)]

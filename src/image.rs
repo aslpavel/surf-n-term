@@ -5,23 +5,22 @@
 //!  - Image object
 //!  - Quantization and dithering
 use crate::{
-    common::{clamp, Rnd},
+    Cell, Color, Error, Face, FaceAttrs, Position, RGBA, Shape, Size, Surface, SurfaceMut,
+    SurfaceOwned, TerminalCommand, TerminalEvent, TerminalSurface,
+    common::{Rnd, clamp},
     decoder::Base64Decoder,
     encoder::{Base64Encoder, Encoder, TTYEncoder},
     surface::ViewBounds,
     view::{BoxConstraint, Layout, View, ViewContext, ViewLayout, ViewMutLayout},
-    Cell, Color, Error, Face, FaceAttrs, Position, Shape, Size, Surface, SurfaceMut, SurfaceOwned,
-    TerminalCommand, TerminalEvent, TerminalSurface, RGBA,
 };
 use serde::{
-    de,
+    Deserialize, Serialize, Serializer, de,
     ser::{self, SerializeStruct},
-    Deserialize, Serialize, Serializer,
 };
 use std::{
     borrow::Cow,
     cmp::Ordering,
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     fmt,
     io::{Read, Write},
     ops::{Add, AddAssign, Mul},
@@ -139,11 +138,7 @@ impl Image {
         }
         fn round_up(a: usize, b: usize) -> usize {
             let c = a / b;
-            if a % b == 0 {
-                c
-            } else {
-                c + 1
-            }
+            if a % b == 0 { c } else { c + 1 }
         }
         Size {
             height: round_up(self.height(), pixels_per_cell.height),
@@ -351,7 +346,9 @@ impl<'de> Deserialize<'de> for Image {
                             if !matches!(channels, 1 | 3 | 4) {
                                 return Err(de::Error::custom(Error::ParseError(
                                     "Image",
-                                    format!("not supported channels value {channels} expected {{1,3,4}}")
+                                    format!(
+                                        "not supported channels value {channels} expected {{1,3,4}}"
+                                    ),
                                 )));
                             }
                         }
@@ -1253,7 +1250,7 @@ impl OcTree {
             use OcTreeNode::*;
             match node {
                 Empty => {}
-                Leaf(ref mut leaf) => {
+                Leaf(leaf) => {
                     leaf.index = palette.len();
                     palette.push(leaf.to_rgba());
                 }
@@ -1864,9 +1861,9 @@ mod tests {
                 + (b0 as i32 - b1 as i32).pow(2)
         }
 
-        let mut gen = RGBA::random_iter();
-        let palette = ColorPalette::new((&mut gen).take(256).collect()).unwrap();
-        let mut colors: Vec<_> = gen.take(65_536).collect();
+        let mut rnd = RGBA::random_iter();
+        let palette = ColorPalette::new((&mut rnd).take(256).collect()).unwrap();
+        let mut colors: Vec<_> = rnd.take(65_536).collect();
         colors.extend(palette.colors().iter().copied());
         for (index, color) in colors.iter().enumerate() {
             let (_, find) = palette.find(*color);

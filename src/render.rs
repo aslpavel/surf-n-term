@@ -1,5 +1,8 @@
 //! Terminal rendering logic
 use crate::{
+    Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
+    SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps, TerminalCommand,
+    TerminalEvent, TerminalSize, TerminalWaker,
     decoder::{Decoder, TTYCommandDecoder, Utf8Decoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
@@ -7,9 +10,6 @@ use crate::{
         BoxConstraint, IntoView, Layout, Text, Tree, TreeId, TreeMut, View, ViewContext,
         ViewLayoutStore, ViewMutLayout,
     },
-    Face, Glyph, Image, ImageHandler, KittyImageHandler, Position, Size, Surface, SurfaceMut,
-    SurfaceMutView, SurfaceOwned, SurfaceView, Terminal, TerminalCaps, TerminalCommand,
-    TerminalEvent, TerminalSize, TerminalWaker,
 };
 use rasterize::RGBA;
 use std::{

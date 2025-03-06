@@ -1,9 +1,10 @@
 //! Unix systems specific `Terminal` implementation.
-use crate::common::{env_cfg, IOQueue};
+use crate::common::{IOQueue, env_cfg};
 use crate::decoder::KEYBOARD_LEVEL;
 use crate::encoder::ColorDepth;
 use crate::image::ImageHandlerKind;
 use crate::{
+    DecMode, ImageHandler,
     decoder::{Decoder, TTYEventDecoder},
     encoder::{Encoder, TTYEncoder},
     error::Error,
@@ -11,9 +12,8 @@ use crate::{
     terminal::{
         Size, Terminal, TerminalCommand, TerminalEvent, TerminalSize, TerminalStats, TerminalWaker,
     },
-    DecMode, ImageHandler,
 };
-use crate::{Position, TerminalCaps, RGBA};
+use crate::{Position, RGBA, TerminalCaps};
 use rustix::event::FdSetElement;
 use signal_hook::{
     consts::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH},

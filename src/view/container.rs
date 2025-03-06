@@ -1,13 +1,13 @@
 //! [Container] view can specify the size and alignment for its child view
 use std::ops::Add;
 
-use serde::{de::DeserializeSeed, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeSeed};
 
 use super::{
     BoxConstraint, IntoView, Layout, Tree, TreeMut, View, ViewContext, ViewDeserializer,
     ViewLayout, ViewMutLayout,
 };
-use crate::{Error, Face, FaceAttrs, Position, Size, TerminalSurface, TerminalSurfaceExt, RGBA};
+use crate::{Error, Face, FaceAttrs, Position, RGBA, Size, TerminalSurface, TerminalSurfaceExt};
 
 /// Alignment of a child view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -142,8 +142,8 @@ fn scroll_bar_layout(
 mod tests {
     use super::*;
     use crate::{
-        view::{tests::render, ViewLayoutStore},
         Surface,
+        view::{ViewLayoutStore, tests::render},
     };
 
     #[test]

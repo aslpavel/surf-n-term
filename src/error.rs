@@ -29,17 +29,17 @@ impl std::error::Error for Error {
         use Error::*;
         match self {
             Quit => None,
-            IOError(ref error) => Some(error),
-            FmtError(ref error) => Some(error),
-            RustixError(ref error) => Some(error),
-            SvgParseError(ref error) => Some(error),
-            ColorError(ref error) => Some(error),
+            IOError(error) => Some(error),
+            FmtError(error) => Some(error),
+            RustixError(error) => Some(error),
+            SvgParseError(error) => Some(error),
+            ColorError(error) => Some(error),
             NotATTY => None,
             ParseError(..) => None,
             FeatureNotSupported => None,
             Other(..) => None,
             InvalidLayout => None,
-            Json(ref error) => Some(error),
+            Json(error) => Some(error),
         }
     }
 }

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{Error, Face, Position, Size, SurfaceMut, TerminalSurface, TerminalSurfaceExt};
 use either::Either;
-use serde::{de::DeserializeSeed, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeSeed};
 use std::{cmp::max, fmt};
 
 pub struct FlexChild<V> {
@@ -305,7 +305,7 @@ impl<'a> Flex<'a> {
                 return Err(Error::ParseError(
                     "Flex",
                     "children must be an array".to_owned(),
-                ))
+                ));
             }
         };
         Ok(Flex {

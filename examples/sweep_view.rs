@@ -1,12 +1,12 @@
 use std::time::Duration;
 use surf_n_term::{
+    CellWrite, Color, Error, Face, FaceAttrs, Position, RGBA, SurfaceMut, SystemTerminal, Terminal,
+    TerminalCommand, TerminalSurfaceExt,
     render::TerminalRenderer,
     view::{
         Align, Axis, Container, Flex, FlexChild, FlexRef, Frame, ScrollBar, ScrollBarPosition,
         Text, View, ViewContext,
     },
-    CellWrite, Color, Error, Face, FaceAttrs, Position, SurfaceMut, SystemTerminal, Terminal,
-    TerminalCommand, TerminalSurfaceExt, RGBA,
 };
 
 const HIGHT: usize = 10;

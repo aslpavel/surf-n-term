@@ -1,10 +1,10 @@
 #![allow(clippy::reversed_empty_ranges)] // those range are not actually empty
 use surf_n_term::{
-    view::{Align, Container, Margins, Text, View, ViewContext, ViewLayoutStore},
     Cell, CellWrite, Face, KeyName, Position, Size, Surface, SurfaceMut, SystemTerminal, Terminal,
     TerminalAction, TerminalCommand, TerminalEvent, TerminalSurfaceExt,
+    view::{Align, Container, Margins, Text, View, ViewContext, ViewLayoutStore},
 };
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 type Error = Box<dyn std::error::Error + Sync + Send + 'static>;
 const CURSOR: &str = r#"
