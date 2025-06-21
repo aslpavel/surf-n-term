@@ -1,8 +1,9 @@
 use criterion::{
-    BenchmarkId, Criterion, SamplingMode, Throughput, black_box, criterion_group, criterion_main,
+    BenchmarkId, Criterion, SamplingMode, Throughput, criterion_group, criterion_main,
 };
 use std::{
     fs::File,
+    hint::black_box,
     io::{BufRead, BufReader, Read},
     path::Path,
 };
@@ -16,7 +17,7 @@ use surf_n_term::{ColorPalette, Image, RGBA, Surface};
 fn load_ppm(path: impl AsRef<Path>) -> Result<Image, Box<dyn std::error::Error>> {
     let mut file = BufReader::new(File::open(path)?);
 
-    // specially constructed ppm header to end with a new line
+    // specially constructed ppm header to end with a newline
     let mut header = String::new();
     file.read_line(&mut header)?;
     let (height, width) = match header.trim().split(' ').collect::<Vec<_>>().as_slice() {

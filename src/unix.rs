@@ -244,7 +244,7 @@ impl UnixTerminal {
 }
 
 /// Fallback way to determine terminal size if it is detected to work
-/// and ioctl is not.
+/// and ioctl is not. XTWINOPS
 const GET_TERM_SIZE: &[u8] = b"\x1b[18t\x1b[14t";
 
 /// Detect and set terminal capabilities
