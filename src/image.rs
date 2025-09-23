@@ -138,7 +138,7 @@ impl Image {
         }
         fn round_up(a: usize, b: usize) -> usize {
             let c = a / b;
-            if a % b == 0 { c } else { c + 1 }
+            if a.is_multiple_of(b) { c } else { c + 1 }
         }
         Size {
             height: round_up(self.height(), pixels_per_cell.height),

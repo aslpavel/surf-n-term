@@ -1,12 +1,14 @@
+use std::io::BufReader;
+
 use rasterize::RGBA;
 use surf_n_term::{ColorPalette, Size, SurfaceMut, SurfaceOwned};
 
 type Error = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 fn load_png(path: impl AsRef<std::path::Path>) -> Result<SurfaceOwned<RGBA>, Error> {
-    let decoder = png::Decoder::new(std::fs::File::open(path)?);
+    let decoder = png::Decoder::new(BufReader::new(std::fs::File::open(path)?));
     let mut reader = decoder.read_info()?;
-    let mut buffer = vec![0; reader.output_buffer_size()];
+    let mut buffer = vec![0; reader.output_buffer_size().expect("out of memory")];
     let info = reader.next_frame(&mut buffer)?;
     buffer.truncate(info.buffer_size());
     let size = Size {

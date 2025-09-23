@@ -10,7 +10,7 @@ use super::{
 use crate::{Error, Face, FaceAttrs, Position, RGBA, Size, TerminalSurface, TerminalSurfaceExt};
 
 /// Alignment of a child view
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Align {
     /// Align to the smallest value along the axis
     #[serde(rename = "start")]
@@ -26,6 +26,7 @@ pub enum Align {
     Expand,
     /// Try to shrink container to match the size of the child
     #[serde(rename = "shrink")]
+    #[default]
     Shrink,
     /// Place  the view at the specified offset, negative means offset is from
     /// the maximum value
@@ -48,12 +49,6 @@ impl Align {
                 }
             }
         }
-    }
-}
-
-impl Default for Align {
-    fn default() -> Self {
-        Self::Shrink
     }
 }
 

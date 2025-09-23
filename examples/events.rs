@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         FaceGet,
         Face(Default::default()),
         Termcap(
-            ["bel", "smcup", "TN", "Co"]
+            ["bel", "smcup", "TN", "Co", "Se"]
                 .into_iter()
                 .map(|s| s.to_owned())
                 .collect(),
