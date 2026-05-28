@@ -149,6 +149,14 @@ impl UnixTerminal {
 
         capabilities_detect(&mut term)?;
         term.execute(TerminalCommand::KeyboardLevel(KEYBOARD_LEVEL))?;
+        if term.image_handler.kind() == ImageHandlerKind::Sixel {
+            // DECSDM: keep cursor put across sixels so a bottom-row glyph
+            // doesn't trigger a host-side scroll behind our back.
+            term.execute(TerminalCommand::DecModeSet {
+                enable: true,
+                mode: DecMode::SixelScrolling,
+            })?;
+        }
         Ok(term)
     }
 
@@ -194,7 +202,7 @@ impl UnixTerminal {
         self.frames_drop();
 
         // flush currently queued output and submit the epilogue
-        self.execute_many([
+        let mut epilogue = vec![
             TerminalCommand::Face(Default::default()),
             TerminalCommand::visible_cursor_set(true),
             TerminalCommand::DecModeSet {
@@ -214,12 +222,19 @@ impl UnixTerminal {
                 mode: DecMode::AutoWrap,
             },
             TerminalCommand::KeyboardLevel(0),
-            // This one must be the last command as we use it as sync event,
-            // which is supported by all terminals, and indicates that we handled
-            // all pending events such as status report from kitty image protocol
-            TerminalCommand::DeviceAttrs,
-        ])
-        .unwrap_or(()); // ignore write errors
+        ];
+        if self.image_handler.kind() == ImageHandlerKind::Sixel {
+            // pair DECSDM set on open
+            epilogue.push(TerminalCommand::DecModeSet {
+                enable: false,
+                mode: DecMode::SixelScrolling,
+            });
+        }
+        // This one must be the last command as we use it as sync event,
+        // which is supported by all terminals, and indicates that we handled
+        // all pending events such as status report from kitty image protocol
+        epilogue.push(TerminalCommand::DeviceAttrs);
+        self.execute_many(epilogue).unwrap_or(()); // ignore write errors
 
         // wait for device attributes report or error
         loop {
