@@ -637,16 +637,12 @@ impl TerminalSize {
     /// Size of the cell in pixels
     pub fn pixels_per_cell(&self) -> Size {
         Size {
-            height: if self.cells.height > 0 {
-                self.pixels.height / self.cells.height
-            } else {
-                0
-            },
-            width: if self.cells.width > 0 {
-                self.pixels.width / self.cells.width
-            } else {
-                0
-            },
+            height: self
+                .pixels
+                .height
+                .checked_div(self.cells.height)
+                .unwrap_or(0),
+            width: self.pixels.width.checked_div(self.cells.width).unwrap_or(0),
         }
     }
 

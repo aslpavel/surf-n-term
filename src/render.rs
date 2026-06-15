@@ -1040,7 +1040,9 @@ impl<W: Write + Send> Terminal for TerminalDebug<W> {
     fn execute(&mut self, cmd: TerminalCommand) -> Result<(), Error> {
         use TerminalCommand::*;
         match cmd {
-            Image(img, pos) => self.image_handler.draw(&mut self.output, &img, pos)?,
+            Image(img, pos) => self
+                .image_handler
+                .draw(&mut self.output, &img, pos, self.size)?,
             ImageErase(img, pos) => self.image_handler.erase(&mut self.output, &img, pos)?,
             Face(face) => {
                 self.face = face;

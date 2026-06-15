@@ -149,14 +149,6 @@ impl UnixTerminal {
 
         capabilities_detect(&mut term)?;
         term.execute(TerminalCommand::KeyboardLevel(KEYBOARD_LEVEL))?;
-        if term.image_handler.kind() == ImageHandlerKind::Sixel {
-            // DECSDM: keep cursor put across sixels so a bottom-row glyph
-            // doesn't trigger a host-side scroll behind our back.
-            term.execute(TerminalCommand::DecModeSet {
-                enable: true,
-                mode: DecMode::SixelScrolling,
-            })?;
-        }
         Ok(term)
     }
 
@@ -202,7 +194,7 @@ impl UnixTerminal {
         self.frames_drop();
 
         // flush currently queued output and submit the epilogue
-        let mut epilogue = vec![
+        self.execute_many([
             TerminalCommand::Face(Default::default()),
             TerminalCommand::visible_cursor_set(true),
             TerminalCommand::DecModeSet {
@@ -222,19 +214,12 @@ impl UnixTerminal {
                 mode: DecMode::AutoWrap,
             },
             TerminalCommand::KeyboardLevel(0),
-        ];
-        if self.image_handler.kind() == ImageHandlerKind::Sixel {
-            // pair DECSDM set on open
-            epilogue.push(TerminalCommand::DecModeSet {
-                enable: false,
-                mode: DecMode::SixelScrolling,
-            });
-        }
-        // This one must be the last command as we use it as sync event,
-        // which is supported by all terminals, and indicates that we handled
-        // all pending events such as status report from kitty image protocol
-        epilogue.push(TerminalCommand::DeviceAttrs);
-        self.execute_many(epilogue).unwrap_or(()); // ignore write errors
+            // This one must be the last command as we use it as sync event,
+            // which is supported by all terminals, and indicates that we handled
+            // all pending events such as status report from kitty image protocol
+            TerminalCommand::DeviceAttrs,
+        ])
+        .unwrap_or(()); // ignore write errors
 
         // wait for device attributes report or error
         loop {
@@ -364,10 +349,22 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
         term.size = Some(size_escape);
     }
 
-    // image handler
+    // image handler, explicit `image` override takes precedence over detection
     let image_handler = env_cfg::<ImageHandlerKind>("image")
-        .or_else(|| image_handlers.get(&ImageHandlerKind::Kitty).copied())
-        .or_else(|| image_handlers.get(&ImageHandlerKind::Sixel).copied())
+        .or_else(|| {
+            if std::env::var_os("ZELLIJ").is_some() {
+                // zellij does not pass image-protocol escape sequences through
+                tracing::debug!(
+                    "[capabilities_detected] zellij detected, image rendering disabled"
+                );
+                Some(ImageHandlerKind::Dummy)
+            } else {
+                image_handlers
+                    .get(&ImageHandlerKind::Kitty)
+                    .or_else(|| image_handlers.get(&ImageHandlerKind::Sixel))
+                    .copied()
+            }
+        })
         .unwrap_or(ImageHandlerKind::Dummy)
         .into_image_handler(bg);
 
@@ -527,7 +524,9 @@ impl Terminal for UnixTerminal {
         tracing::trace!(?cmd, "[UnixTerminal.execute]");
         match cmd {
             TerminalCommand::Image(img, pos) => {
-                self.image_handler.draw(&mut self.write_queue, &img, pos)
+                let size = self.size()?;
+                self.image_handler
+                    .draw(&mut self.write_queue, &img, pos, size)
             }
             TerminalCommand::ImageErase(img, pos) => {
                 self.image_handler.erase(&mut self.write_queue, &img, pos)

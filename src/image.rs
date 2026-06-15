@@ -6,7 +6,7 @@
 //!  - Quantization and dithering
 use crate::{
     Cell, Color, Error, Face, FaceAttrs, Position, RGBA, Shape, Size, Surface, SurfaceMut,
-    SurfaceOwned, TerminalCommand, TerminalEvent, TerminalSurface,
+    SurfaceOwned, TerminalCommand, TerminalEvent, TerminalSize, TerminalSurface,
     common::{Rnd, clamp},
     decoder::Base64Decoder,
     encoder::{Base64Encoder, Encoder, TTYEncoder},
@@ -517,8 +517,15 @@ pub trait ImageHandler: Send + Sync {
     ///
     /// Send an appropriate terminal escape sequence so the image would be rendered.
     /// Position argument `pos` assumed to be current position, and handler
-    /// is not trying to change it.
-    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error>;
+    /// is not trying to change it. `size` is the current terminal size, used
+    /// to clip images at the screen margins.
+    fn draw(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Position,
+        size: TerminalSize,
+    ) -> Result<(), Error>;
 
     /// Erase image at specified position
     ///
@@ -544,8 +551,14 @@ impl<T: ImageHandler + ?Sized> ImageHandler for Box<T> {
         (**self).kind()
     }
 
-    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
-        (**self).draw(out, img, pos)
+    fn draw(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Position,
+        size: TerminalSize,
+    ) -> Result<(), Error> {
+        (**self).draw(out, img, pos, size)
     }
 
     fn erase(
@@ -570,7 +583,13 @@ impl ImageHandler for DummyImageHandler {
         ImageHandlerKind::Dummy
     }
 
-    fn draw(&mut self, _out: &mut dyn Write, _img: &Image, _pos: Position) -> Result<(), Error> {
+    fn draw(
+        &mut self,
+        _out: &mut dyn Write,
+        _img: &Image,
+        _pos: Position,
+        _size: TerminalSize,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
@@ -651,7 +670,13 @@ impl ImageHandler for KittyImageHandler {
         ImageHandlerKind::Kitty
     }
 
-    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
+    fn draw(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Position,
+        _size: TerminalSize,
+    ) -> Result<(), Error> {
         tracing::trace!(
             image_handler = "kitty",
             ?pos,
@@ -786,7 +811,7 @@ impl ImageHandler for KittyImageHandler {
                         // in case of very large image.
                         let suppress = self.suppress;
                         self.suppress.replace(2);
-                        self.draw(out, &img, pos)?;
+                        self.draw(out, &img, pos, TerminalSize::default())?;
                         self.suppress = suppress;
                         encoder.encode(out, TerminalCommand::CursorRestore)?;
                     }
@@ -824,13 +849,34 @@ impl ImageHandler for SixelImageHandler {
         ImageHandlerKind::Sixel
     }
 
-    fn draw(&mut self, out: &mut dyn Write, img: &Image, pos: Position) -> Result<(), Error> {
+    fn draw(
+        &mut self,
+        out: &mut dyn Write,
+        img: &Image,
+        pos: Position,
+        size: TerminalSize,
+    ) -> Result<(), Error> {
         tracing::debug!(
             image_handler = "sixel",
             ?pos,
             ?img,
             "[SixelImageHandler.draw]"
         );
+        // crop the image so it does not extend past the bottom screen row,
+        // otherwise the terminal scrolls in sixel scrolling mode
+        let per_cell = size.pixels_per_cell().height;
+        let cropped;
+        let img = if per_cell > 0 {
+            let max_height = size.cells.height.saturating_sub(pos.row) * per_cell;
+            if img.height() > max_height {
+                cropped = img.crop(..max_height, ..);
+                &cropped
+            } else {
+                img
+            }
+        } else {
+            img
+        };
         if let Some(sixel_image) = self.imgs.get(&img.hash()) {
             out.write_all(sixel_image.as_slice())?;
             return Ok(());
