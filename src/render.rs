@@ -937,6 +937,7 @@ impl TerminalSurfaceDebug<'_> {
             depth: crate::encoder::ColorDepth::TrueColor,
             glyphs: true,
             kitty_keyboard: false,
+            terminal_name: None,
         };
 
         // init size

@@ -286,6 +286,9 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // Detect kitty keyboard protocol support
     write!(term, "\x1b[?u")?;
 
+    // XTVERSION - terminal name and version
+    term.execute(TerminalCommand::TerminalVersionGet)?;
+
     // DA1 - sync and sixel info
     // Device Attribute command is used as "sync" event, it is supported
     // by most terminals, at least in its basic form, so we expect to
@@ -326,6 +329,10 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
                 tracing::debug!("[capabilities_detected] kitty keyboard protocol");
                 caps.kitty_keyboard = true;
             }
+            Some(TerminalEvent::TerminalVersion(name)) => {
+                tracing::debug!("[capabilities_detected] terminal: {}", name);
+                caps.terminal_name = Some(name);
+            }
             Some(event) => {
                 tracing::warn!("[capabilities_detected] unexpected event: {:?}", event);
                 continue;
@@ -352,7 +359,12 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // image handler, explicit `image` override takes precedence over detection
     let image_handler = env_cfg::<ImageHandlerKind>("image")
         .or_else(|| {
-            if std::env::var_os("ZELLIJ").is_some() {
+            let is_zellij = std::env::var_os("ZELLIJ").is_some()
+                || caps
+                    .terminal_name
+                    .as_deref()
+                    .is_some_and(|name| name.to_ascii_lowercase().starts_with("zellij"));
+            if is_zellij {
                 // zellij does not pass image-protocol escape sequences through
                 tracing::debug!(
                     "[capabilities_detected] zellij detected, image rendering disabled"

@@ -574,7 +574,7 @@ where
                 write!(f, ",color=red")?
             }
             if !info.tags.is_empty() {
-                write!(f, ",label=\"{} {:?}\"", from.0, &info.tags)?;
+                write!(f, ",label=\"{} {:?}\"", from.0, info.tags)?;
             }
             writeln!(f, "]")?;
 

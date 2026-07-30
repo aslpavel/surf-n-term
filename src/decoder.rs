@@ -45,6 +45,7 @@ static TTY_EVENT_AUTOMATA: LazyLock<MatcherAutomata<TerminalEvent>> = LazyLock::
         Box::new(CursorPositionMatcher),
         Box::new(DecModeMatcher),
         Box::new(DeviceAttrsMatcher),
+        Box::new(XTVersionMatcher),
         Box::new(
             GraphicRenditionMatcher
                 .map(|face| TerminalEvent::Command(TerminalCommand::FaceModify(face))),
@@ -541,13 +542,11 @@ impl Matcher for KittyKeyboardMatcher {
         let mut fields = data.split(|c| *c == b';');
 
         // decode key
-        let name = match fields.next() {
-            Some(codes) => {
-                // TODO: decode alternative keys
-                let mut codes = numbers_decode(codes, b':');
-                keyboard_decode_key(codes.next().unwrap_or(1))?
-            }
-            None => return None,
+        let name = {
+            let codes = fields.next()?;
+            // TODO: decode alternative keys
+            let mut codes = numbers_decode(codes, b':');
+            keyboard_decode_key(codes.next().unwrap_or(1))?
         };
 
         // decode modifiers
@@ -645,6 +644,33 @@ impl Matcher for DeviceAttrsMatcher {
             numbers_decode(&data[3..data.len() - 1], b';')
                 .filter(|v| v > &0)
                 .collect(),
+        ))
+    }
+}
+
+/// XTVERSION - Terminal name and version
+///
+/// Reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+#[derive(Debug)]
+struct XTVersionMatcher;
+
+impl Matcher for XTVersionMatcher {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        // "\x1bP>|<text>\x1b\\"
+        let nfa = NFA::sequence([
+            NFA::from("\x1bP>|"),
+            NFA::predicate(|c| c != b'\x1b').many(),
+            NFA::from("\x1b\\"),
+        ]);
+        Either::Left(nfa)
+    }
+
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
+        let payload = &data[4..data.len() - 2];
+        Some(TerminalEvent::TerminalVersion(
+            String::from_utf8_lossy(payload).into_owned(),
         ))
     }
 }
@@ -1895,6 +1921,20 @@ mod tests {
                 TerminalEvent::FaceGet("bg=#010203".parse()?),
                 TerminalEvent::FaceGet("bg=#060504".parse()?)
             ],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_xtversion() -> Result<(), Error> {
+        let mut result = Vec::new();
+        TTYEventDecoder::new()
+            .decode_into(Cursor::new("\x1bP>|Zellij(0.44.3)\x1b\\"), &mut result)?;
+
+        assert_eq!(
+            result,
+            vec![TerminalEvent::TerminalVersion("Zellij(0.44.3)".to_owned())],
         );
 
         Ok(())

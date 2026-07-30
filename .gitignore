@@ -2,3 +2,4 @@
 **/*.rs.bk
 *.path
 /**/Cargo.lock
+.opencode/plans

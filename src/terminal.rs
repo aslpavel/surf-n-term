@@ -207,6 +207,7 @@ pub struct TerminalCaps {
     pub depth: ColorDepth,
     pub glyphs: bool,
     pub kitty_keyboard: bool,
+    pub terminal_name: Option<String>,
 }
 
 impl Default for TerminalCaps {
@@ -215,6 +216,7 @@ impl Default for TerminalCaps {
             depth: ColorDepth::EightBit,
             glyphs: false,
             kitty_keyboard: false,
+            terminal_name: None,
         }
     }
 }
@@ -320,6 +322,8 @@ pub enum TerminalCommand {
     Title(String),
     /// [Primary Device Attributes](https://vt100.net/docs/vt510-rm/DA1.html)
     DeviceAttrs,
+    /// Request terminal name and version (XTVERSION, `CSI > q`)
+    TerminalVersionGet,
     /// Set kitty keyboard protocol level
     KeyboardLevel(usize),
     /// Write raw data to terminal
@@ -545,6 +549,8 @@ pub enum TerminalEvent {
     Termcap(BTreeMap<String, Option<String>>),
     /// Terminal Attributes DA1 response
     DeviceAttrs(BTreeSet<usize>),
+    /// XTVERSION response: raw terminal identifier, e.g. "Zellij(0.44.3)"
+    TerminalVersion(String),
     /// Unrecognized bytes (TODO: remove Vec and just use u8)
     Raw(Vec<u8>),
     /// Color

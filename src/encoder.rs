@@ -247,6 +247,9 @@ impl Encoder for TTYEncoder {
             DeviceAttrs => {
                 write!(out, "\x1b[c")?;
             }
+            TerminalVersionGet => {
+                write!(out, "\x1b[>0q")?;
+            }
             KeyboardLevel(level) => {
                 self.kitty_level(out, level)?;
             }
