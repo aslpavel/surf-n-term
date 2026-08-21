@@ -359,15 +359,22 @@ fn capabilities_detect(term: &mut UnixTerminal) -> Result<(), Error> {
     // image handler, explicit `image` override takes precedence over detection
     let image_handler = env_cfg::<ImageHandlerKind>("image")
         .or_else(|| {
-            let is_zellij = std::env::var_os("ZELLIJ").is_some()
-                || caps
-                    .terminal_name
-                    .as_deref()
-                    .is_some_and(|name| name.to_ascii_lowercase().starts_with("zellij"));
-            if is_zellij {
-                // zellij does not pass image-protocol escape sequences through
+            let terminal_name = caps.terminal_name.as_deref().unwrap_or("");
+            const ZELLIJ: &str = "Zellij(";
+            let bad_zellij = if terminal_name.starts_with(ZELLIJ)
+                && let Some(version) = terminal_name
+                    .split(')')
+                    .next()
+                    .and_then(|version| version.parse::<u32>().ok())
+            {
+                version < 4500
+            } else {
+                false
+            };
+            if bad_zellij {
+                // zellij before 0.45 does not pass image-protocol escape sequences through
                 tracing::debug!(
-                    "[capabilities_detected] zellij detected, image rendering disabled"
+                    "[capabilities_detected] zellij<0.45 detected, image rendering disabled"
                 );
                 Some(ImageHandlerKind::Dummy)
             } else {
