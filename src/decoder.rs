@@ -45,6 +45,7 @@ static TTY_EVENT_AUTOMATA: LazyLock<MatcherAutomata<TerminalEvent>> = LazyLock::
         Box::new(CursorPositionMatcher),
         Box::new(DecModeMatcher),
         Box::new(DeviceAttrsMatcher),
+        Box::new(FunctionalKeyMatcher),
         Box::new(XTVersionMatcher),
         Box::new(
             GraphicRenditionMatcher
@@ -52,6 +53,7 @@ static TTY_EVENT_AUTOMATA: LazyLock<MatcherAutomata<TerminalEvent>> = LazyLock::
         ),
         Box::new(KittyImageMatcher),
         Box::new(KittyKeyboardMatcher),
+        Box::new(KittyKeyboardLevelMatcher),
         Box::new(MouseEventMatcher),
         Box::new(OSControlMatcher),
         Box::new(ReportSettingMatcher),
@@ -513,7 +515,7 @@ struct KittyKeyboardMatcher;
 // 0b0001 - Disambiguate escape codes
 // 0b0100 - Report alternate keys
 // 0b1000 - Report all keys as escape codes
-//          NOTE: 0b1000 breaks shift+key as it no longer generated as uppercase
+//          NOTE: 0b1000 breaks shift+key as it no longer generated as uppercase when you type text
 pub(crate) const KEYBOARD_LEVEL: usize = 0b0101;
 
 impl Matcher for KittyKeyboardMatcher {
@@ -522,23 +524,15 @@ impl Matcher for KittyKeyboardMatcher {
     fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
         let nfa = NFA::sequence([
             NFA::from("\x1b["),
-            NFA::choice([
-                NFA::from("?") + NFA::digit().some(),
-                NFA::predicate(|c| matches!(c, b';' | b':' | b'0'..=b'9')).many(),
-            ]),
+            NFA::predicate(|c| matches!(c, b';' | b':' | b'0'..=b'9')).some(),
             NFA::from("u"),
         ]);
         Either::Left(nfa)
     }
 
     fn decode(&self, data: &[u8]) -> Option<Self::Item> {
-        let data = &data[2..data.len() - 1]; // skip CSI and `u`
-        if data[0] == b'?' {
-            let level = number_decode(&data[1..data.len()])?;
-            return Some(TerminalEvent::KeyboardLevel(level));
-        }
-
         // CSI unicode-key-code:alternate-key-codes ; modifiers:event-type ; text-as-codepoints u
+        let data = &data[2..data.len() - 1]; // skip CSI and `u`
         let mut fields = data.split(|c| *c == b';');
 
         // decode key
@@ -553,10 +547,7 @@ impl Matcher for KittyKeyboardMatcher {
         let mode = match fields.next() {
             Some(modes) => {
                 let mut modes = numbers_decode(modes, b':');
-                let mode = match modes.next() {
-                    Some(mode) if mode > 1 => KeyMod::from_bits((mode - 1) as u32),
-                    _ => KeyMod::EMPTY,
-                };
+                let mode = keyboard_decode_mode(modes.next());
                 let event_type = modes.next().unwrap_or(0);
                 // TODO: decode press/release/repeat
                 if event_type != 0 {
@@ -585,6 +576,113 @@ fn keyboard_decode_key(code: usize) -> Option<KeyName> {
         code if code <= u32::MAX as usize && !(57344..=63743).contains(&code) => {
             KeyName::Char(char::from_u32(code as u32)?)
         }
+        _ => return None,
+    };
+    Some(key)
+}
+
+/// Modifiers are encoded as `1 + bit-flags`
+///
+/// Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#modifiers
+fn keyboard_decode_mode(param: Option<usize>) -> KeyMod {
+    KeyMod::from_bits(param.unwrap_or(1).saturating_sub(1) as u32)
+}
+
+/// Kitty keyboard protocol level report
+///
+/// Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
+#[derive(Debug)]
+struct KittyKeyboardLevelMatcher;
+
+impl Matcher for KittyKeyboardLevelMatcher {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        let nfa = NFA::sequence([NFA::from("\x1b[?"), NFA::number(), NFA::from("u")]);
+        Either::Left(nfa)
+    }
+
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
+        // "\x1b[?{level}u"
+        let level = number_decode(&data[3..data.len() - 1])?;
+        Some(TerminalEvent::KeyboardLevel(level))
+    }
+}
+
+/// Functional keys in the legacy encoding
+///
+/// Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#legacy-functional-keys
+#[derive(Debug)]
+struct FunctionalKeyMatcher;
+
+impl Matcher for FunctionalKeyMatcher {
+    type Item = TerminalEvent;
+
+    fn matcher(&self) -> Either<NFA<Void>, NFA<Self::Item>> {
+        // `R` is only accepted in the SS3 and unparameterized forms, `CSI number;number R`
+        // is a cursor position report, see [CursorPositionMatcher]
+        fn params() -> NFA<Void> {
+            (NFA::number() + (NFA::from(";") + NFA::number()).optional()).optional()
+        }
+        let nfa = NFA::choice([
+            NFA::from("\x1b[") + params() + NFA::from("~"),
+            NFA::from("\x1b[") + params() + NFA::predicate(|c| CSI_KEYS.contains(&c)),
+            NFA::from("\x1b[R"),
+            NFA::from("\x1bO") + NFA::predicate(|c| SS3_KEYS.contains(&c)),
+        ]);
+        Either::Left(nfa)
+    }
+
+    fn decode(&self, data: &[u8]) -> Option<Self::Item> {
+        let tail = data[data.len() - 1];
+        if data[1] == b'O' {
+            return Some(TerminalEvent::Key(letter_decode_key(tail)?.into()));
+        }
+        let mut params = numbers_decode(&data[2..data.len() - 1], b';');
+        let name = if tail == b'~' {
+            // "\x1b[{code};{mode}~"
+            tilde_decode_key(params.next()?)?
+        } else {
+            // "\x1b[1;{mode}{tail}", the first parameter is always `1`
+            params.next();
+            letter_decode_key(tail)?
+        };
+        let mode = keyboard_decode_mode(params.next());
+        Some(TerminalEvent::Key(Key { name, mode }))
+    }
+}
+
+const CSI_KEYS: [u8; 9] = *b"ABCDFHPQS";
+const SS3_KEYS: [u8; 4] = *b"PQRS";
+
+fn letter_decode_key(tail: u8) -> Option<KeyName> {
+    let key = match tail {
+        b'A' => KeyName::Up,
+        b'B' => KeyName::Down,
+        b'C' => KeyName::Right,
+        b'D' => KeyName::Left,
+        b'F' => KeyName::End,
+        b'H' => KeyName::Home,
+        b'P' => KeyName::F(1),
+        b'Q' => KeyName::F(2),
+        b'R' => KeyName::F(3),
+        b'S' => KeyName::F(4),
+        _ => return None,
+    };
+    Some(key)
+}
+
+fn tilde_decode_key(code: usize) -> Option<KeyName> {
+    let key = match code {
+        1 => KeyName::Home,
+        2 | 7 => KeyName::Insert,
+        3 => KeyName::Delete,
+        4 | 8 => KeyName::End,
+        5 => KeyName::PageUp,
+        6 => KeyName::PageDown,
+        11..=15 => KeyName::F(code - 10),
+        17..=21 => KeyName::F(code - 11),
+        23 | 24 => KeyName::F(code - 12),
         _ => return None,
     };
     Some(key)
@@ -975,8 +1073,8 @@ impl Matcher for CursorPositionMatcher {
         // "\x1b[{row};{col}R"
         let mut nums = numbers_decode(&data[2..data.len() - 1], b';');
         Some(TerminalEvent::CursorPosition(Position {
-            row: nums.next()? - 1,
-            col: nums.next()? - 1,
+            row: nums.next()?.checked_sub(1)?,
+            col: nums.next()?.checked_sub(1)?,
         }))
     }
 }
@@ -1123,65 +1221,6 @@ fn basic_events_nfa() -> NFA<TerminalEvent> {
             &format!("\x1b{}", c),
             (KeyName::Char(c), KeyMod::ALT),
         ));
-    }
-
-    for (name, code) in [
-        (KeyName::Home, "1"),
-        (KeyName::Insert, "2"),
-        (KeyName::Delete, "3"),
-        (KeyName::End, "4"),
-        (KeyName::PageUp, "5"),
-        (KeyName::PageDown, "6"),
-        (KeyName::Insert, "7"),
-        (KeyName::End, "8"),
-        (KeyName::F(1), "11"),
-        (KeyName::F(2), "12"),
-        (KeyName::F(3), "13"),
-        (KeyName::F(4), "14"),
-        (KeyName::F(5), "15"),
-        (KeyName::F(6), "17"),
-        (KeyName::F(7), "18"),
-        (KeyName::F(8), "19"),
-        (KeyName::F(9), "20"),
-        (KeyName::F(10), "21"),
-        (KeyName::F(11), "23"),
-        (KeyName::F(12), "24"),
-    ]
-    .iter()
-    {
-        cmds.push(basic_key(&format!("\x1b[{}~", code), *name));
-        for mode in 1..8 {
-            cmds.push(basic_key(
-                &format!("\x1b[{};{}~", code, mode + 1),
-                (*name, KeyMod::from_bits(mode)),
-            ));
-        }
-    }
-    for (name, code_empty, code) in [
-        (KeyName::Up, "[", "A"),
-        (KeyName::Down, "[", "B"),
-        (KeyName::Right, "[", "C"),
-        (KeyName::Left, "[", "D"),
-        (KeyName::End, "[", "F"),
-        (KeyName::Home, "[", "H"),
-        (KeyName::F(1), "O", "P"),
-        (KeyName::F(1), "[", "P"),
-        (KeyName::F(2), "O", "Q"),
-        (KeyName::F(2), "[", "Q"),
-        (KeyName::F(3), "O", "R"),
-        (KeyName::F(3), "[", "R"),
-        (KeyName::F(4), "O", "S"),
-        (KeyName::F(4), "[", "S"),
-    ]
-    .iter()
-    {
-        cmds.push(basic_key(&format!("\x1b{}{}", code_empty, code), *name));
-        for mode in 1..8 {
-            cmds.push(basic_key(
-                &format!("\x1b[1;{}{}", mode + 1, code),
-                (*name, KeyMod::from_bits(mode)),
-            ));
-        }
     }
 
     NFA::choice(cmds)
@@ -1578,10 +1617,94 @@ mod tests {
     }
 
     #[test]
+    fn test_functional_keys() -> Result<(), Error> {
+        for (input, key) in [
+            ("\x1b[1~", "home"),
+            ("\x1b[2~", "insert"),
+            ("\x1b[3~", "delete"),
+            ("\x1b[4~", "end"),
+            ("\x1b[5~", "pageup"),
+            ("\x1b[6~", "pagedown"),
+            ("\x1b[7~", "insert"),
+            ("\x1b[8~", "end"),
+            ("\x1b[11~", "f1"),
+            ("\x1b[12~", "f2"),
+            ("\x1b[13~", "f3"),
+            ("\x1b[14~", "f4"),
+            ("\x1b[15~", "f5"),
+            ("\x1b[17~", "f6"),
+            ("\x1b[18~", "f7"),
+            ("\x1b[19~", "f8"),
+            ("\x1b[20~", "f9"),
+            ("\x1b[21~", "f10"),
+            ("\x1b[23~", "f11"),
+            ("\x1b[24~", "f12"),
+            // one modified case per f-key arithmetic range
+            ("\x1b[11;5~", "ctrl+f1"),
+            ("\x1b[17;5~", "ctrl+f6"),
+            ("\x1b[23;5~", "ctrl+f11"),
+            ("\x1b[A", "up"),
+            ("\x1b[B", "down"),
+            ("\x1b[C", "right"),
+            ("\x1b[D", "left"),
+            ("\x1b[F", "end"),
+            ("\x1b[H", "home"),
+            ("\x1b[P", "f1"),
+            ("\x1b[Q", "f2"),
+            ("\x1b[R", "f3"),
+            ("\x1b[S", "f4"),
+            ("\x1b[1;5A", "ctrl+up"),
+            ("\x1b[1;5B", "ctrl+down"),
+            ("\x1b[1;5C", "ctrl+right"),
+            ("\x1b[1;5D", "ctrl+left"),
+            ("\x1b[1;5F", "ctrl+end"),
+            ("\x1b[1;5H", "ctrl+home"),
+            ("\x1b[1;5P", "ctrl+f1"),
+            ("\x1b[1;5Q", "ctrl+f2"),
+            ("\x1b[1;5S", "ctrl+f4"),
+            ("\x1bOP", "f1"),
+            ("\x1bOQ", "f2"),
+            ("\x1bOR", "f3"),
+            ("\x1bOS", "f4"),
+        ] {
+            assert_eq!(
+                TTYEventDecoder::new().decode(Cursor::new(input))?,
+                Some(TerminalEvent::Key(key.parse()?)),
+                "{:?}",
+                input,
+            );
+        }
+
+        // codes without a key name
+        for input in [
+            "\x1b[0~", "\x1b[9~", "\x1b[10~", "\x1b[16~", "\x1b[22~", "\x1b[25~",
+        ] {
+            assert_eq!(
+                TTYEventDecoder::new().decode(Cursor::new(input))?,
+                Some(TerminalEvent::Raw(input.as_bytes().into())),
+                "{:?}",
+                input,
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn test_cursor_position() -> Result<(), Error> {
         assert_eq!(
             TTYEventDecoder::new().decode(Cursor::new("\x1b[97;15R"))?,
             Some(TerminalEvent::CursorPosition(Position { row: 96, col: 14 })),
+        );
+        // must not be confused with a modified functional key
+        assert_eq!(
+            TTYEventDecoder::new().decode(Cursor::new("\x1b[1;5R"))?,
+            Some(TerminalEvent::CursorPosition(Position { row: 0, col: 4 })),
+        );
+        // rows and columns are one based
+        assert_eq!(
+            TTYEventDecoder::new().decode(Cursor::new("\x1b[0;1R"))?,
+            Some(TerminalEvent::Raw(b"\x1b[0;1R".as_slice().into())),
         );
         Ok(())
     }
@@ -1950,6 +2073,11 @@ mod tests {
         write!(cursor.get_mut(), "\x1b[99;5u")?;
         write!(cursor.get_mut(), "\x1b[1;6P")?;
         write!(cursor.get_mut(), "\x1b[9;0u")?;
+        // lock modifiers are reported for every key while the lock is enabled
+        write!(cursor.get_mut(), "\x1b[127;129u")?;
+        write!(cursor.get_mut(), "\x1b[1;129B")?;
+        write!(cursor.get_mut(), "\x1b[1;9B")?;
+        write!(cursor.get_mut(), "\x1b[u")?;
 
         let mut result = Vec::new();
         decoder.decode_into(&mut cursor, &mut result)?;
@@ -1961,7 +2089,12 @@ mod tests {
                 TerminalEvent::Key("ctrl+alt+esc".parse()?),
                 TerminalEvent::Key("ctrl+c".parse()?),
                 TerminalEvent::Key("ctrl+shift+f1".parse()?),
-                TerminalEvent::Key("tab".parse()?)
+                TerminalEvent::Key("tab".parse()?),
+                TerminalEvent::Key("backspace".parse()?),
+                TerminalEvent::Key("down".parse()?),
+                TerminalEvent::Key("super+down".parse()?),
+                TerminalEvent::Key("alt+[".parse()?),
+                TerminalEvent::Key("u".parse()?),
             ],
         );
 

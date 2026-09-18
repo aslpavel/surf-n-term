@@ -148,7 +148,7 @@ impl UnixTerminal {
         };
 
         capabilities_detect(&mut term)?;
-        term.execute(TerminalCommand::KeyboardLevel(KEYBOARD_LEVEL))?;
+        term.execute(TerminalCommand::KeyboardLevelPush(KEYBOARD_LEVEL))?;
         Ok(term)
     }
 
@@ -213,7 +213,7 @@ impl UnixTerminal {
                 enable: true,
                 mode: DecMode::AutoWrap,
             },
-            TerminalCommand::KeyboardLevel(0),
+            TerminalCommand::KeyboardLevelPop,
             // This one must be the last command as we use it as sync event,
             // which is supported by all terminals, and indicates that we handled
             // all pending events such as status report from kitty image protocol

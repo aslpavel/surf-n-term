@@ -324,8 +324,10 @@ pub enum TerminalCommand {
     DeviceAttrs,
     /// Request terminal name and version (XTVERSION, `CSI > q`)
     TerminalVersionGet,
-    /// Set kitty keyboard protocol level
-    KeyboardLevel(usize),
+    /// Push kitty keyboard protocol level onto the terminal's stack
+    KeyboardLevelPush(usize),
+    /// Pop kitty keyboard protocol level, restoring the previous one
+    KeyboardLevelPop,
     /// Write raw data to terminal
     Raw(Vec<u8>),
 }

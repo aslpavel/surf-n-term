@@ -42,9 +42,16 @@ impl TTYEncoder {
         }
     }
 
-    fn kitty_level<W: Write>(&self, mut out: W, level: usize) -> Result<(), Error> {
+    fn kitty_level_push<W: Write>(&self, mut out: W, level: usize) -> Result<(), Error> {
         if self.caps.kitty_keyboard {
-            write!(out, "\x1b[={}u", level)?;
+            write!(out, "\x1b[>{}u", level)?;
+        }
+        Ok(())
+    }
+
+    fn kitty_level_pop<W: Write>(&self, mut out: W) -> Result<(), Error> {
+        if self.caps.kitty_keyboard {
+            write!(out, "\x1b[<1u")?;
         }
         Ok(())
     }
@@ -59,16 +66,16 @@ impl Encoder for TTYEncoder {
 
         match cmd {
             DecModeSet { enable, mode } => {
-                // kitty keyboard level maintained separately for alt-screen
+                // alt-screen has its own keyboard level stack
                 if !enable && mode == DecMode::AltScreen {
-                    self.kitty_level(&mut out, 0)?;
+                    self.kitty_level_pop(&mut out)?;
                 }
 
                 let flag = if enable { "h" } else { "l" };
                 write!(out, "\x1b[?{}{}", mode as usize, flag)?;
 
                 if enable && mode == DecMode::AltScreen {
-                    self.kitty_level(out, KEYBOARD_LEVEL)?;
+                    self.kitty_level_push(out, KEYBOARD_LEVEL)?;
                 }
             }
             DecModeGet(mode) => {
@@ -250,8 +257,11 @@ impl Encoder for TTYEncoder {
             TerminalVersionGet => {
                 write!(out, "\x1b[>0q")?;
             }
-            KeyboardLevel(level) => {
-                self.kitty_level(out, level)?;
+            KeyboardLevelPush(level) => {
+                self.kitty_level_push(out, level)?;
+            }
+            KeyboardLevelPop => {
+                self.kitty_level_pop(out)?;
             }
             Raw(data) => out.write_all(&data)?,
         }

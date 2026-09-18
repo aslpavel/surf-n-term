@@ -323,7 +323,12 @@ impl KeyMod {
     pub const CAPSLOCK: Self = KeyMod { bits: 64 };
     pub const NUMLOCK: Self = KeyMod { bits: 128 };
     pub const PRESS: Self = KeyMod { bits: 256 };
-    pub const ALL: Self = KeyMod { bits: 511 };
+    // Lock bits are excluded: kitty sets them whenever the lock is enabled, not
+    // pressed, so keeping them would make every binding lock-sensitive.
+    // https://sw.kovidgoyal.net/kitty/keyboard-protocol/#modifiers
+    pub const ALL: Self = KeyMod {
+        bits: 0b1_1111_1111 & !(Self::CAPSLOCK.bits | Self::NUMLOCK.bits),
+    };
 
     /// Key mode is empty
     pub fn is_empty(self) -> bool {
